@@ -1,0 +1,7 @@
+FRONTEND SYSTEM
+cd dashboard-frontend
+npm run dev
+
+BACKEND SYSTEM
+cd SERVER
+npm run dev

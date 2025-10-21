@@ -22,15 +22,16 @@ mongoose.connect('mongodb://localhost:27017/iot-monitoring')
 
 // === SCHEMA ===
 const SensorDataSchema = new mongoose.Schema({
-  raspi_serial_id: Number,
+  raspi_serial_id: { type: String, index: true, trim: true, lowercase: true },
   timestamp: { type: Date, default: Date.now },
-  data: Array
+  data: { type: Array, default: [] }
 });
+
 const SensorData = mongoose.model('SensorData', SensorDataSchema);
 
 const UserAliasSchema = new mongoose.Schema({
-  username: { type: String, unique: true },
-  raspi_serial_id: Number
+  username: { type: String, unique: true, trim: true, lowercase: true },
+  raspi_serial_id: { type: String, unique: true, index: true, trim: true, lowercase: true }
 });
 const UserAlias = mongoose.model('UserAlias', UserAliasSchema);
 
@@ -38,17 +39,26 @@ const UserAlias = mongoose.model('UserAlias', UserAliasSchema);
 // === API ROUTE ===
 app.post('/api/iot-data', async (req, res) => {
   try {
-    const newData = new SensorData(req.body);
+    const { raspi_serial_id, data } = req.body || {};
+    if (!raspi_serial_id || !Array.isArray(data)) {
+      return res.status(400).json({ error: 'Bad payload. Expect { raspi_serial_id, data: [...] }' });
+    }
+
+    const newData = new SensorData({
+      raspi_serial_id,
+      data,                      // simpan apa adanya sebagai Array
+      // timestamp otomatis via default
+    });
+
     await newData.save();
-
-    // Emit ke client realtime
     io.emit('new-data', newData);
-
-    res.status(201).json({ success: true });
+    return res.status(201).json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[SAVE ERROR]', err);
+    return res.status(500).json({ error: err.message });
   }
 });
+
 
 app.get('/api/user/:raspiID/latest', async (req, res) => {
   const raspiID = req.params.raspiID;
@@ -123,5 +133,5 @@ io.on('connection', (socket) => {
 
 // === START SERVER ===
 server.listen(3000, () => {
-  console.log('Server berjalan di http://localhost:3000');
+  console.log('Server running on http://localhost:3000');
 });

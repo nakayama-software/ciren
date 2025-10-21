@@ -7,7 +7,7 @@ import NotFound from './NotFound';
 import Register from './Register';
 import SensorDetail from './SensorDetail';
 import 'leaflet/dist/leaflet.css';
-import './index.css'; // atau './main.css' tergantung nama file kamu
+import './index.css';
 
 
 
