@@ -8,7 +8,7 @@ import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 import { useParams, useSearchParams } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
-const HUB_OFFLINE_MS  = 12_000; // hub menghilang jika tak terlihat > 12s
+const HUB_OFFLINE_MS = 12_000; // hub menghilang jika tak terlihat > 12s
 const NODE_OFFLINE_MS = 8_000;  // NODE LIVENESS: node dihapus jika tak terlihat > 8s
 
 /************************ i18n ************************/
@@ -208,7 +208,7 @@ function LeafletMap({ controllers }) {
 
   useEffect(() => {
     if (!mapRef.current) return;
-    const id = setTimeout(() => {}, 0);
+    const id = setTimeout(() => { }, 0);
     return () => clearTimeout(id);
   }, [controllers]);
 
@@ -217,6 +217,8 @@ function LeafletMap({ controllers }) {
 
 /********************** Controller Detail **********************/
 function ControllerDetailView({ controller, onBack, t }) {
+  console.log(c);
+
   return (
     <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-4 sm:p-6 border border-white/20 animate-fade-in">
       <div className="flex items-center justify-between mb-6">
@@ -290,8 +292,8 @@ export default function Dashboard() {
   const [err, setErr] = useState(null);
 
   // Liveness reference maps
-  const hubLastSeenRef  = useRef(new Map()); // hubId -> ms
-  const hubSnapshotRef  = useRef(new Map()); // hubId -> last ctrl snapshot (bisa nodes kosong)
+  const hubLastSeenRef = useRef(new Map()); // hubId -> ms
+  const hubSnapshotRef = useRef(new Map()); // hubId -> last ctrl snapshot (bisa nodes kosong)
   const nodeLastSeenRef = useRef(new Map()); // NODE LIVENESS: `${hubId}:${nodeId}` -> ms
 
   // Running time
