@@ -5,7 +5,7 @@ import {
   Settings, Battery, ArrowLeft, Globe, Sun
 } from 'lucide-react';
 import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -321,7 +321,7 @@ export default function Dashboard(props) {
         await fetchAndBuild(raspiId);
 
         // 3) polling ringan setiap 5s
-        pollId = setInterval(() => fetchAndBuild(raspiId), 5000);
+        pollId = setInterval(() => fetchAndBuild(raspiId), 500);
       } catch (e) {
         if (!stop) setErr(e.message || String(e));
       } finally {
