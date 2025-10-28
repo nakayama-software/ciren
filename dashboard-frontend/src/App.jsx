@@ -96,12 +96,13 @@ function App() {
       alert(t.alerts.missingInput);
       return;
     }
-    const res = await fetch(`http://localhost:3000/api/resolve/${userInput}`);
-    if (!res.ok) {
-      alert(t.alerts.notFound);
-      return;
-    }
-    const { username } = await res.json();
+    // const res = await fetch(`http://localhost:3000/api/resolve/${userInput}`);
+    // if (!res.ok) {
+    //   alert(t.alerts.notFound);
+    //   return;
+    // }
+    // const { username } = await res.json();
+       const { username } = "raihan";
     navigate(`/ciren/${username}/dashboard`);
   };
 
