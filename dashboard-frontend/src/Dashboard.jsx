@@ -11,6 +11,8 @@ const API_BASE = import.meta.env.VITE_API_BASE || '';
 const HUB_OFFLINE_MS  = 12_000; // hub menghilang jika tak terlihat > 12s
 const NODE_OFFLINE_MS = 8_000;  // NODE LIVENESS: node dihapus jika tak terlihat > 8s
 
+const WINDOW_MS = 15_000; 
+
 /************************ i18n ************************/
 const translations = {
   en: {
@@ -340,67 +342,114 @@ export default function Dashboard() {
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
         const entries = Array.isArray(jd) ? jd : [];
+    
+        // Sort terbaru -> lama
         entries.sort((a, b) => {
-          const ta = a.received_ts || a.timestamp || 0;
-          const tb = b.received_ts || b.timestamp || 0;
-          return Number(tb) - Number(ta);
+          const ta = new Date(a.received_ts || a.timestamp || 0).getTime();
+          const tb = new Date(b.received_ts || b.timestamp || 0).getTime();
+          return tb - ta;
         });
-
-        const latestEntry = entries[0];
+    
         const now = Date.now();
-
-        if (latestEntry && Array.isArray(latestEntry.data)) {
-          const seenIds = new Set();
-
-          latestEntry.data.forEach(hubObj => {
-            const ctrl = normalizeHubToController(hubObj);
-            const hubId = ctrl.sensor_controller_id;
-
-            seenIds.add(hubId);
-            hubLastSeenRef.current.set(hubId, now);
-            hubSnapshotRef.current.set(hubId, ctrl); // overwrite nodes dengan kondisi terbaru
-
-            // NODE LIVENESS: update lastSeen utk node yang muncul
-            ctrl.sensor_nodes.forEach(n => {
-              const key = `${hubId}:${n.node_id}`;
-              nodeLastSeenRef.current.set(key, now);
-            });
-          });
-        }
-
-        // Bangun daftar hub yang masih hidup
-        const visible = [];
-        for (const [hubId, snapshot] of hubSnapshotRef.current.entries()) {
-          const hubLast = hubLastSeenRef.current.get(hubId) || 0;
-          if (now - hubLast <= HUB_OFFLINE_MS) {
-            // NODE LIVENESS: filter nodes berdasarkan lastSeen
-            const filteredNodes = (snapshot.sensor_nodes || []).filter(n => {
-              const key = `${hubId}:${n.node_id}`;
-              const last = nodeLastSeenRef.current.get(key) || 0;
-              return (now - last) <= NODE_OFFLINE_MS;
-            });
-
-            // gunakan snapshot hub, tapi ganti nodes jadi yang terfilter
-            visible.push({
-              ...snapshot,
-              sensor_nodes: filteredNodes
-            });
-          } else {
-            // hub expired
-            hubSnapshotRef.current.delete(hubId);
-            hubLastSeenRef.current.delete(hubId);
-            // opsional: bersihkan nodeLastSeen untuk hub ini
-            for (const key of nodeLastSeenRef.current.keys()) {
-              if (key.startsWith(`${hubId}:`)) nodeLastSeenRef.current.delete(key);
+    
+        // 1) Bangun peta "last seen" untuk setiap node dari WINDOW_MS terakhir
+        const nodeLastSeen = new Map();        // key: `${hubId}:${nodeId}` -> ms
+        const hubMetaLatest = new Map();       // hubId -> meta terbaru (battery, signal, lat/lon, dst.)
+        const hubLastSeen   = new Map();       // hubId -> ms (ada aktivitas apapun)
+    
+        for (const rec of entries) {
+          const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
+          if (!isFinite(ts) || now - ts > WINDOW_MS) {
+            // keluar dari window; karena entries sudah terurut, boleh break
+            break;
+          }
+          if (!Array.isArray(rec.data)) continue;
+    
+          for (const hubObj of rec.data) {
+            // Normalisasi -> controller snapshot pada timestamp ini
+            const ctrlAtThisRecord = normalizeHubToController(hubObj);
+            const hubId = ctrlAtThisRecord.sensor_controller_id;
+    
+            // simpan meta terbaru (ambil paling awal karena entries sudah terbaru -> lama)
+            if (!hubMetaLatest.has(hubId)) {
+              hubMetaLatest.set(hubId, {
+                sensor_controller_id: hubId,
+                controller_status: "online",
+                signal_strength: ctrlAtThisRecord.signal_strength ?? -60,
+                battery_level: ctrlAtThisRecord.battery_level ?? 80,
+                latitude: ctrlAtThisRecord.latitude,
+                longitude: ctrlAtThisRecord.longitude,
+              });
+            }
+    
+            hubLastSeen.set(hubId, Math.max(hubLastSeen.get(hubId) || 0, ts));
+    
+            // periksa port yang benar-benar muncul di record ini
+            for (let i = 1; i <= 8; i++) {
+              const key = `port-${i}`;
+              if (!hubObj[key]) continue;
+              const nodeId = `P${i}`;
+              nodeLastSeen.set(`${hubId}:${nodeId}`, Math.max(nodeLastSeen.get(`${hubId}:${nodeId}`) || 0, ts));
             }
           }
         }
-
-        // sort by id
+    
+        // 2) Susun daftar hub visible:
+        //    - hub “terlihat” kalau ada aktivitas dalam WINDOW_MS (hubLastSeen)
+        //    - sensor_nodes = node yang lastSeen dalam WINDOW_MS; jika kosong -> “No node connected”
+        const visible = [];
+        for (const [hubId, meta] of hubMetaLatest.entries()) {
+          const hubSeenAt = hubLastSeen.get(hubId) || 0;
+          if (now - hubSeenAt > WINDOW_MS) {
+            // hub tak terlihat dalam window → jangan tampilkan
+            continue;
+          }
+    
+          // Kumpulkan node yang hidup
+          const nodes = [];
+          for (let i = 1; i <= 8; i++) {
+            const nodeKey = `${hubId}:P${i}`;
+            const last = nodeLastSeen.get(nodeKey) || 0;
+            if (now - last <= WINDOW_MS) {
+              // kita perlu value+unit. Ambil dari entry terbaru yang masih dalam window yang mengandung node ini.
+              // Cari cepat: scan entries (terbaru -> lama) lagi tapi hanya sampai WINDOW_MS
+              let valueParsed = null;
+              for (const rec of entries) {
+                const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
+                if (now - ts > WINDOW_MS) break;
+                const hubRow = Array.isArray(rec.data) ? rec.data.find(h => {
+                  const id = h.sensor_controller_id ?? h.sensor_controller ?? "UNKNOWN";
+                  return id === hubId;
+                }) : null;
+                if (!hubRow) continue;
+                const raw = hubRow[`port-${i}`];
+                if (!raw) continue;
+                // parse type/value/unit
+                const parsed = parseTypeValue(raw);
+                valueParsed = {
+                  node_id: `P${i}`,
+                  sensor_type: parsed.type,
+                  value: parsed.value,
+                  unit: parsed.unit,
+                  status: "active",
+                };
+                break; // ambil yang paling baru
+              }
+              if (valueParsed) nodes.push(valueParsed);
+            }
+          }
+    
+          visible.push({
+            ...meta,
+            sensor_nodes: nodes, // bisa kosong; UI akan menulis "No node connected"
+          });
+        }
+    
+        // 3) Sort & commit
         visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
         setControllersLatest(visible);
-
-        // jika sedang lihat detail hub yang sudah tidak visible, tutup detail
+    
+        // Jika panel detail sedang buka dan hub tak lagi visible → tutup
         if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
           setSelectedControllerId(null);
         }
@@ -408,6 +457,7 @@ export default function Dashboard() {
         setErr(e.message || String(e));
       }
     }
+    
 
     resolveAndLoad();
     return () => {
