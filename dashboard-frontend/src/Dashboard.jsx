@@ -1,15 +1,26 @@
 // src/Dashboard.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, Thermometer, Gauge, MapPin, Clock, Cpu, Wifi, Zap, Eye,
-  Settings, Battery, ArrowLeft, Globe, Sun
+  Activity,
+  ArrowLeft,
+  Battery,
+  Clock, Cpu,
+  Eye,
+  Gauge,
+  Globe,
+  MapPin,
+  Settings,
+  Thermometer,
+  Wifi, Zap
 } from 'lucide-react';
-import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const HUB_OFFLINE_MS = 6_000; // hub menghilang jika tak terlihat > 12s
 const NODE_OFFLINE_MS = 4_000;  // NODE LIVENESS: node dihapus jika tak terlihat > 8s
+
+const RASPI_OFFLINE_MS = 10_000;
 
 /************************ i18n ************************/
 const translations = {
@@ -24,9 +35,9 @@ const translations = {
       online: "ONLINE",
       controllers: "Controllers",
       runningTime: "Running Time",
-      avgTemp: "Avg. Temp",
-      avgBattery: "Avg. Battery",
-      sensorControllers: "Sensor Controllers",
+      avgTemp: "Raspberry Temp",
+      avgBattery: undefined,
+      sensorControllers: undefined,
       nodesActive: "nodes active",
       viewDetails: "View Details",
       footer: "© 2025 CIREN Dashboard",
@@ -61,7 +72,7 @@ const translations = {
       online: "オンライン",
       controllers: "コントローラー",
       runningTime: "稼働時間",
-      avgTemp: "平均温度",
+      avgTemp: "ラズパイ温度",
       avgBattery: "平均バッテリー",
       sensorControllers: "センサーコントローラー",
       nodesActive: "ノードがアクティブ",
@@ -290,6 +301,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
+  const [raspiOnline, setRaspiOnline] = useState(false);
+  const [raspiTempC, setRaspiTempC] = useState(null);
+
   // Liveness reference maps
   const hubLastSeenRef = useRef(new Map()); // hubId -> ms
   const hubSnapshotRef = useRef(new Map()); // hubId -> last ctrl snapshot (bisa nodes kosong)
@@ -348,6 +362,35 @@ export default function Dashboard() {
           const tb = new Date(b.received_ts || b.timestamp || 0).getTime();
           return tb - ta;
         });
+
+        // === Raspi online/offline berdasarkan timestamp terbaru ===
+        const latestEntry = entries[0];
+        let latestTs = 0;
+        if (latestEntry) {
+          latestTs = new Date(latestEntry.received_ts || latestEntry.timestamp || 0).getTime();
+        }
+        const nowMs = Date.now();
+        setRaspiOnline(isFinite(latestTs) && (nowMs - latestTs) <= RASPI_OFFLINE_MS);
+
+        // === Raspi temperature (opsional, fallback "—")
+        // cari di beberapa kemungkinan field yang mungkin kamu kirim dari backend
+        let cpuTemp = null;
+        if (latestEntry) {
+          // 1) field langsung di root (contoh: { raspi_temp: 52.3 })
+          cpuTemp = latestEntry.raspi_temp ?? latestEntry.pi_temp ?? null;
+
+          // 2) kalau tidak ada, coba lihat jika backend menaruh di meta/data lain
+          // misal: latestEntry.meta?.cpu_temp
+          if (cpuTemp == null && latestEntry.meta && typeof latestEntry.meta.cpu_temp !== 'undefined') {
+            cpuTemp = latestEntry.meta.cpu_temp;
+          }
+
+          // 3) (opsional) kalau suatu node khusus mengirim "temperature-<val>" dengan node_id "CPU"
+          //    atau controller khusus bernama "RASPI-CPU", kamu bisa tambahkan pencarian custom di sini
+          //    biarkan kosong bila belum ada
+        }
+        setRaspiTempC(typeof cpuTemp === 'number' ? cpuTemp : null);
+
 
         const now = Date.now();
 
@@ -560,42 +603,43 @@ export default function Dashboard() {
                   <Gauge className="w-6 h-6 text-purple-400" />
                   <span>{t.dashboard.mainModuleStatus}</span>
                 </h2>
+
                 <div className="space-y-2 text-sm flex-grow">
+                  {/* Live Status (Raspi online/offline) */}
                   <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
                     <span className="text-gray-400 flex items-center space-x-2">
-                      <Eye className="w-4 h-4" /><span>{t.dashboard.liveStatus}</span>
+                      <Eye className="w-4 h-4" />
+                      <span>{t.dashboard.liveStatus}</span>
                     </span>
-                    <span className="font-semibold text-green-400">{t.dashboard.online}</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
-                    <span className="text-gray-400 flex items-center space-x-2">
-                      <Cpu className="w-4 h-4" /><span>{t.dashboard.controllers}</span>
-                    </span>
-                    <span className="font-mono text-white">
-                      {controllersLatest.filter((c) => c.controller_status === 'online').length} / {controllersLatest.length}
+                    <span className={`font-semibold ${raspiOnline ? 'text-green-400' : 'text-red-400'}`}>
+                      {raspiOnline ? t.dashboard.online : 'OFFLINE'}
                     </span>
                   </div>
+
+                  {/* Running Time (uptime aplikasi) */}
                   <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
                     <span className="text-gray-400 flex items-center space-x-2">
-                      <Clock className="w-4 h-4" /><span>{t.dashboard.runningTime}</span>
+                      <Clock className="w-4 h-4" />
+                      <span>{t.dashboard.runningTime}</span>
                     </span>
                     <span className="font-mono text-white">{runningTime}</span>
                   </div>
+
+                  {/* Raspi Temp (mengganti Avg Temp) */}
                   <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
                     <span className="text-gray-400 flex items-center space-x-2">
-                      <Thermometer className="w-4 h-4" /><span>{t.dashboard.avgTemp}</span>
+                      <Thermometer className="w-4 h-4" />
+                      <span>{t.dashboard.avgTemp}</span>
                     </span>
-                    <span className="font-mono text-white">{averageTemp}{averageTemp !== 'N/A' ? '°C' : ''}</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
-                    <span className="text-gray-400 flex items-center space-x-2">
-                      <Battery className="w-4 h-4" /><span>{t.dashboard.avgBattery}</span>
+                    <span className="font-mono text-white">
+                      {raspiTempC != null ? `${raspiTempC.toFixed(1)}°C` : '—'}
                     </span>
-                    <span className="font-mono text-white">{averageBattery}{averageBattery !== 'N/A' ? '%' : ''}</span>
                   </div>
                 </div>
+
                 <p className="text-center mt-4 text-gray-500 text-xs">{t.dashboard.footer}</p>
               </div>
+
             </div>
 
             {/* daftar hub (ringkas) */}

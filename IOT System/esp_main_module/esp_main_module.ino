@@ -11,15 +11,15 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define SCREEN_WIDTH  128
+#define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET    -1
-#define I2C_ADDRESS   0x3C
+#define OLED_RESET -1
+#define I2C_ADDRESS 0x3C
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Device tracking
 #define MAX_DEVICES 50
-#define TIMEOUT_MS  6000
+#define TIMEOUT_MS 6000
 
 struct DeviceEntry {
   uint8_t mac[6];
@@ -28,20 +28,26 @@ struct DeviceEntry {
 DeviceEntry knownDevices[MAX_DEVICES];
 int deviceCount = 0;
 
-int  lastDisplayedActiveCount = -1;
-char raspberrySerialStr[18]; // maks 17 + null
+int lastDisplayedActiveCount = -1;
+char raspberrySerialStr[18];  // maks 17 + null
 uint8_t selfMac[6];
 
 bool serverOnline = false;
 unsigned long serverOnlineUntil = 0;
 const unsigned long SERVER_OK_TTL = 8000;
 
-bool isSameMac(const uint8_t* a, const uint8_t* b) { return memcmp(a,b,6)==0; }
-int  findDeviceIndex(const uint8_t* mac) { for(int i=0;i<deviceCount;i++) if(isSameMac(knownDevices[i].mac,mac)) return i; return -1; }
+bool isSameMac(const uint8_t* a, const uint8_t* b) {
+  return memcmp(a, b, 6) == 0;
+}
+int findDeviceIndex(const uint8_t* mac) {
+  for (int i = 0; i < deviceCount; i++)
+    if (isSameMac(knownDevices[i].mac, mac)) return i;
+  return -1;
+}
 void addOrUpdateDevice(const uint8_t* mac) {
   if (isSameMac(mac, selfMac)) return;
   int index = findDeviceIndex(mac);
-  if (index!=-1) knownDevices[index].lastSeen = millis();
+  if (index != -1) knownDevices[index].lastSeen = millis();
   else if (deviceCount < MAX_DEVICES) {
     memcpy(knownDevices[deviceCount].mac, mac, 6);
     knownDevices[deviceCount].lastSeen = millis();
@@ -49,18 +55,24 @@ void addOrUpdateDevice(const uint8_t* mac) {
   }
 }
 void removeDevice(int index) {
-  for (int i=index;i<deviceCount-1;i++) knownDevices[i]=knownDevices[i+1];
+  for (int i = index; i < deviceCount - 1; i++) knownDevices[i] = knownDevices[i + 1];
   deviceCount--;
 }
 int countActivePeers() {
-  int c=0; for(int i=0;i<deviceCount;i++) if(!isSameMac(knownDevices[i].mac,selfMac)) c++; return c;
+  int c = 0;
+  for (int i = 0; i < deviceCount; i++)
+    if (!isSameMac(knownDevices[i].mac, selfMac)) c++;
+  return c;
 }
 
 unsigned long lastSwitchTime = 0;
 bool showingServerStatus = true;
 
 void drawMacLine(uint8_t mac[6]) {
-  for (int i=0;i<6;i++){ display.printf("%02X", mac[i]); if(i<5) display.print(":"); }
+  for (int i = 0; i < 6; i++) {
+    display.printf("%02X", mac[i]);
+    if (i < 5) display.print(":");
+  }
 }
 
 void updateDisplay(bool force = false) {
@@ -68,23 +80,27 @@ void updateDisplay(bool force = false) {
   bool serverIsOnlineNow = serverOnline && (millis() < serverOnlineUntil);
   int activePeers = countActivePeers();
 
-  if (force || activePeers != lastDisplayedActiveCount || millis()-lastUpdate > 1000) {
+  if (force || activePeers != lastDisplayedActiveCount || millis() - lastUpdate > 1000) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
 
-    display.setCursor(0,0);  display.println("RASPBERRY ID:");
-    display.setCursor(0,12); display.println(raspberrySerialStr);
+    display.setCursor(0, 0);
+    display.println("RASPBERRY ID:");
+    display.setCursor(0, 12);
+    display.println(raspberrySerialStr);
 
-    display.setCursor(0,24); display.println("MAC address:");
-    display.setCursor(0,36); drawMacLine(selfMac);
+    display.setCursor(0, 24);
+    display.println("MAC address:");
+    display.setCursor(0, 36);
+    drawMacLine(selfMac);
 
-    if (millis()-lastSwitchTime > 3000) {
+    if (millis() - lastSwitchTime > 3000) {
       showingServerStatus = !showingServerStatus;
       lastSwitchTime = millis();
     }
 
-    display.setCursor(0,48);
+    display.setCursor(0, 48);
     if (showingServerStatus) {
       display.print("Server: ");
       display.println(serverIsOnlineNow ? "Online" : "Offline");
@@ -101,22 +117,28 @@ void updateDisplay(bool force = false) {
 
 void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int len) {
   Serial.print("ESP-NOW msg from: ");
-  for (int i=0;i<6;i++){ Serial.printf("%02X", recvInfo->src_addr[i]); if(i<5) Serial.print(":"); }
+  for (int i = 0; i < 6; i++) {
+    Serial.printf("%02X", recvInfo->src_addr[i]);
+    if (i < 5) Serial.print(":");
+  }
   Serial.println();
 
   static char jsonBuf[300];
-  int copyLen = min(len, (int)sizeof(jsonBuf)-1);
+  int copyLen = min(len, (int)sizeof(jsonBuf) - 1);
   memcpy(jsonBuf, data, copyLen);
   jsonBuf[copyLen] = '\0';
 
-  Serial.print("Data: "); Serial.println(jsonBuf);
+  Serial.print("Data: ");
+  Serial.println(jsonBuf);
 
-  String s = String(jsonBuf); s.trim();
-  bool looksJsonObject = s.length()>=2 && s[0]=='{' && s[s.length()-1]=='}';
+  String s = String(jsonBuf);
+  s.trim();
+  bool looksJsonObject = s.length() >= 2 && s[0] == '{' && s[s.length() - 1] == '}';
 
   if (looksJsonObject) {
     // forward ke Raspberry (Python bridge membaca baris ini)
-    Serial.print("[FOR_PI] "); Serial.println(s);
+    Serial.print("[FOR_PI] ");
+    Serial.println(s);
   } else {
     Serial.println("[WARN] Dropped non-JSON payload");
   }
@@ -125,7 +147,9 @@ void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int l
   updateDisplay();
 }
 
-void getSelfMac(){ esp_wifi_get_mac(WIFI_IF_STA, selfMac); }
+void getSelfMac() {
+  esp_wifi_get_mac(WIFI_IF_STA, selfMac);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -135,17 +159,23 @@ void setup() {
   getSelfMac();
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS)) {
-    Serial.println("OLED failed"); while(1);
+    Serial.println("OLED failed");
+    while (1)
+      ;
   }
   display.clearDisplay();
   display.setTextColor(WHITE);
-  display.setCursor(0,0); display.println("Initializing...");
+  display.setCursor(0, 0);
+  display.println("Initializing...");
   display.display();
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW init failed");
-    display.clearDisplay(); display.println("ESP-NOW Init Failed"); display.display();
-    while (1);
+    display.clearDisplay();
+    display.println("ESP-NOW Init Failed");
+    display.display();
+    while (1)
+      ;
   }
 
   esp_now_register_recv_cb(onDataReceive);
@@ -158,10 +188,13 @@ void loop() {
   bool changed = false;
 
   // purge timeout peers
-  for (int i=0;i<deviceCount;) {
+  for (int i = 0; i < deviceCount;) {
     if (now - knownDevices[i].lastSeen > TIMEOUT_MS) {
       Serial.print("[TIMEOUT] Removed: ");
-      for (int j=0;j<6;j++){ Serial.printf("%02X", knownDevices[i].mac[j]); if(j<5) Serial.print(":"); }
+      for (int j = 0; j < 6; j++) {
+        Serial.printf("%02X", knownDevices[i].mac[j]);
+        if (j < 5) Serial.print(":");
+      }
       Serial.println();
       removeDevice(i);
       changed = true;
@@ -171,7 +204,7 @@ void loop() {
   // Baca heartbeat/ID dari Raspberry (USB serial)
   if (Serial.available()) {
     char lineBuf[64];
-    int rlen = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf)-1);
+    int rlen = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
     if (rlen < 0) rlen = 0;
     lineBuf[rlen] = '\0';
 
@@ -182,8 +215,8 @@ void loop() {
       serverOnline = false;
     } else {
       // anggap ini Raspberry ID singkat (dipotong agar muat OLED)
-      strncpy(raspberrySerialStr, lineBuf, sizeof(raspberrySerialStr)-1);
-      raspberrySerialStr[sizeof(raspberrySerialStr)-1] = '\0';
+      strncpy(raspberrySerialStr, lineBuf, sizeof(raspberrySerialStr) - 1);
+      raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
     }
     updateDisplay();
   }
