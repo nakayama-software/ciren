@@ -8,7 +8,8 @@ import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 import { useParams, useSearchParams } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
-const HUB_OFFLINE_MS = 12_000; // 12 detik: jika tidak terlihat >12s, anggap hub offline & sembunyikan
+const HUB_OFFLINE_MS  = 12_000; // hub menghilang jika tak terlihat > 12s
+const NODE_OFFLINE_MS = 8_000;  // NODE LIVENESS: node dihapus jika tak terlihat > 8s
 
 /************************ i18n ************************/
 const translations = {
@@ -99,16 +100,13 @@ function inferUnit(type) {
 }
 
 function parseTypeValue(raw) {
-  // "temperature-25", "ultrasonic-32cm", "light-100lux"
   if (!raw || typeof raw !== "string" || !raw.includes("-")) {
     return { type: "unknown", value: raw, unit: "" };
   }
   const [typeRaw, valRaw] = raw.split("-", 2);
   const type = String(typeRaw || "").trim().toLowerCase();
-
   const m = String(valRaw ?? "").trim().match(/^(-?\d+(?:\.\d+)?)(.*)$/);
   if (!m) return { type, value: valRaw?.trim() ?? "", unit: "" };
-
   const num = Number(m[1]);
   const unit = (m[2] || "").trim() || inferUnit(type);
   return {
@@ -137,7 +135,7 @@ function normalizeHubToController(hubObj) {
     controller_status: "online",
     signal_strength: hubObj.signal_strength ?? -60,
     battery_level: hubObj.battery_level ?? 80,
-    sensor_nodes: nodes, // bisa kosong => “no node connected”
+    sensor_nodes: nodes, // bisa kosong
     latitude: hubObj.latitude,
     longitude: hubObj.longitude,
   };
@@ -275,7 +273,6 @@ function ControllerDetailView({ controller, onBack, t }) {
 
 /********************** Dashboard Utama (real data) **********************/
 export default function Dashboard() {
-  // username dari URL /:userID, ?user=, atau window global
   const { userID } = useParams();
   const [searchParams] = useSearchParams();
   const usernameProp = userID || searchParams.get("user") || window.__APP_USERNAME__;
@@ -284,7 +281,7 @@ export default function Dashboard() {
   const t = useMemo(() => translations[language], [language]);
 
   const [raspiID, setRaspiID] = useState(null);
-  const [controllersLatest, setControllersLatest] = useState([]); // daftar hub yang masih "alive"
+  const [controllersLatest, setControllersLatest] = useState([]); // daftar hub yang masih alive + node terfilter
   const [selectedControllerId, setSelectedControllerId] = useState(null);
 
   const [startTime] = useState(new Date());
@@ -292,10 +289,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
-  // liveness map (bertahan lintas render) — idHub -> lastSeen(ms)
-  const hubLastSeenRef = useRef(new Map());
-  // snapshot terakhir per hub (biar info seperti battery/signal tetap ada sampai timeout)
-  const hubSnapshotRef = useRef(new Map());
+  // Liveness reference maps
+  const hubLastSeenRef  = useRef(new Map()); // hubId -> ms
+  const hubSnapshotRef  = useRef(new Map()); // hubId -> last ctrl snapshot (bisa nodes kosong)
+  const nodeLastSeenRef = useRef(new Map()); // NODE LIVENESS: `${hubId}:${nodeId}` -> ms
 
   // Running time
   useEffect(() => {
@@ -310,7 +307,7 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [startTime]);
 
-  // resolve raspi + load data + polling
+  // resolve raspi + load + polling
   useEffect(() => {
     let stop = false;
     let pollId;
@@ -329,7 +326,6 @@ export default function Dashboard() {
 
         await fetchAndBuild(raspiId);
 
-        // polling ringan
         pollId = setInterval(() => fetchAndBuild(raspiId), 1000);
       } catch (e) {
         if (!stop) setErr(e.message || String(e));
@@ -354,36 +350,57 @@ export default function Dashboard() {
         const now = Date.now();
 
         if (latestEntry && Array.isArray(latestEntry.data)) {
-          // tandai yang terlihat di paket terbaru
           const seenIds = new Set();
+
           latestEntry.data.forEach(hubObj => {
             const ctrl = normalizeHubToController(hubObj);
-            const id = ctrl.sensor_controller_id;
-            seenIds.add(id);
-            hubLastSeenRef.current.set(id, now);
-            hubSnapshotRef.current.set(id, ctrl); // update snapshot terakhir (boleh nodes kosong)
+            const hubId = ctrl.sensor_controller_id;
+
+            seenIds.add(hubId);
+            hubLastSeenRef.current.set(hubId, now);
+            hubSnapshotRef.current.set(hubId, ctrl); // overwrite nodes dengan kondisi terbaru
+
+            // NODE LIVENESS: update lastSeen utk node yang muncul
+            ctrl.sensor_nodes.forEach(n => {
+              const key = `${hubId}:${n.node_id}`;
+              nodeLastSeenRef.current.set(key, now);
+            });
           });
         }
 
-        // Bangun daftar “masih hidup” berdasarkan lastSeen
+        // Bangun daftar hub yang masih hidup
         const visible = [];
-        for (const [id, snapshot] of hubSnapshotRef.current.entries()) {
-          const last = hubLastSeenRef.current.get(id) || 0;
-          if (now - last <= HUB_OFFLINE_MS) {
-            visible.push(snapshot);
+        for (const [hubId, snapshot] of hubSnapshotRef.current.entries()) {
+          const hubLast = hubLastSeenRef.current.get(hubId) || 0;
+          if (now - hubLast <= HUB_OFFLINE_MS) {
+            // NODE LIVENESS: filter nodes berdasarkan lastSeen
+            const filteredNodes = (snapshot.sensor_nodes || []).filter(n => {
+              const key = `${hubId}:${n.node_id}`;
+              const last = nodeLastSeenRef.current.get(key) || 0;
+              return (now - last) <= NODE_OFFLINE_MS;
+            });
+
+            // gunakan snapshot hub, tapi ganti nodes jadi yang terfilter
+            visible.push({
+              ...snapshot,
+              sensor_nodes: filteredNodes
+            });
           } else {
-            // sudah terlalu lama tak terlihat → hapus agar tak tampil
-            hubSnapshotRef.current.delete(id);
-            hubLastSeenRef.current.delete(id);
+            // hub expired
+            hubSnapshotRef.current.delete(hubId);
+            hubLastSeenRef.current.delete(hubId);
+            // opsional: bersihkan nodeLastSeen untuk hub ini
+            for (const key of nodeLastSeenRef.current.keys()) {
+              if (key.startsWith(`${hubId}:`)) nodeLastSeenRef.current.delete(key);
+            }
           }
         }
 
-        // sort optional: by id asc
+        // sort by id
         visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
-
         setControllersLatest(visible);
 
-        // jika sedang menonton detail hub yang sudah offline, tutup detail
+        // jika sedang lihat detail hub yang sudah tidak visible, tutup detail
         if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
           setSelectedControllerId(null);
         }
@@ -399,7 +416,7 @@ export default function Dashboard() {
     };
   }, [usernameProp, selectedControllerId]);
 
-  // metrik ringkas
+  // metrik ringkas pakai nodes yang sudah terfilter (agar tak kebawa node stale)
   const averageTemp = useMemo(() => {
     const temps = controllersLatest.flatMap(c => c.sensor_nodes).filter(n => n.sensor_type === 'temperature');
     if (!temps.length) return 'N/A';
