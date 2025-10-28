@@ -219,6 +219,8 @@ function LeafletMap({ controllers }) {
 
 /********************** Controller Detail **********************/
 function ControllerDetailView({ controller, onBack, t }) {
+  console.log(c);
+
   return (
     <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-4 sm:p-6 border border-white/20 animate-fade-in">
       <div className="flex items-center justify-between mb-6">
