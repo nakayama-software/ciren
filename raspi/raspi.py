@@ -26,6 +26,7 @@ data_queue = Queue(maxsize=1000)
 
 SER_HANDLE = None
 SER_LOCK = threading.Lock()  # tulis serial thread-safe
+HTTP_SESSION = requests.Session()
 
 PI_SERIAL = None
 
@@ -35,7 +36,8 @@ PI_SERIAL = None
 def detect_serial_port():
     ports = list_ports.comports()
     for p in ports:
-        if "USB" in p.device or "ACM" in p.device:
+        # Sesuaikan filter kalau perlu (ttyUSB/ttyACM/cu.usbserial/cu.usbmodem)
+        if ("USB" in p.device) or ("ACM" in p.device) or ("usbserial" in p.device) or ("usbmodem" in p.device):
             print(f"[FOUND] Detected ESP32 at {p.device}")
             return p.device
     print("[ERROR] No ESP32 detected. Please plug in the device.")
@@ -76,20 +78,33 @@ def send_to_vps_worker():
         data = data_queue.get()
         try:
             success = False
+            # Enrich minimal: pastikan dict dan tambahkan metadata
+            if isinstance(data, dict):
+                data.setdefault("_pi_serial", PI_SERIAL or "UNKNOWN_PI")
+                data.setdefault("_received_ts", int(time.time()))
+            else:
+                # Kalau bukan dict (harusnya tidak terjadi), bungkus sebagai dict
+                data = {
+                    "_pi_serial": PI_SERIAL or "UNKNOWN_PI",
+                    "_received_ts": int(time.time()),
+                    "_raw": data,
+                }
+
+            payload = {
+                "raspi_serial_id": str(PI_SERIAL or "UNKNOWN_PI"),
+                "data": [data],  # array of readings
+            }
+
             for attempt in range(1, MAX_RETRY + 1):
                 try:
-                    payload = {
-                        "raspi_serial_id": str(PI_SERIAL or "UNKNOWN_PI"),
-                        "data": [data],  # array of readings
-                    }
-                    resp = requests.post(VPS_API_URL, json=payload, timeout=REQUEST_TIMEOUT)
-                    print(f"[VPS RESPONSE] {resp.status_code}: {resp.text}")
+                    resp = HTTP_SESSION.post(VPS_API_URL, json=payload, timeout=REQUEST_TIMEOUT)
+                    print(f"[VPS RESPONSE] {resp.status_code}: {resp.text[:200]}")
                     success = (200 <= resp.status_code < 300)
                     if success:
                         break
                 except requests.exceptions.RequestException as e:
                     print(f"[RETRY {attempt}] VPS ERROR: {e}")
-                    time.sleep(1)
+                    time.sleep(min(1 * attempt, 5))
 
             tag = b"[SVROK]\n" if success else b"[SVRERR]\n"
             with SER_LOCK:
@@ -177,18 +192,22 @@ def read_serial_loop():
                     if not line:
                         continue
 
-                    print(f"[SERIAL] {line}")
-
+                    # Contoh baris: "[FOR_PI] { ...json... }"
                     if line.startswith("[FOR_PI]"):
-                        json_part = line.replace("[FOR_PI]", "").strip()
-                        try:
-                            parsed = json.loads(json_part)
-                            data_queue.put(parsed, timeout=1)
-                            print(f"[QUEUE] Data parsed & queued: {parsed}")
-                        except json.JSONDecodeError as e:
-                            print(f"[JSON ERROR] {e}: {json_part}")
+                        json_part = line.replace("[FOR_PI]", "", 1).strip()
+                        # Gunakan fast path: jika memang JSON object
+                        if json_part and json_part[0] == "{" and json_part[-1:] == "}":
+                            try:
+                                parsed = json.loads(json_part)
+                                data_queue.put(parsed, timeout=1)
+                                print(f"[QUEUE] JSON parsed & queued")
+                            except json.JSONDecodeError as e:
+                                print(f"[JSON ERROR] {e}: {json_part[:200]}")
+                        else:
+                            print(f"[WARN] Non-object JSON or malformed payload: {json_part[:200]}")
                     else:
-                        print(f"[INFO] Non-JSON line ignored: {line}")
+                        # Boleh diabaikan; yang penting [FOR_PI]
+                        pass
 
         except serial.SerialException as e:
             print(f"[DISCONNECTED] Lost connection: {e}")

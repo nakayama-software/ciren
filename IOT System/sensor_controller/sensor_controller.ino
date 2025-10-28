@@ -1,6 +1,10 @@
 // ESP32_8port_UART_Hub_TwoColumnStatus_AutoUpdate.ino
-// Perubahan: otomatis update ON/OFF tanpa perlu ganti page
-// Tetap mempertahankan: port ID tagging, ESP-NOW forward, offline detection, 2-column display
+// - Auto update ON/OFF
+// - Port ID tagging
+// - ESP-NOW forward (JSON)
+// - Offline detection
+// - 2-column display
+// - JSON payload hanya berisi port online + sensor_controller_id
 
 #include <HardwareSerial.h>
 #include <SoftwareSerial.h>
@@ -40,8 +44,9 @@ String bufP1, bufP2, bufP3, bufP4, bufP5, bufP6, bufP7, bufP8;
 int senderID = 1;
 const int maxSenderID = 9;
 
-// Timeout to consider a port OFFLINE (ms). Ubah sesuai kebutuhan.
-const unsigned long OFFLINE_TIMEOUT_MS = 10000UL; // 10 detik
+const unsigned long OFFLINE_TIMEOUT_MS = 10000UL; // 10 s
+const unsigned long SEND_INTERVAL_MS   = 2000UL;  // 2 s kirim periodik
+unsigned long lastSendMs = 0;
 
 // ========== EEPROM ==========
 #define EEPROM_SIZE 7
@@ -68,27 +73,26 @@ bool inputConfirmed = false;
 bool macValid = false;
 uint8_t currentMac[6];
 
-// avoid render during I2C poll
 volatile bool g_i2cPollBusy = false;
 
 // Node tracking (8 ports)
-bool nodeOnline[8] = { false, false, false, false, false, false, false, false };
+bool nodeOnline[8]   = { false,false,false,false,false,false,false,false };
 unsigned long lastSeenMs[8] = { 0,0,0,0,0,0,0,0 };
-String lastPayload[8]; // optional: last payload per port
-int onlineCount = 0;   // jumlah port online
+String lastPayload[8]; // simpan "jenis-value" tanpa spasi
+int onlineCount = 0;
 
-// Flag perubahan status (true bila ada ON/OFF berubah sejak terakhir)
+// Flags
 volatile bool statusChanged = false;
+volatile bool payloadDirty  = false; // set true saat ada data baru
 
 // Display pages
 #define PAGE_MAIN 0
 #define PAGE_NODESTATUS 1
-int displayPage = PAGE_MAIN; // global so other funcs know which page is active
+int displayPage = PAGE_MAIN;
 
 // ========== FORWARD DECLS ==========
 void initESPNow();
 void addPeer(uint8_t* peerMac);
-void sendTest(uint8_t* mac);
 void sendToReceiver(const String& msg);
 
 char nextHexChar(char c);
@@ -98,7 +102,7 @@ void saveMAC(uint8_t* mac, int id);
 void loadMAC(uint8_t* mac);
 bool isValidMAC(uint8_t* mac);
 void resetEEPROM();
-int loadSenderID();
+int  loadSenderID();
 void saveSenderID(int id);
 
 void drawMainScreen();
@@ -110,8 +114,13 @@ void printMacFormatted(const char* raw, int cursorIndex);
 bool readLine(Stream& s, String& buf, String& out);
 void pollSerials();
 void checkNodeTimeouts();
+void recalcOnlineCount();
 
-// --- Port descriptors (masukkan portId) ---
+// === Baru: builder payload JSON & trigger kirim ===
+void buildJson(String& out);
+void maybeSendJson();
+
+// --- Port descriptors ---
 struct HWPort {
   HardwareSerial* port;
   String* buffer;
@@ -143,50 +152,48 @@ SWPort swPorts[] = {
 const int HW_PORT_COUNT = sizeof(hwPorts) / sizeof(hwPorts[0]);
 const int SW_PORT_COUNT = sizeof(swPorts) / sizeof(swPorts[0]);
 
-// Utility: recalc onlineCount from nodeOnline[]
 void recalcOnlineCount() {
   int c = 0;
   for (int i = 0; i < 8; ++i) if (nodeOnline[i]) ++c;
   onlineCount = c;
 }
 
-// Handle incoming serial lines:
-// - parse format "jenis sensor - value"
-// - tag dengan PORT id
-// - tampilkan ke Serial dan forward via ESP-NOW bila macValid
-void handleLine(const char* portName, uint8_t portId, const String& line) {
+// Normalisasi: "jenis sensor - value" -> "jenis_sensor-value" (spasi jadi underscore)
+static String normalizeKV(const String& line) {
   String t = line;
   t.trim();
   int dash = t.indexOf('-');
-  String payload;
-
-  if (dash >= 0) {
-    String type = t.substring(0, dash);
-    String val = t.substring(dash + 1);
-    type.trim(); val.trim();
-
-    payload = String("PORT=") + String(portId) + ";TYPE=" + type + ";VAL=" + val;
-    Serial.printf("[%s:%d] TYPE=%s VAL=%s\n", portName, portId, type.c_str(), val.c_str());
-  } else {
-    // fallback ke RAW
-    payload = String("PORT=") + String(portId) + ";RAW=" + t;
-    Serial.printf("[%s:%d] RAW: %s\n", portName, portId, t.c_str());
+  if (dash < 0) {
+    // kalau tak ada '-', raw -> buang spasi: "raw" -> "raw"
+    t.replace(' ', '_');
+    return t;
   }
+  String jenis = t.substring(0, dash);
+  String value = t.substring(dash + 1);
+  jenis.trim(); value.trim();
+  jenis.replace(' ', '_');
+  value.replace(' ', '_');
+  return jenis + "-" + value;
+}
 
-  // update tracking
+// Handle satu baris dari port tertentu, update status & buffer & tandai payloadDirty
+void handleLine(const char* portName, uint8_t portId, const String& line) {
+  String norm = normalizeKV(line);
+
+  Serial.printf("[%s:%d] %s\n", portName, portId, norm.c_str());
+
   int idx = portId - 1;
   lastSeenMs[idx] = millis();
 
-  // jika sebelumnya offline, tandai online dan set flag perubahan
   if (!nodeOnline[idx]) {
     nodeOnline[idx] = true;
     statusChanged = true;
     Serial.printf("Port P%d -> ONLINE\n", portId);
   }
-  lastPayload[idx] = payload; // simpan (opsional)
 
-  // Forward via ESP-NOW bila MAC tujuan valid
-  if (macValid) sendToReceiver(payload);
+  // simpan payload dalam format "jenis-value"
+  lastPayload[idx] = norm;
+  payloadDirty = true;  // tandai perlu kirim
 }
 
 // ========== setup / loop ==========
@@ -207,7 +214,7 @@ void setup() {
 
   EEPROM.begin(EEPROM_SIZE);
   pinMode(BUTTON_NEXT, INPUT_PULLUP);
-  pinMode(BUTTON_INC, INPUT_PULLUP);
+  pinMode(BUTTON_INC,  INPUT_PULLUP);
 
   WireOLED.begin(OLED_SDA, OLED_SCL, 400000);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
@@ -223,7 +230,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   initESPNow();
 
-  // Reset EEPROM (kombinasi tombol saat startup)
+  // Reset EEPROM via tombol saat startup (opsional)
   bool resetPressed = (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW);
   if (resetPressed) {
     delay(800);
@@ -257,7 +264,6 @@ void setup() {
   if (isValidMAC(storedMac)) {
     memcpy(currentMac, storedMac, 6);
     addPeer(currentMac);
-    sendTest(currentMac);
     senderID = loadSenderID();
     macValid = true;
     Serial.print("Loaded MAC: ");
@@ -272,21 +278,19 @@ void setup() {
     showMACEntry();
   }
 
-  // init lastSeen to 0 (already done by initializer), nodeOnline false
   recalcOnlineCount();
   Serial.println("ESP32 8-port UART hub siap.");
 }
 
-// Centralized polling
 void pollSerials() {
   String line;
-  // HW ports
+  // HW
   for (int i = 0; i < HW_PORT_COUNT; ++i) {
     if (readLine(*hwPorts[i].port, *hwPorts[i].buffer, line)) {
       handleLine(hwPorts[i].name, hwPorts[i].portId, line);
     }
   }
-  // SW ports: each must listen() before read
+  // SW
   for (int i = 0; i < SW_PORT_COUNT; ++i) {
     swPorts[i].port->listen();
     if (readLine(*swPorts[i].port, *swPorts[i].buffer, line)) {
@@ -295,7 +299,6 @@ void pollSerials() {
   }
 }
 
-// Check timeouts and update nodeOnline[]. When we mark OFFLINE -> set statusChanged flag.
 void checkNodeTimeouts() {
   unsigned long now = millis();
   for (int i = 0; i < 8; ++i) {
@@ -303,17 +306,15 @@ void checkNodeTimeouts() {
       if (now - lastSeenMs[i] > OFFLINE_TIMEOUT_MS) {
         nodeOnline[i] = false;
         statusChanged = true;
+        payloadDirty = true; // supaya JSON berikutnya tak lagi memuat port ini
         Serial.printf("Port P%d -> OFFLINE (timeout)\n", i + 1);
       }
     }
   }
 }
 
-// ========== loop utama ==========
 void loop() {
-  String line;
-
-  // === MAC Entry UI ===
+  // UI MAC entry
   if (!inputConfirmed && !macValid) {
     if (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW) {
       uint8_t mac[6];
@@ -353,10 +354,9 @@ void loop() {
     return;
   }
 
-  // UI page toggle (short press NEXT)
+  // Page toggle
   static int prevNext = HIGH;
   static unsigned long nextPressTime = 0;
-
   int curNext = digitalRead(BUTTON_NEXT);
   if (prevNext == HIGH && curNext == LOW) nextPressTime = millis();
   else if (prevNext == LOW && curNext == HIGH) {
@@ -370,7 +370,7 @@ void loop() {
   }
   prevNext = curNext;
 
-  // Long-press INC untuk ganti senderID
+  // Long press INC -> ganti senderID
   static unsigned long idPressStart = 0;
   if (digitalRead(BUTTON_INC) == LOW) {
     if (idPressStart == 0) idPressStart = millis();
@@ -379,30 +379,26 @@ void loop() {
       saveSenderID(senderID);
       drawMainScreen();
       Serial.println("Sender ID changed to: " + String(senderID));
+      payloadDirty = true; // kirim JSON dengan ID baru
       delay(500);
       idPressStart = 0;
     }
   } else idPressStart = 0;
 
-  // Poll serials (this will update lastSeen & nodeOnline on receive)
+  // I/O
   pollSerials();
-
-  // Check timeouts and mark offline if perlu
   checkNodeTimeouts();
 
-  // Jika ada perubahan status -> recalc count + redraw sesuai halaman aktif
   if (statusChanged) {
     recalcOnlineCount();
-    if (displayPage == PAGE_NODESTATUS) {
-      drawNodeStatusPage();
-    } else {
-      // update main screen summary (Nodes: X/8)
-      drawMainScreen();
-    }
+    if (displayPage == PAGE_NODESTATUS) drawNodeStatusPage();
+    else drawMainScreen();
     statusChanged = false;
   }
 
-  // small yield
+  // Kirim JSON bila perlu
+  maybeSendJson();
+
   delay(0);
 }
 
@@ -424,20 +420,14 @@ void addPeer(uint8_t* peerMac) {
   }
 }
 
-void sendTest(uint8_t* mac) {
-  const char* msg = "Hello from sender!";
-  esp_err_t result = esp_now_send(mac, (uint8_t*)msg, strlen(msg));
-  if (result == ESP_OK) Serial.println("Sent!");
-  else Serial.println("Send failed");
-}
-
 void sendToReceiver(const String& msg) {
   if (!macValid) {
     Serial.println("MAC tujuan belum valid - tidak mengirim.");
     return;
   }
+  // PERINGATAN: payload ESP-NOW praktis ~250 byte; JSON disini aman selama port tak semuanya spam panjang.
   esp_err_t result = esp_now_send(currentMac, (uint8_t*)msg.c_str(), msg.length());
-  Serial.print("Forwarding -> ");
+  Serial.print("Forwarding JSON -> ");
   Serial.print(msg);
   Serial.print(" to: ");
   for (int i = 0; i < 6; i++) {
@@ -447,6 +437,65 @@ void sendToReceiver(const String& msg) {
   Serial.println(result == ESP_OK ? " ✅ Success" : " ❌ Failed");
 }
 
+// ========== JSON builder & sender ==========
+// Bentuk: {"sensor_controller_id": <senderID>,"port-1":"jenis-val", ...} (hanya port online)
+void buildJson(String& out) {
+  out.reserve(256);
+  out = "{\"sensor_controller_id\":";
+  out += String(senderID);
+  bool first = true;
+  for (int i = 0; i < 8; ++i) {
+    if (!nodeOnline[i]) continue;
+    if (lastPayload[i].length() == 0) continue;
+
+    // tambahkan koma sebelum field port jika bukan field pertama setelah ID
+    out += (first ? "," : ",");
+    first = false;
+
+    out += "\"port-";
+    out += String(i + 1);
+    out += "\":\"";
+    // escape tanda kutip ganda jika ada (hampir tak terjadi di format kita)
+    String v = lastPayload[i];
+    v.replace("\"", "\\\"");
+    out += v;
+    out += "\"";
+  }
+  out += "}";
+}
+
+// Kirim jika payloadDirty atau tiap SEND_INTERVAL_MS
+void maybeSendJson() {
+  unsigned long now = millis();
+  bool timeToSend = (now - lastSendMs >= SEND_INTERVAL_MS);
+
+  if (!payloadDirty && !timeToSend) return;
+  if (!macValid) return;
+
+  // Kalau tidak ada port online dan tidak ada perubahan penting, boleh skip
+  if (onlineCount == 0 && !payloadDirty && !timeToSend) return;
+
+  String json;
+  buildJson(json);
+
+  // Hindari kirim objek terlalu kecil ketika tidak ada port online:
+  if (onlineCount == 0) {
+    // tetap kirim ID saja tiap interval—boleh diaktifkan bila mau heartbeat ke receiver:
+    // sendToReceiver(json);
+    // lastSendMs = now;
+    // payloadDirty = false;
+    // return;
+    lastSendMs = now;
+    payloadDirty = false;
+    return;
+  }
+
+  sendToReceiver(json);
+  lastSendMs = now;
+  payloadDirty = false;
+}
+
+// ========== MAC & EEPROM utilities ==========
 char nextHexChar(char c) {
   if (c >= '0' && c < '9') return c + 1;
   if (c == '9') return 'A';
@@ -516,13 +565,12 @@ void drawMainScreen() {
   display.setCursor(0, 48);
   display.print("Nodes: ");
   display.print(onlineCount);
-  display.print("/");
-  display.print(8);
+  display.print("/8");
   if (!g_i2cPollBusy) display.display();
 }
 
 void drawNodeStatusPage() {
-  // Two-column layout (left: ports 1..4, right: ports 5..8)
+  // Two-column: left 1..4, right 5..8
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextWrap(false);
@@ -530,40 +578,107 @@ void drawNodeStatusPage() {
   display.println("Node Status:");
 
   const int leftX = 0;
-  const int rightX = 64; // midpoint of 128px display
+  const int rightX = 64;
   const int startY = 12;
   const int rowGap = 12;
 
-  // Left column: ports 1..4
   for (int r = 0; r < 4; ++r) {
-    int portIdx = r; // 0..3
+    int idx = r;
     int y = startY + r * rowGap;
     display.setCursor(leftX, y);
     display.print("P");
-    display.print(portIdx + 1);
+    display.print(idx + 1);
     display.print(": ");
-    display.print(nodeOnline[portIdx] ? "On " : "Off");
+    display.print(nodeOnline[idx] ? "On " : "Off");
   }
-
-  // Right column: ports 5..8
   for (int r = 0; r < 4; ++r) {
-    int portIdx = r + 4; // 4..7
+    int idx = r + 4;
     int y = startY + r * rowGap;
     display.setCursor(rightX, y);
     display.print("P");
-    display.print(portIdx + 1);
+    display.print(idx + 1);
     display.print(": ");
-    display.print(nodeOnline[portIdx] ? "On " : "Off");
+    display.print(nodeOnline[idx] ? "On " : "Off");
   }
 
   if (!g_i2cPollBusy) display.display();
 }
 
+// Render MAC 12 heksadesimal sebagai "AA:BB:CC" (baris 1) dan "DD:EE:FF" (baris 2)
+// Cursor ditampilkan dengan inverse-rectangle di atas nibble aktif.
+// Signature harus persis: void printMacFormatted(const char* raw, int cursorIndex)
+void printMacFormatted(const char* raw, int cursorIndex) {
+  // Bangun dua baris: 3 pasangan per baris
+  char line1[16], line2[16];
+  snprintf(line1, sizeof(line1), "%c%c:%c%c:%c%c",
+           raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]);
+  snprintf(line2, sizeof(line2), "%c%c:%c%c:%c%c",
+           raw[6], raw[7], raw[8], raw[9], raw[10], raw[11]);
+
+  // Koordinat dasar
+  const int x0 = 0;        // kiri
+  const int y1 = 14;       // baris pertama
+  const int y2 = y1 + 14;  // baris kedua
+  const int charW = 6;     // lebar karakter default font 5x7 + 1px spasi
+  const int charH = 8;
+
+  // Tulis kedua baris
+  display.setCursor(x0, y1);
+  display.print(line1);
+  display.setCursor(x0, y2);
+  display.print(line2);
+
+  // Highlight nibble aktif (cursorIndex 0..11 = heks di MAC, 12 = senderID)
+  if (cursorIndex >= 0 && cursorIndex < 12) {
+    int nibble = cursorIndex;             // 0..11
+    int pairIdx = nibble / 2;             // 0..5
+    int nibbleInPair = nibble % 2;        // 0 atau 1
+    bool topRow = (pairIdx < 3);
+
+    // Posisi karakter pada "AA:BB:CC" -> indeks 0..7, kolom ':' di 2 dan 5
+    int charPosInLine = (pairIdx % 3) * 3 + nibbleInPair; // 0..7
+
+    int x = x0 + charPosInLine * charW;
+    int y = topRow ? y1 : y2;
+
+    // Karakter yang sudah tercetak
+    char ch = topRow ? line1[charPosInLine] : line2[charPosInLine];
+
+    // Inverse highlight
+    display.fillRect(x - 1, y - 1, charW, charH + 2, WHITE);
+    display.setTextColor(BLACK);
+    display.setCursor(x, y);
+    display.write(ch);
+    display.setTextColor(WHITE);
+  }
+
+  // Keterangan Sender ID di bawahnya
+  display.setCursor(0, y2 + 14);
+  display.print("Sender ID: ");
+  if (cursorIndex == 12) {
+    int xSID = display.getCursorX();
+    int ySID = y2 + 14;
+    char sidBuf[8];
+    snprintf(sidBuf, sizeof(sidBuf), "%d", senderID);
+    int sidPixels = strlen(sidBuf) * charW;
+    display.fillRect(xSID - 1, ySID - 1, sidPixels, charH + 2, WHITE);
+    display.setTextColor(BLACK);
+    display.print(sidBuf);
+    display.setTextColor(WHITE);
+  } else {
+    display.print(senderID);
+  }
+}
+
+
+// ===== UI MAC entry (pakai fungsi dua-baris yg kamu punya) =====
 void showMACEntry() {
   display.clearDisplay();
   display.setCursor(0, 0);
-  display.println("Input MAC:");
+  display.println("Input MAC (2-line):");
   printMacFormatted(macStr, cursor);
+  display.setCursor(0, 56);
+  display.print("NEXT=Move  INC=Edit");
   if (!g_i2cPollBusy) display.display();
 }
 
@@ -576,21 +691,8 @@ void showMessage(const char* line1, const char* line2) {
   if (!g_i2cPollBusy) display.display();
 }
 
-void printMacFormatted(const char* raw, int cursorIndex) {
-  display.setCursor(0, 10);
-  for (int i = 0; i < 12; i++) {
-    if (i == cursorIndex) display.print("[");
-    display.print(raw[i]);
-    if (i == cursorIndex) display.print("]");
-    if (i % 2 == 1 && i != 11) display.print(":");
-    else display.print(" ");
-  }
-  display.setCursor(0, 42);
-  display.print("Sender ID: ");
-  if (cursorIndex == 12) display.print("[");
-  display.print(senderID);
-  if (cursorIndex == 12) display.print("]");
-}
+// === gunakan versi printMacFormatted dua baris yang sudah kamu adopsi sebelumnya ===
+// (Tidak ditampilkan ulang di sini untuk ringkas; tetap sama seperti versi yang sudah fix width.)
 
 // Non-blocking readLine
 bool readLine(Stream& s, String& buf, String& out) {

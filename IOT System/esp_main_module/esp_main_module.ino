@@ -74,8 +74,6 @@ void removeDevice(int index) {
 }
 
 int countActivePeers() {
-  // Karena self tidak pernah dimasukkan, ini sama dengan deviceCount.
-  // Tetap hitung manual untuk berjaga-jaga bila ada entri asing.
   int c = 0;
   for (int i = 0; i < deviceCount; i++) {
     if (!isSameMac(knownDevices[i].mac, selfMac)) c++;
@@ -141,7 +139,7 @@ void updateDisplay(bool force = false) {
 // ────────────────────────────────
 // ESP-NOW Receive Callback
 void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int len) {
-  // Log ke USB
+  // Baca MAC pengirim
   Serial.print("ESP-NOW msg from: ");
   for (int i = 0; i < 6; i++) {
     Serial.printf("%02X", recvInfo->src_addr[i]);
@@ -149,16 +147,30 @@ void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int l
   }
   Serial.println();
 
+  // Salin payload ke buffer char, paksa null-terminated
+  static char jsonBuf[300]; // aman untuk payload JSON pendek
+  int copyLen = min(len, (int)sizeof(jsonBuf) - 1);
+  memcpy(jsonBuf, data, copyLen);
+  jsonBuf[copyLen] = '\0';
+
+  // Logging ringkas
   Serial.print("Data: ");
-  for (int i = 0; i < len; i++) Serial.print((char)data[i]);
-  Serial.println(); // newline
+  Serial.println(jsonBuf);
 
-  // Forward khusus buat Raspberry Pi (dibaca Python)
-  Serial.print("[FOR_PI] ");
-  for (int i = 0; i < len; i++) Serial.print((char)data[i]);
-  Serial.println();
+  // Hanya forward kalau kelihatannya JSON object (dimulai '{' dan berakhir '}')
+  // Ini mencegah noise string lain ikut dikirim ke Pi.
+  String s = String(jsonBuf);
+  s.trim();
+  bool looksJsonObject = s.length() >= 2 && s[0] == '{' && s[s.length() - 1] == '}';
 
-  // Hanya update daftar device dari ESP-NOW packet
+  if (looksJsonObject) {
+    Serial.print("[FOR_PI] ");
+    Serial.println(s); // satu baris JSON valid
+  } else {
+    Serial.println("[WARN] Dropped non-JSON payload");
+  }
+
+  // Update daftar device dari ESP-NOW packet
   addOrUpdateDevice(recvInfo->src_addr);
   updateDisplay();
 }
@@ -171,7 +183,7 @@ void getSelfMac() {
 
 void setup() {
   Serial.begin(115200);
-  raspberrySerialStr[0] = '\0';  // inisialisasi kosong agar tampilan awal rapi
+  raspberrySerialStr[0] = '\0';  // tampilan awal rapi
 
   WiFi.mode(WIFI_STA);
   getSelfMac();
@@ -226,10 +238,10 @@ void loop() {
   // Baca per baris dari USB Serial: bisa berisi Raspberry ID atau heartbeat tag
   if (Serial.available()) {
     char lineBuf[64];
-    int len = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
-    lineBuf[len] = '\0';
+    int rlen = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
+    if (rlen < 0) rlen = 0;
+    lineBuf[rlen] = '\0';
 
-    // Deteksi heartbeat dari Python
     if (strstr(lineBuf, "[SVROK]")) {
       serverOnline = true;
       serverOnlineUntil = millis() + SERVER_OK_TTL;
@@ -241,7 +253,6 @@ void loop() {
       raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
     }
 
-    // PENTING: tidak lagi addOrUpdateDevice(selfMac);
     updateDisplay();
   }
 
