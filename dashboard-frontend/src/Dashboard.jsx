@@ -8,10 +8,8 @@ import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 import { useParams, useSearchParams } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
-const HUB_OFFLINE_MS = 12_000; // hub menghilang jika tak terlihat > 12s
-const NODE_OFFLINE_MS = 8_000;  // NODE LIVENESS: node dihapus jika tak terlihat > 8s
-
-const WINDOW_MS = 5_000;
+const HUB_OFFLINE_MS = 6_000; // hub menghilang jika tak terlihat > 12s
+const NODE_OFFLINE_MS = 4_000;  // NODE LIVENESS: node dihapus jika tak terlihat > 8s
 
 /************************ i18n ************************/
 const translations = {
@@ -343,33 +341,30 @@ export default function Dashboard() {
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
         const entries = Array.isArray(jd) ? jd : [];
-
+    
         // Sort terbaru -> lama
         entries.sort((a, b) => {
           const ta = new Date(a.received_ts || a.timestamp || 0).getTime();
           const tb = new Date(b.received_ts || b.timestamp || 0).getTime();
           return tb - ta;
         });
-
+    
         const now = Date.now();
-
-        // ---------------------------
-        // 1) Bangun peta "last seen"
-        // ---------------------------
-        const nodeLastSeen = new Map();   // `${hubId}:P${i}` -> ms
-        const hubMetaLatest = new Map();  // hubId -> meta terbaru
-        const hubLastSeen = new Map();  // hubId -> ms
-
+    
+        // ------ 1) Last-seen maps ------
+        const nodeLastSeen = new Map();  // `${hubId}:P${i}` -> ms
+        const hubMetaLatest = new Map(); // hubId -> meta terbaru (tanpa nodes)
+        const hubLastSeen = new Map();   // hubId -> ms
+    
         for (const rec of entries) {
           const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
-          if (!isFinite(ts) || now - ts > WINDOW_MS) break;
+          if (!isFinite(ts)) continue;
           if (!Array.isArray(rec.data)) continue;
-
+    
           for (const hubObj of rec.data) {
             const ctrl = normalizeHubToController(hubObj);
             const hubId = ctrl.sensor_controller_id;
-
-            // meta terbaru per hub
+    
             if (!hubMetaLatest.has(hubId)) {
               hubMetaLatest.set(hubId, {
                 sensor_controller_id: hubId,
@@ -380,9 +375,10 @@ export default function Dashboard() {
                 longitude: ctrl.longitude,
               });
             }
+            // update last seen hub dari timestamp record (ADA port atau TIDAK)
             hubLastSeen.set(hubId, Math.max(hubLastSeen.get(hubId) || 0, ts));
-
-            // port yang muncul pada record ini
+    
+            // tandai port yang hadir di record ini
             for (let i = 1; i <= 8; i++) {
               const key = `port-${i}`;
               if (!hubObj[key]) continue;
@@ -390,29 +386,28 @@ export default function Dashboard() {
             }
           }
         }
-
-        // ---------------------------
-        // 2) Susun daftar hub visible
-        // ---------------------------
+    
+        // ------ 2) Susun daftar hub visible (dengan filter HUB_OFFLINE_MS / NODE_OFFLINE_MS) ------
         let visible = [];
         for (const [hubId, meta] of hubMetaLatest.entries()) {
           const seenAt = hubLastSeen.get(hubId) || 0;
-          if (now - seenAt > WINDOW_MS) continue; // hub tak aktif dalam window
-
+          // pakai ambang HUB
+          if (now - seenAt > HUB_OFFLINE_MS) continue;
+    
           const nodes = [];
           for (let i = 1; i <= 8; i++) {
             const key = `${hubId}:P${i}`;
             const last = nodeLastSeen.get(key) || 0;
-            if (now - last <= WINDOW_MS) {
-              // ambil value terbaru untuk node ini dalam window
+            // pakai ambang NODE
+            if (now - last <= NODE_OFFLINE_MS) {
+              // ambil value terbaru untuk node ini dalam ambang NODE
               let nodeParsed = null;
               for (const rec of entries) {
                 const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
-                if (now - ts > WINDOW_MS) break;
-                const row = Array.isArray(rec.data) ? rec.data.find(h => {
-                  const id = (h.sensor_controller_id ?? h.sensor_controller ?? "UNKNOWN");
-                  return id === hubId;
-                }) : null;
+                if (now - ts > NODE_OFFLINE_MS) break;
+                const row = Array.isArray(rec.data)
+                  ? rec.data.find(h => (h.sensor_controller_id ?? h.sensor_controller ?? "UNKNOWN") === hubId)
+                  : null;
                 if (!row) continue;
                 const raw = row[`port-${i}`];
                 if (!raw) continue;
@@ -429,22 +424,19 @@ export default function Dashboard() {
               if (nodeParsed) nodes.push(nodeParsed);
             }
           }
-
-          visible.push({ ...meta, sensor_nodes: nodes }); // nodes bisa []
+    
+          // penting: SELALU dorong hub, meski nodes kosong (agar bisa tampil "No node connected")
+          visible.push({ ...meta, sensor_nodes: nodes });
         }
-
-        // ---------------------------
-        // 3) Fallback “hub tanpa node”
-        //    Kalau tidak ada hub di window, tapi ada rekaman terbaru:
-        //    tampilkan hub dari rekaman terbaru (nodes boleh kosong)
-        // ---------------------------
+    
+        // ------ 3) Fallback “hub tanpa node” ------
+        // Jika TIDAK ADA hub visible (mungkin jeda data > NODE_OFFLINE_MS tapi hub sebenarnya masih “online”),
+        // tetap tampilkan hub dari snapshot terbaru DENGAN nodes kosong.
         if (visible.length === 0 && entries.length > 0) {
           const latest = entries[0];
-          const latestTs = new Date(latest.received_ts || latest.timestamp || 0).getTime();
-          if (isFinite(latestTs) && now - latestTs <= WINDOW_MS && Array.isArray(latest.data)) {
+          if (Array.isArray(latest.data)) {
             visible = latest.data.map(hubObj => {
               const ctrl = normalizeHubToController(hubObj);
-              // kosongkan nodes (anggap no node connected pada snapshot ini)
               return {
                 sensor_controller_id: ctrl.sensor_controller_id,
                 controller_status: "online",
@@ -452,19 +444,16 @@ export default function Dashboard() {
                 battery_level: ctrl.battery_level ?? 80,
                 latitude: ctrl.latitude,
                 longitude: ctrl.longitude,
-                sensor_nodes: [], // <- ini yang memicu label "No node connected"
+                sensor_nodes: [], // memicu label "No node connected"
               };
             });
           }
         }
-
-        // ---------------------------
-        // 4) Commit ke state
-        // ---------------------------
+    
+        // ------ 4) Commit ------
         visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
         setControllersLatest(visible);
-
-        // Tutup panel detail kalau hub-nya sudah tak visible
+    
         if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
           setSelectedControllerId(null);
         }
@@ -472,8 +461,7 @@ export default function Dashboard() {
         setErr(e.message || String(e));
       }
     }
-
-
+    
 
     resolveAndLoad();
     return () => {
