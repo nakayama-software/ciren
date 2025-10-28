@@ -7,9 +7,8 @@ import {
 import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 import { useParams, useSearchParams } from 'react-router-dom';
 
-
 const API_BASE = import.meta.env.VITE_API_BASE || '';
-
+const HUB_OFFLINE_MS = 12_000; // 12 detik: jika tidak terlihat >12s, anggap hub offline & sembunyikan
 
 /************************ i18n ************************/
 const translations = {
@@ -30,6 +29,7 @@ const translations = {
       nodesActive: "nodes active",
       viewDetails: "View Details",
       footer: "© 2025 CIREN Dashboard",
+      noNode: "No node connected",
     },
     controllerDetail: {
       back: "Back to Dashboard",
@@ -37,6 +37,7 @@ const translations = {
       signal: "Signal",
       sensorNodes: "Sensor Nodes",
       history: "Sensor Nodes",
+      noNode: "No node connected.",
     },
     sensors: {
       temperature: "Temperature",
@@ -65,6 +66,7 @@ const translations = {
       nodesActive: "ノードがアクティブ",
       viewDetails: "詳細を表示",
       footer: "© 2025 CIREN ダッシュボード",
+      noNode: "接続されたノードはありません",
     },
     controllerDetail: {
       back: "ダッシュボードに戻る",
@@ -72,6 +74,7 @@ const translations = {
       signal: "信号強度",
       sensorNodes: "センサーノード",
       history: "センサーノード",
+      noNode: "接続されたノードはありません。",
     },
     sensors: {
       temperature: "温度",
@@ -134,7 +137,7 @@ function normalizeHubToController(hubObj) {
     controller_status: "online",
     signal_strength: hubObj.signal_strength ?? -60,
     battery_level: hubObj.battery_level ?? 80,
-    sensor_nodes: nodes,
+    sensor_nodes: nodes, // bisa kosong => “no node connected”
     latitude: hubObj.latitude,
     longitude: hubObj.longitude,
   };
@@ -206,7 +209,6 @@ function LeafletMap({ controllers }) {
   }, [controllers]);
 
   useEffect(() => {
-    // redraw markers when controllers updates
     if (!mapRef.current) return;
     const id = setTimeout(() => {}, 0);
     return () => clearTimeout(id);
@@ -254,37 +256,46 @@ function ControllerDetailView({ controller, onBack, t }) {
         <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
           <span>{t.controllerDetail.history}</span>
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {controller.sensor_nodes.map((node, index) => (
-            <SensorRenderer key={index} node={node} />
-          ))}
-        </div>
+
+        {controller.sensor_nodes.length === 0 ? (
+          <div className="p-4 rounded bg-white/10 text-gray-200 text-sm">
+            {t.controllerDetail.noNode}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {controller.sensor_nodes.map((node, index) => (
+              <SensorRenderer key={index} node={node} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /********************** Dashboard Utama (real data) **********************/
-export default function Dashboard(props) {
-  // username dari router props atau global, fallback "alice"
-  const { userID } = useParams();                 // /:userID
-  const [searchParams] = useSearchParams();       // fallback ?user=raihan
-  const usernameProp =
-    userID ||
-    searchParams.get("user") ||
-    window.__APP_USERNAME__ 
+export default function Dashboard() {
+  // username dari URL /:userID, ?user=, atau window global
+  const { userID } = useParams();
+  const [searchParams] = useSearchParams();
+  const usernameProp = userID || searchParams.get("user") || window.__APP_USERNAME__;
 
   const [language, setLanguage] = useState('en');
   const t = useMemo(() => translations[language], [language]);
 
   const [raspiID, setRaspiID] = useState(null);
-  const [controllersLatest, setControllersLatest] = useState([]); // array controller normalized (snapshot terbaru)
+  const [controllersLatest, setControllersLatest] = useState([]); // daftar hub yang masih "alive"
   const [selectedControllerId, setSelectedControllerId] = useState(null);
 
   const [startTime] = useState(new Date());
   const [runningTime, setRunningTime] = useState('00:00:00');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+
+  // liveness map (bertahan lintas render) — idHub -> lastSeen(ms)
+  const hubLastSeenRef = useRef(new Map());
+  // snapshot terakhir per hub (biar info seperti battery/signal tetap ada sampai timeout)
+  const hubSnapshotRef = useRef(new Map());
 
   // Running time
   useEffect(() => {
@@ -299,7 +310,7 @@ export default function Dashboard(props) {
     return () => clearInterval(timer);
   }, [startTime]);
 
-  // resolve raspi + load data
+  // resolve raspi + load data + polling
   useEffect(() => {
     let stop = false;
     let pollId;
@@ -309,7 +320,6 @@ export default function Dashboard(props) {
         setLoading(true);
         setErr(null);
 
-        // 1) resolve username → raspi_serial_id
         const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
         if (!r.ok) throw new Error("resolve failed");
         const jr = await r.json();
@@ -317,11 +327,10 @@ export default function Dashboard(props) {
         if (stop) return;
         setRaspiID(raspiId);
 
-        // 2) fetch data awal
         await fetchAndBuild(raspiId);
 
-        // 3) polling ringan setiap 5s
-        pollId = setInterval(() => fetchAndBuild(raspiId), 500);
+        // polling ringan
+        pollId = setInterval(() => fetchAndBuild(raspiId), 1000);
       } catch (e) {
         if (!stop) setErr(e.message || String(e));
       } finally {
@@ -334,8 +343,6 @@ export default function Dashboard(props) {
         const d = await fetch(`${API_BASE}/api/data/${encodeURIComponent(raspiId)}`);
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
-        // jd: array of entries
-        // ambil entry terbaru per server (anggap jd sudah sorted terbaru→lama; jika tidak, sort)
         const entries = Array.isArray(jd) ? jd : [];
         entries.sort((a, b) => {
           const ta = a.received_ts || a.timestamp || 0;
@@ -343,25 +350,54 @@ export default function Dashboard(props) {
           return Number(tb) - Number(ta);
         });
 
-        // dari entry terbaru, normalize semua hub → controllers
         const latestEntry = entries[0];
-        let controllers = [];
+        const now = Date.now();
+
         if (latestEntry && Array.isArray(latestEntry.data)) {
-          controllers = latestEntry.data.map(normalizeHubToController);
+          // tandai yang terlihat di paket terbaru
+          const seenIds = new Set();
+          latestEntry.data.forEach(hubObj => {
+            const ctrl = normalizeHubToController(hubObj);
+            const id = ctrl.sensor_controller_id;
+            seenIds.add(id);
+            hubLastSeenRef.current.set(id, now);
+            hubSnapshotRef.current.set(id, ctrl); // update snapshot terakhir (boleh nodes kosong)
+          });
         }
-        setControllersLatest(controllers);
+
+        // Bangun daftar “masih hidup” berdasarkan lastSeen
+        const visible = [];
+        for (const [id, snapshot] of hubSnapshotRef.current.entries()) {
+          const last = hubLastSeenRef.current.get(id) || 0;
+          if (now - last <= HUB_OFFLINE_MS) {
+            visible.push(snapshot);
+          } else {
+            // sudah terlalu lama tak terlihat → hapus agar tak tampil
+            hubSnapshotRef.current.delete(id);
+            hubLastSeenRef.current.delete(id);
+          }
+        }
+
+        // sort optional: by id asc
+        visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
+
+        setControllersLatest(visible);
+
+        // jika sedang menonton detail hub yang sudah offline, tutup detail
+        if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
+          setSelectedControllerId(null);
+        }
       } catch (e) {
         setErr(e.message || String(e));
       }
     }
 
     resolveAndLoad();
-
     return () => {
       stop = true;
       if (pollId) clearInterval(pollId);
     };
-  }, [usernameProp]);
+  }, [usernameProp, selectedControllerId]);
 
   // metrik ringkas
   const averageTemp = useMemo(() => {
@@ -488,7 +524,7 @@ export default function Dashboard(props) {
               </div>
             </div>
 
-            {/* daftar hub (ringkas, tanpa preview sensor) */}
+            {/* daftar hub (ringkas) */}
             <div>
               <h2 className="text-xl font-bold text-white flex items-center space-x-2 mb-4">
                 <Settings className="w-6 h-6 text-cyan-400" />
@@ -497,6 +533,7 @@ export default function Dashboard(props) {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {controllersLatest.map((controller, idx) => {
                   const online = controller.controller_status === 'online';
+                  const hasNodes = controller.sensor_nodes.length > 0;
                   return (
                     <div key={idx} className="group bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20 hover:border-white/40 transition-all duration-300">
                       <div className="flex items-center justify-between mb-4">
@@ -506,7 +543,10 @@ export default function Dashboard(props) {
                         <div className="text-right">
                           <div className="font-bold text-white">{controller.sensor_controller_id}</div>
                           <div className="text-xs text-gray-400">
-                            {controller.sensor_nodes.length} {t.dashboard.nodesActive}
+                            {hasNodes
+                              ? (<>{controller.sensor_nodes.length} {t.dashboard.nodesActive}</>)
+                              : (<span className="text-yellow-200">{translations[language].dashboard.noNode}</span>)
+                            }
                           </div>
                         </div>
                       </div>
@@ -538,6 +578,7 @@ export default function Dashboard(props) {
                     </div>
                   );
                 })}
+
                 {controllersLatest.length === 0 && (
                   <div className="col-span-full p-4 bg-yellow-50/10 border border-yellow-200/30 rounded text-yellow-100 text-sm">
                     Belum ada hub terdeteksi untuk Raspi <b>{raspiID || "—"}</b>.
