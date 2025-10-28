@@ -266,7 +266,10 @@ function ControllerDetailView({ controller, onBack, t }) {
 /********************** Dashboard Utama (real data) **********************/
 export default function Dashboard(props) {
   // username dari router props atau global, fallback "alice"
-  const usernameProp = (props && props.params && props.params.userID) || window.__APP_USERNAME__ || "alice";
+  console.log("props : ",props)
+  console.log("props.params : ",props.params)
+
+  const usernameProp = (props && props.params && props.params.userID) || window.__APP_USERNAME__ || "raihan";
 
   const [language, setLanguage] = useState('en');
   const t = useMemo(() => translations[language], [language]);
@@ -304,7 +307,7 @@ export default function Dashboard(props) {
         setErr(null);
 
         // 1) resolve username → raspi_serial_id
-        const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(username)}`);
+        const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
         if (!r.ok) throw new Error("resolve failed");
         const jr = await r.json();
         const raspiId = jr.raspi_serial_id || jr.raspi || jr;
