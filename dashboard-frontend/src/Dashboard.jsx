@@ -5,6 +5,7 @@ import {
   Settings, Battery, ArrowLeft, Globe, Sun
 } from 'lucide-react';
 import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
+import { useSearchParams } from 'react-router-dom';
 
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -266,10 +267,12 @@ function ControllerDetailView({ controller, onBack, t }) {
 /********************** Dashboard Utama (real data) **********************/
 export default function Dashboard(props) {
   // username dari router props atau global, fallback "alice"
-  console.log("props : ",props)
-  console.log("props.params : ",props.params)
-
-  const usernameProp = (props && props.params && props.params.userID) || window.__APP_USERNAME__ || "raihan";
+  const { userID } = useParams();                 // /:userID
+  const [searchParams] = useSearchParams();       // fallback ?user=raihan
+  const usernameProp =
+    userID ||
+    searchParams.get("user") ||
+    window.__APP_USERNAME__ 
 
   const [language, setLanguage] = useState('en');
   const t = useMemo(() => translations[language], [language]);
