@@ -1,5 +1,6 @@
 // XIAO SAMD21: TX=D6, RX=D7 (Serial1)
-const char* DEVICE_ID = "seedG";  // ubah per unit atau rakit dari UID
+// const char* SensorType = "Ultrasonic";  // ubah per unit atau rakit dari UID
+const char* SensorType = "Temperature";  // ubah per unit atau rakit dari UID
 
 void setup() {
   Serial.begin(115200);
@@ -13,9 +14,9 @@ void setup() {
 
 void loop() {
   static uint32_t c = 0;
-  Serial1.print("ID=");
-  Serial1.print(DEVICE_ID);
-  Serial1.print(";VAL=");
+  Serial1.print(SensorType);
+  Serial1.print("-");
+  Serial1.print("");
   Serial1.println(c++);
   delay(500);
 }

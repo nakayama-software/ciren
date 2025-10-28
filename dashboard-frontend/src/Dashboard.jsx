@@ -7,6 +7,8 @@ import {
 import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
 
 /************************ i18n ************************/
 const translations = {
@@ -302,7 +304,7 @@ export default function Dashboard(props) {
         setErr(null);
 
         // 1) resolve username → raspi_serial_id
-        const r = await fetch(`/api/resolve/${encodeURIComponent(usernameProp)}`);
+        const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(username)}`);
         if (!r.ok) throw new Error("resolve failed");
         const jr = await r.json();
         const raspiId = jr.raspi_serial_id || jr.raspi || jr;
@@ -323,7 +325,7 @@ export default function Dashboard(props) {
 
     async function fetchAndBuild(raspiId) {
       try {
-        const d = await fetch(`/api/data/${encodeURIComponent(raspiId)}`);
+        const d = await fetch(`${API_BASE}/api/data/${encodeURIComponent(raspiId)}`);
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
         // jd: array of entries
