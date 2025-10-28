@@ -102,7 +102,7 @@ function App() {
     //   return;
     // }
     // const { username } = await res.json();
-       const { username } = "raihan";
+    const username ="raihan"
     navigate(`/ciren/${username}/dashboard`);
   };
 
