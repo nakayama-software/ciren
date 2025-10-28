@@ -341,30 +341,30 @@ export default function Dashboard() {
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
         const entries = Array.isArray(jd) ? jd : [];
-    
+
         // Sort terbaru -> lama
         entries.sort((a, b) => {
           const ta = new Date(a.received_ts || a.timestamp || 0).getTime();
           const tb = new Date(b.received_ts || b.timestamp || 0).getTime();
           return tb - ta;
         });
-    
+
         const now = Date.now();
-    
+
         // ------ 1) Last-seen maps ------
         const nodeLastSeen = new Map();  // `${hubId}:P${i}` -> ms
         const hubMetaLatest = new Map(); // hubId -> meta terbaru (tanpa nodes)
         const hubLastSeen = new Map();   // hubId -> ms
-    
+
         for (const rec of entries) {
           const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
           if (!isFinite(ts)) continue;
           if (!Array.isArray(rec.data)) continue;
-    
+
           for (const hubObj of rec.data) {
             const ctrl = normalizeHubToController(hubObj);
             const hubId = ctrl.sensor_controller_id;
-    
+
             if (!hubMetaLatest.has(hubId)) {
               hubMetaLatest.set(hubId, {
                 sensor_controller_id: hubId,
@@ -377,7 +377,7 @@ export default function Dashboard() {
             }
             // update last seen hub dari timestamp record (ADA port atau TIDAK)
             hubLastSeen.set(hubId, Math.max(hubLastSeen.get(hubId) || 0, ts));
-    
+
             // tandai port yang hadir di record ini
             for (let i = 1; i <= 8; i++) {
               const key = `port-${i}`;
@@ -386,14 +386,14 @@ export default function Dashboard() {
             }
           }
         }
-    
+
         // ------ 2) Susun daftar hub visible (dengan filter HUB_OFFLINE_MS / NODE_OFFLINE_MS) ------
         let visible = [];
         for (const [hubId, meta] of hubMetaLatest.entries()) {
           const seenAt = hubLastSeen.get(hubId) || 0;
           // pakai ambang HUB
           if (now - seenAt > HUB_OFFLINE_MS) continue;
-    
+
           const nodes = [];
           for (let i = 1; i <= 8; i++) {
             const key = `${hubId}:P${i}`;
@@ -424,17 +424,17 @@ export default function Dashboard() {
               if (nodeParsed) nodes.push(nodeParsed);
             }
           }
-    
+
           // penting: SELALU dorong hub, meski nodes kosong (agar bisa tampil "No node connected")
           visible.push({ ...meta, sensor_nodes: nodes });
         }
-    
+
         // ------ 3) Fallback “hub tanpa node” ------
-        // Jika TIDAK ADA hub visible (mungkin jeda data > NODE_OFFLINE_MS tapi hub sebenarnya masih “online”),
-        // tetap tampilkan hub dari snapshot terbaru DENGAN nodes kosong.
         if (visible.length === 0 && entries.length > 0) {
           const latest = entries[0];
-          if (Array.isArray(latest.data)) {
+          const latestTs = new Date(latest.received_ts || latest.timestamp || 0).getTime();
+
+          if (isFinite(latestTs) && (Date.now() - latestTs) <= HUB_OFFLINE_MS && Array.isArray(latest.data)) {
             visible = latest.data.map(hubObj => {
               const ctrl = normalizeHubToController(hubObj);
               return {
@@ -444,16 +444,19 @@ export default function Dashboard() {
                 battery_level: ctrl.battery_level ?? 80,
                 latitude: ctrl.latitude,
                 longitude: ctrl.longitude,
-                sensor_nodes: [], // memicu label "No node connected"
+                sensor_nodes: [], // “No node connected”
               };
             });
+          } else {
+            // snapshot sudah basi -> JANGAN fallback (biarkan kosong supaya hub hilang)
+            visible = [];
           }
         }
-    
+
         // ------ 4) Commit ------
         visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
         setControllersLatest(visible);
-    
+
         if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
           setSelectedControllerId(null);
         }
@@ -461,7 +464,7 @@ export default function Dashboard() {
         setErr(e.message || String(e));
       }
     }
-    
+
 
     resolveAndLoad();
     return () => {
