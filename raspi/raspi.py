@@ -1,3 +1,6 @@
+# ==============================
+# Raspberry Pi Serial → Server
+# ==============================
 import serial
 import json
 import requests
@@ -16,13 +19,13 @@ MAX_RETRY = 3
 # GANTI sesuai server kamu:
 # - Jika Express tanpa TLS: gunakan http://host:3000/...
 # - Jika TLS valid: https://host:3000/...
-VPS_API_URL = "http://192.168.103.174:3000/api/iot-data"  # CONTOH: Express HTTP
+VPS_API_URL = "http://192.168.103.174:3000/api/iot-data"  # contoh Express HTTP
 # VPS_API_URL = "https://projects.nakayamairon.com/ncs85283278/server/api/receive-data.php"  # contoh lain
 
 data_queue = Queue(maxsize=1000)
 
 SER_HANDLE = None
-SER_LOCK = threading.Lock()  # supaya tulis serial thread-safe
+SER_LOCK = threading.Lock()  # tulis serial thread-safe
 
 PI_SERIAL = None
 
@@ -37,7 +40,6 @@ def detect_serial_port():
             return p.device
     print("[ERROR] No ESP32 detected. Please plug in the device.")
     return None
-
 
 # ==============================
 # AMBIL SERIAL NUMBER RPI
@@ -65,7 +67,6 @@ def get_pi_serial():
         pass
     return "UNKNOWN_PI"
 
-
 # ==============================
 # KIRIM DATA KE SERVER
 # ==============================
@@ -77,12 +78,10 @@ def send_to_vps_worker():
             success = False
             for attempt in range(1, MAX_RETRY + 1):
                 try:
-                    # >>>>> PATCH PENTING: bungkus sesuai skema server
                     payload = {
                         "raspi_serial_id": str(PI_SERIAL or "UNKNOWN_PI"),
                         "data": [data],  # array of readings
                     }
-
                     resp = requests.post(VPS_API_URL, json=payload, timeout=REQUEST_TIMEOUT)
                     print(f"[VPS RESPONSE] {resp.status_code}: {resp.text}")
                     success = (200 <= resp.status_code < 300)
@@ -121,7 +120,6 @@ def periodic_heartbeat():
                     print(f"[HB ERROR] {e}")
         time.sleep(5)
 
-
 # ==============================
 # KIRIM PI SERIAL (saat konek & berkala)
 # ==============================
@@ -136,7 +134,6 @@ def periodic_send_pi_serial(pi_serial):
                 except Exception as e:
                     print(f"[TX PI SERIAL ERROR] {e}")
         time.sleep(30)  # kirim ulang tiap 30 detik
-
 
 # ==============================
 # LOOP PEMBACA SERIAL
@@ -200,7 +197,6 @@ def read_serial_loop():
         except Exception as e:
             print(f"[SERIAL ERROR] {e}")
             time.sleep(3)
-
 
 # ==============================
 # MAIN

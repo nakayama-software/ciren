@@ -1,3 +1,6 @@
+// =======================
+// ESP32 Receiver Firmware
+// =======================
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_now.h>
@@ -14,7 +17,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Device tracking
 #define MAX_DEVICES 50
-#define TIMEOUT_MS 5000  // 5 seconds timeout
+#define TIMEOUT_MS 6000  // 6s timeout (sedikit di atas heartbeat 5s agar tidak balapan)
 
 struct DeviceEntry {
   uint8_t mac[6];
@@ -23,15 +26,18 @@ struct DeviceEntry {
 
 DeviceEntry knownDevices[MAX_DEVICES];
 int deviceCount = 0;
-int lastDisplayedCount = -1;
 
-char raspberrySerialStr[18];   // Menyimpan Raspberry Pi Serial (maks 16 char + null)
-uint8_t selfMac[6];            // MAC address dari ESP32 ini
+// untuk menghindari redraw berlebihan
+int lastDisplayedActiveCount = -1;
+
+// Raspberry Pi serial (untuk ditampilkan)
+char raspberrySerialStr[18];   // maks 17 + null
+uint8_t selfMac[6];            // MAC ESP32 ini
 
 // Status server dari heartbeat Pi
 bool serverOnline = false;
 unsigned long serverOnlineUntil = 0;
-const unsigned long SERVER_OK_TTL = 8000; // Tunjukkan "Online" hingga 8 detik sejak heartbeat terakhir
+const unsigned long SERVER_OK_TTL = 8000; // “Online” hingga 8s sejak heartbeat terakhir
 
 // ────────────────────────────────
 // Utils
@@ -47,6 +53,9 @@ int findDeviceIndex(const uint8_t* mac) {
 }
 
 void addOrUpdateDevice(const uint8_t* mac) {
+  // Jangan pernah memasukkan diri sendiri
+  if (isSameMac(mac, selfMac)) return;
+
   int index = findDeviceIndex(mac);
   if (index != -1) {
     knownDevices[index].lastSeen = millis();
@@ -64,16 +73,34 @@ void removeDevice(int index) {
   deviceCount--;
 }
 
+int countActivePeers() {
+  // Karena self tidak pernah dimasukkan, ini sama dengan deviceCount.
+  // Tetap hitung manual untuk berjaga-jaga bila ada entri asing.
+  int c = 0;
+  for (int i = 0; i < deviceCount; i++) {
+    if (!isSameMac(knownDevices[i].mac, selfMac)) c++;
+  }
+  return c;
+}
+
 // ────────────────────────────────
 // OLED
 unsigned long lastSwitchTime = 0;
 bool showingServerStatus = true;  // toggle tiap 3 detik
 
-void updateDisplayIfChanged() {
+void drawMacLine(uint8_t mac[6]) {
+  for (int i = 0; i < 6; i++) {
+    display.printf("%02X", mac[i]);
+    if (i < 5) display.print(":");
+  }
+}
+
+void updateDisplay(bool force = false) {
   static unsigned long lastUpdate = 0;
   bool serverIsOnlineNow = serverOnline && (millis() < serverOnlineUntil);
+  int activePeers = countActivePeers();
 
-  if (deviceCount != lastDisplayedCount || millis() - lastUpdate > 1000) {
+  if (force || activePeers != lastDisplayedActiveCount || millis() - lastUpdate > 1000) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
@@ -88,10 +115,7 @@ void updateDisplayIfChanged() {
     display.setCursor(0, 24);
     display.println("MAC address:");
     display.setCursor(0, 36);
-    for (int i = 0; i < 6; i++) {
-      display.printf("%02X", selfMac[i]);
-      if (i < 5) display.print(":");
-    }
+    drawMacLine(selfMac);
 
     // Toggle status vs device count
     if (millis() - lastSwitchTime > 3000) {
@@ -105,11 +129,11 @@ void updateDisplayIfChanged() {
       display.println(serverIsOnlineNow ? "Online" : "Offline");
     } else {
       display.print("Active devices: ");
-      display.println(deviceCount);
+      display.println(activePeers);
     }
 
     display.display();
-    lastDisplayedCount = deviceCount;
+    lastDisplayedActiveCount = activePeers;
     lastUpdate = millis();
   }
 }
@@ -127,15 +151,16 @@ void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int l
 
   Serial.print("Data: ");
   for (int i = 0; i < len; i++) Serial.print((char)data[i]);
-  Serial.println(); // penting untuk newline
+  Serial.println(); // newline
 
   // Forward khusus buat Raspberry Pi (dibaca Python)
   Serial.print("[FOR_PI] ");
   for (int i = 0; i < len; i++) Serial.print((char)data[i]);
   Serial.println();
 
+  // Hanya update daftar device dari ESP-NOW packet
   addOrUpdateDevice(recvInfo->src_addr);
-  updateDisplayIfChanged();
+  updateDisplay();
 }
 
 // ────────────────────────────────
@@ -146,7 +171,7 @@ void getSelfMac() {
 
 void setup() {
   Serial.begin(115200);
-  raspberrySerialStr[0] = '\0';  // inisialisasi kosong agar tampilan awal rapih
+  raspberrySerialStr[0] = '\0';  // inisialisasi kosong agar tampilan awal rapi
 
   WiFi.mode(WIFI_STA);
   getSelfMac();
@@ -172,7 +197,7 @@ void setup() {
 
   esp_now_register_recv_cb(onDataReceive);
 
-  updateDisplayIfChanged();
+  updateDisplay(true);
   Serial.println("Receiver ready. Waiting for data...");
 }
 
@@ -216,11 +241,11 @@ void loop() {
       raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
     }
 
-    addOrUpdateDevice(selfMac);
-    updateDisplayIfChanged();
+    // PENTING: tidak lagi addOrUpdateDevice(selfMac);
+    updateDisplay();
   }
 
-  if (changed) updateDisplayIfChanged();
+  if (changed) updateDisplay();
 
   delay(100);
 }
