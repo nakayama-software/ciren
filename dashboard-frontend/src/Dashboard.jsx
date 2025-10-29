@@ -118,7 +118,8 @@ function parseTypeValue(raw) {
 
 function normalizeHubToController(hubObj) {
   const scidRaw = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
-  const scidUp = String(scidRaw).toUpperCase();
+  const scidUp = String(hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN").toUpperCase();
+
   if (scidUp === "RASPI_SYS" || hubObj._type === "raspi_status") return null;
 
   const nodes = [];
