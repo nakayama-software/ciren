@@ -10,9 +10,9 @@ import SensorRenderer from "./components/sensors/SensorRenderer.jsx";
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 /** Liveness windows (ms) */
-const HUB_OFFLINE_MS  = 12_000;  // hub hilang jika tidak terlihat > 12 s
+const HUB_OFFLINE_MS = 12_000;  // hub hilang jika tidak terlihat > 12 s
 const NODE_OFFLINE_MS = 8_000;   // node hilang jika tidak terlihat > 8 s
-const RASPI_ALIVE_MS  = 15_000;  // Raspi dianggap online jika heartbeat < 15 s
+const RASPI_ALIVE_MS = 15_000;  // Raspi dianggap online jika heartbeat < 15 s
 
 /************************ i18n ************************/
 const translations = {
@@ -32,6 +32,7 @@ const translations = {
       viewDetails: "View Details",
       footer: "© 2025 CIREN Dashboard",
       noNode: "No node connected",
+      noHubDetected: "No Sensor controller connected"
     },
     controllerDetail: {
       back: "Back to Dashboard",
@@ -67,6 +68,7 @@ const translations = {
       viewDetails: "詳細を表示",
       footer: "© 2025 CIREN ダッシュボード",
       noNode: "接続されたノードはありません",
+      noHubDetected: "センサーコントローラーが接続されていません"
     },
     controllerDetail: {
       back: "ダッシュボードに戻る",
@@ -117,7 +119,7 @@ function parseTypeValue(raw) {
 
 function normalizeHubToController(hubObj) {
   const scidRaw = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
-  const scidUp  = String(scidRaw).toUpperCase();
+  const scidUp = String(scidRaw).toUpperCase();
   // Skip paket status Raspi agar tidak muncul sebagai HUB
   if (scidUp === "RASPI_SYS" || hubObj._type === "raspi_status") return null;
 
@@ -212,7 +214,7 @@ function LeafletMap({ controllers }) {
 
   useEffect(() => {
     if (!mapRef.current) return;
-    const id = setTimeout(() => {}, 0);
+    const id = setTimeout(() => { }, 0);
     return () => clearTimeout(id);
   }, [controllers]);
 
@@ -408,7 +410,7 @@ export default function Dashboard() {
 
           for (const hubObj of rec.data) {
             const scidRaw = hubObj?.sensor_controller_id ?? hubObj?.sensor_controller ?? "UNKNOWN";
-            const scidUp  = String(scidRaw).toUpperCase();
+            const scidUp = String(scidRaw).toUpperCase();
             if (scidUp === "RASPI_SYS" || hubObj?._type === "raspi_status") continue;
 
             // meta hub
@@ -481,7 +483,7 @@ export default function Dashboard() {
             visible = latest.data
               .filter(h => {
                 const scidRaw = h?.sensor_controller_id ?? h?.sensor_controller ?? "";
-                const scidUp  = String(scidRaw).toUpperCase();
+                const scidUp = String(scidRaw).toUpperCase();
                 return scidUp !== "RASPI_SYS" && h?._type !== "raspi_status";
               })
               .map(h => ({
@@ -682,7 +684,7 @@ export default function Dashboard() {
 
                 {controllersLatest.length === 0 && (
                   <div className="col-span-full p-4 bg-yellow-50/10 border border-yellow-200/30 rounded text-yellow-100 text-sm">
-                    Belum ada hub terdeteksi untuk Raspi <b>{raspiID || "—"}</b>.
+                    {t.dashboard.noHubDetected}<b>{raspiID || "—"}</b>.
                   </div>
                 )}
               </div>
