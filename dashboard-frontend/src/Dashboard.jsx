@@ -128,25 +128,27 @@ function parseTypeValue(raw) {
 }
 
 function normalizeHubToController(hubObj) {
+  // ⬇️ skip kalau ini paket status raspi
+  const scid = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
+  if (String(scid).toUpperCase() === "RASPI_SYS" || hubObj._type === "raspi_status") {
+    return null; // <-- JANGAN dirender sebagai controller
+  }
+  // ...lanjut seperti sebelumnya
   const nodes = [];
   for (let i = 1; i <= 8; i++) {
     const key = `port-${i}`;
     if (!hubObj[key]) continue;
     const parsed = parseTypeValue(hubObj[key]);
     nodes.push({
-      node_id: `P${i}`,
-      sensor_type: parsed.type,
-      value: parsed.value,
-      unit: parsed.unit,
-      status: "active",
+      node_id: `P${i}`, sensor_type: parsed.type, value: parsed.value, unit: parsed.unit, status: "active",
     });
   }
   return {
-    sensor_controller_id: hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN",
+    sensor_controller_id: scid,
     controller_status: "online",
     signal_strength: hubObj.signal_strength ?? -60,
     battery_level: hubObj.battery_level ?? 80,
-    sensor_nodes: nodes, // bisa kosong
+    sensor_nodes: nodes,
     latitude: hubObj.latitude,
     longitude: hubObj.longitude,
   };
@@ -292,33 +294,6 @@ function fmtHHMMSS(totalSeconds) {
   const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
   const ss = String(s % 60).padStart(2, '0');
   return `${h}:${m}:${ss}`;
-}
-
-function normalizeHubToController(hubObj) {
-  // ⬇️ skip kalau ini paket status raspi
-  const scid = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
-  if (String(scid).toUpperCase() === "RASPI_SYS" || hubObj._type === "raspi_status") {
-    return null; // <-- JANGAN dirender sebagai controller
-  }
-  // ...lanjut seperti sebelumnya
-  const nodes = [];
-  for (let i = 1; i <= 8; i++) {
-    const key = `port-${i}`;
-    if (!hubObj[key]) continue;
-    const parsed = parseTypeValue(hubObj[key]);
-    nodes.push({
-      node_id: `P${i}`, sensor_type: parsed.type, value: parsed.value, unit: parsed.unit, status: "active",
-    });
-  }
-  return {
-    sensor_controller_id: scid,
-    controller_status: "online",
-    signal_strength: hubObj.signal_strength ?? -60,
-    battery_level: hubObj.battery_level ?? 80,
-    sensor_nodes: nodes,
-    latitude: hubObj.latitude,
-    longitude: hubObj.longitude,
-  };
 }
 
 
