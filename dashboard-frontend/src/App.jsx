@@ -1,90 +1,104 @@
 import { useState, useEffect } from 'react';
-import { Activity, Wifi, Shield, BarChart3, Zap, Globe, ArrowRight, User, UserPlus } from 'lucide-react';
+import { Wifi, ArrowRight, User, UserPlus, Globe, Sun, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import './index.css';
 
-// Translations for English and Japanese (formalized)
+// i18n
 const translations = {
   en: {
     locale: 'en-US',
     title: 'CIREN',
-    subtitle: 'Connected IoT Real-time Environmental Network',
-    stats: {
-      activeDevices: 'Active Devices',
-      dataPoints: 'Data Points',
-      uptime: 'System Uptime'
-    },
-    buttons: {
-      login: 'Login to Dashboard',
-      register: 'Register',
-      submitLogin: 'Login',
-      goBack: 'Back'
-    },
+    subtitle: 'Real-time IoT Monitoring',
+    stats: { activeDevices: 'Active Devices', dataPoints: 'Data Points', uptime: 'Uptime' },
+    buttons: { login: 'Login', register: 'Create account', submitLogin: 'Continue', goBack: 'Back' },
     features: {
-      realtime: { title: 'Real-time Monitoring', description: 'Monitor IoT devices with per-second updates and reliable data flow.' },
-      secure: { title: 'Secure Connection', description: 'End-to-end encrypted transmission ensures your data stays safe.' },
-      analytics: { title: 'Advanced Analytics', description: 'Comprehensive visualization and data insights for smart decision-making.' }
+      realtime: { title: 'Realtime', description: 'Per-second device updates.' },
+      secure: { title: 'Secure', description: 'End-to-end encrypted transport.' },
+      analytics: { title: 'Analytics', description: 'Clear, actionable insights.' },
     },
     loginForm: {
-      title: 'Login',
-      subtitle: 'Access your IoT monitoring dashboard securely.',
-      label: 'Username or Raspi Serial ID',
-      placeholder: 'Enter your username or serial ID...'
+      title: 'Sign in',
+      subtitle: 'Enter your username or Raspi serial ID.',
+      label: 'Username / Raspi Serial ID',
+      placeholder: 'raihan or 10000000c6…',
+      help: 'Used only to resolve your dashboard.',
     },
-    alerts: {
-      missingInput: 'Please enter a username or Raspi serial ID.',
-      notFound: 'No matching user information found.'
-    },
-    footer: '© 2024 CIREN - Connected IoT Real-time Environmental Network',
-    languageSwitcher: 'Language'
+    alerts: { missingInput: 'Please enter a username or Raspi serial ID.', notFound: 'No matching user was found.' },
+    footer: '© 2025 CIREN',
+    languageSwitcher: 'Language',
+    theme: 'Theme',
   },
   ja: {
     locale: 'ja-JP',
     title: 'CIREN',
-    subtitle: 'コネクテッドIoTリアルタイム環境ネットワーク',
-    stats: {
-      activeDevices: '稼働中のデバイス',
-      dataPoints: 'データポイント',
-      uptime: 'システム稼働率'
-    },
-    buttons: {
-      login: 'ダッシュボードへログイン',
-      register: '新規登録',
-      submitLogin: 'ログイン',
-      goBack: '戻る'
-    },
+    subtitle: 'リアルタイムIoTモニタリング',
+    stats: { activeDevices: '稼働デバイス', dataPoints: 'データポイント', uptime: '稼働率' },
+    buttons: { login: 'ログイン', register: '新規登録', submitLogin: '続行', goBack: '戻る' },
     features: {
-      realtime: { title: 'リアルタイム監視', description: 'IoTデバイスを毎秒更新のリアルタイムデータで監視します。' },
-      secure: { title: '安全な通信', description: 'エンドツーエンド暗号化によりデータを安全に保護します。' },
-      analytics: { title: '高度な分析', description: '包括的なデータ可視化で精密な分析と判断を支援します。' }
+      realtime: { title: 'リアルタイム', description: '毎秒更新で状態を把握。' },
+      secure: { title: 'セキュア', description: 'エンドツーエンド暗号化で安全に伝送。' },
+      analytics: { title: '分析', description: '簡潔な可視化で意思決定を支援。' },
     },
     loginForm: {
-      title: 'ログイン画面',
-      subtitle: 'IoT監視ダッシュボードにアクセスするにはログインしてください。',
-      label: 'ユーザー名またはRaspiシリアルID',
-      placeholder: 'ユーザー名またはシリアルIDを入力してください'
+      title: 'ログイン',
+      subtitle: 'ユーザー名またはRaspiシリアルIDをご入力ください。',
+      label: 'ユーザー名 / RaspiシリアルID',
+      placeholder: '例：raihan または 10000000c6…',
+      help: 'ダッシュボード解決のみに使用します。',
     },
-    alerts: {
-      missingInput: 'ユーザー名またはRaspiシリアルIDを入力してください。',
-      notFound: '該当するユーザー情報が見つかりません。'
-    },
-    footer: '© 2024 CIREN - コネクテッドIoTリアルタイム環境ネットワーク | 全著作権所有',
-    languageSwitcher: '言語'
-  }
+    alerts: { missingInput: 'ユーザー名またはRaspiシリアルIDを入力してください。', notFound: '該当ユーザーが見つかりません。' },
+    footer: '© 2025 CIREN',
+    languageSwitcher: '言語',
+    theme: 'テーマ',
+  },
 };
 
 function App() {
   const navigate = useNavigate();
-  const [language, setLanguage] = useState('ja'); // default to Japanese
-  const [showLoginForm, setShowLoginForm] = useState(false);
-  const [userInput, setUserInput] = useState('');
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [stats] = useState({
-    activeDevices: 247,
-    dataPoints: '2.4M',
-    uptime: '99.8%'
+
+  // --- Language ---
+  const [language, setLanguage] = useState('ja');
+  const t = translations[language];
+
+  // --- Theme ---
+  const [theme, setTheme] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('ciren-theme') : null;
+    if (saved === 'light' || saved === 'dark') return saved;
+    const prefersDark = typeof window !== 'undefined'
+      && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'dark' : 'light';
   });
 
-  const t = translations[language];
+  useEffect(() => {
+    const html = document.querySelector('html');
+    if (!html) return;
+    if (theme === 'dark') {
+      html.classList.add('dark');
+      html.style.colorScheme = 'dark';
+    } else {
+      html.classList.remove('dark');
+      html.style.colorScheme = 'light';
+    }
+    localStorage.setItem('ciren-theme', theme);
+  }, [theme]);
+
+  // --- State ---
+  const [showLoginForm, setShowLoginForm] = useState(false);
+  const [userInput, setUserInput] = useState('');
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [stats] = useState({ activeDevices: 247, dataPoints: '2.4M', uptime: '99.8%' });
+
+  const fmtJaTime = (date, locale) => {
+    if (locale !== 'ja-JP') return date.toLocaleString(locale);
+    const o = new Intl.DateTimeFormat('ja-JP', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false, weekday: 'short',
+    }).formatToParts(date);
+    const get = (t) => o.find(p => p.type === t)?.value || '';
+    return `${get('year')}/${get('month')}/${get('day')}(${get('weekday')}) ${get('hour')}:${get('minute')}:${get('second')}`;
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -93,177 +107,222 @@ function App() {
 
   const handleLogin = async () => {
     if (!userInput.trim()) {
-      alert(t.alerts.missingInput);
+      setErrorMsg(t.alerts.missingInput);
       return;
     }
-    // const res = await fetch(`http://localhost:3000/api/resolve/${userInput}`);
-    // if (!res.ok) {
-    //   alert(t.alerts.notFound);
-    //   return;
-    // }
-    // const { username } = await res.json();
-    const username ="raihan"
+    setErrorMsg(null);
+    const username = 'raihan';
     navigate(`/ciren/${username}/dashboard`);
   };
 
-  const features = [
-    { icon: <Activity className="w-6 h-6" />, ...t.features.realtime },
-    { icon: <Shield className="w-6 h-6" />, ...t.features.secure },
-    { icon: <BarChart3 className="w-6 h-6" />, ...t.features.analytics }
-  ];
+  // --- UI components ---
+  const LangSwitch = () => (
+    <div className="flex items-center gap-2">
+      <Globe className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+      <div className="inline-flex rounded-md bg-black/5 p-1 border border-black/10 dark:border-white/10 dark:bg-white/10">
+        <button
+          type="button"
+          onClick={() => setLanguage('ja')}
+          className={`px-3 py-1 text-xs rounded ${language === 'ja'
+            ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+            : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'}`}
+        >
+          日本語
+        </button>
+        <button
+          type="button"
+          onClick={() => setLanguage('en')}
+          className={`px-3 py-1 text-xs rounded ${language === 'en'
+            ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+            : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'}`}
+        >
+          EN
+        </button>
+      </div>
+    </div>
+  );
+
+  const ThemeSwitch = () => (
+    <button
+      type="button"
+      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      className="inline-flex items-center gap-2 rounded-md border border-black/10 bg-black/5 px-3 py-1 text-xs text-gray-700 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20"
+    >
+      {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      <span>{theme === 'dark' ? (language === 'ja' ? 'ライト' : 'Light') : (language === 'ja' ? 'ダーク' : 'Dark')}</span>
+    </button>
+  );
+
+  const StatCard = ({ label, value }) => (
+    <div className="rounded-xl border border-black/10 bg-white/70 p-4 text-slate-900 backdrop-blur-sm 
+                    dark:border-white/10 dark:bg-slate-800/60 dark:text-white shadow-sm">
+      <div className="text-xs text-gray-600 dark:text-gray-400">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight">{value}</div>
+    </div>
+  );
 
   return (
-    <div lang={t.locale} className="h-screen w-screen bg-gradient-to-br from-slate-800 via-slate-900 to-slate-800 relative overflow-hidden fixed inset-0 font-['Noto Sans JP'] text-white">
-      {/* Background softly blurred */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-72 h-72 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10"></div>
-        <div className="absolute -bottom-40 -left-40 w-72 h-72 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10"></div>
+    
+    <div
+      lang={t.locale}
+      className="fixed inset-0 min-h-screen overflow-hidden font-['Noto_Sans_JP','Hiragino Kaku Gothic ProN','Yu Gothic UI',system-ui,sans-serif]
+                 selection:bg-cyan-300/30 selection:text-white
+                 bg-slate-50 text-slate-900 dark:text-white
+                 dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-950
+                 transition-colors duration-500"
+    >
+      {/* Background gradient */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 -right-24 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="absolute -bottom-32 -left-24 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
       </div>
 
-      <div className="relative z-10 h-full w-full overflow-y-auto">
-        <div className="container mx-auto px-6 py-8 min-h-full flex flex-col">
-          {/* Header */}
-          <div className="text-center mb-10 flex-shrink-0">
-            <div className="flex items-center justify-center mb-4">
-              <div className="w-14 h-14 bg-gradient-to-r from-indigo-400 to-blue-500 rounded-full flex items-center justify-center shadow-xl">
-                <Wifi className="w-7 h-7 text-white" />
-              </div>
+      <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col px-5">
+        {/* Header */}
+        <header className="flex items-center justify-between py-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 dark:bg-white/10">
+              <Wifi className="h-5 w-5" />
             </div>
-            <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400 mb-2">
-              {t.title}
-            </h1>
-            <p className="text-lg text-gray-300 mb-2">{t.subtitle}</p>
-            <div className="text-sm text-gray-400 font-mono">{currentTime.toLocaleString(t.locale)}</div>
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight">{t.title}</h1>
+              <p className="text-xs text-gray-600 dark:text-gray-400">{t.subtitle}</p>
+            </div>
           </div>
-
-          {/* Stats Section */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
-            {[
-              { icon: <Zap className="w-6 h-6 text-blue-400" />, value: stats.activeDevices, label: t.stats.activeDevices },
-              { icon: <Globe className="w-6 h-6 text-indigo-400" />, value: stats.dataPoints, label: t.stats.dataPoints },
-              { icon: <Shield className="w-6 h-6 text-cyan-400" />, value: stats.uptime, label: t.stats.uptime }
-            ].map((item, i) => (
-              <div key={i} className="bg-white/10 backdrop-blur-md rounded-xl p-6 border border-white/10 hover:border-white/30 transition-all duration-300 hover:bg-white/20">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center">
-                    {item.icon}
-                  </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold">{item.value}</div>
-                    <div className="text-sm text-gray-400">{item.label}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="flex items-center gap-3">
+            <ThemeSwitch />
+            <LangSwitch />
           </div>
+        </header>
 
-          {/* Main Content */}
-          <div className="flex-1 flex flex-col justify-center">
-            <div className="max-w-4xl mx-auto w-full">
-              {!showLoginForm ? (
-                <div className="text-center space-y-8">
-                  {/* Buttons */}
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                    <button
-                      onClick={() => setShowLoginForm(true)}
-                      className="w-full sm:w-auto bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white px-8 py-3 rounded-xl font-semibold shadow-md transition-transform transform hover:scale-105 flex items-center justify-center space-x-2"
-                    >
-                      <User className="w-5 h-5" />
-                      <span>{t.buttons.login}</span>
-                      <ArrowRight className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() => navigate('/ciren/register')}
-                      className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-xl font-semibold border border-white/20 transition-transform transform hover:scale-105 flex items-center justify-center space-x-2"
-                    >
-                      <UserPlus className="w-5 h-5" />
-                      <span>{t.buttons.register}</span>
-                      <ArrowRight className="w-5 h-5" />
-                    </button>
-                  </div>
+        {/* Main */}
+        <main className="flex flex-1 flex-col items-center justify-center">
+          <div className="w-full max-w-3xl">
+            <div className="mb-6 text-right text-[11px] font-mono text-gray-600 dark:text-gray-400">
+              {fmtJaTime(currentTime, t.locale)}
+            </div>
 
-                  {/* Features */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-12">
-                    {features.map((feature, index) => (
-                      <div key={index} className="bg-white/5 backdrop-blur-lg rounded-xl p-6 border border-white/10 hover:border-white/30 transition-all hover:bg-white/10">
-                        <div className="w-12 h-12 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center mb-4">
-                          {feature.icon}
-                        </div>
-                        <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
-                        <p className="text-gray-400 text-sm leading-relaxed">{feature.description}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="max-w-md mx-auto">
-                  <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 shadow-xl">
-                    <div className="text-center mb-6">
-                      <div className="w-16 h-16 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                        <User className="w-8 h-8 text-white" />
-                      </div>
-                      <h2 className="text-2xl font-bold mb-1">{t.loginForm.title}</h2>
-                      <p className="text-gray-400 text-sm">{t.loginForm.subtitle}</p>
+            {!showLoginForm ? (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-5">
+                <div className="sm:col-span-3">
+                  <div className="rounded-2xl border border-black/10 bg-white/80 p-6 backdrop-blur-sm 
+                                  dark:border-white/10 dark:bg-slate-800/60 transition-colors">
+                    <h2 className="text-lg font-medium tracking-tight">{t.subtitle}</h2>
+                    <p className="mt-2 text-sm leading-6 text-gray-700 dark:text-gray-300">
+                      {language === 'ja'
+                        ? '重要な情報だけを、見やすく、静かに。過度な装飾を避け、業務に集中できるUIです。'
+                        : 'Quiet, legible UI that surfaces only the essentials—so teams stay focused.'}
+                    </p>
+
+                    <div className="mt-6 grid grid-cols-3 gap-3">
+                      <StatCard label={t.stats.activeDevices} value={String(stats.activeDevices)} />
+                      <StatCard label={t.stats.dataPoints} value={String(stats.dataPoints)} />
+                      <StatCard label={t.stats.uptime} value={String(stats.uptime)} />
                     </div>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                          {t.loginForm.label}
-                        </label>
-                        <input
-                          type="text"
-                          value={userInput}
-                          onChange={(e) => setUserInput(e.target.value)}
-                          placeholder={t.loginForm.placeholder}
-                          className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 outline-none transition-all"
-                          onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
-                        />
-                      </div>
-                      <div className="flex space-x-3 pt-4">
-                        <button
-                          onClick={handleLogin}
-                          className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white py-3 rounded-lg font-semibold transition-transform transform hover:scale-105 flex items-center justify-center space-x-2"
-                        >
-                          <span>{t.buttons.submitLogin}</span>
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowLoginForm(false);
-                            setUserInput('');
-                          }}
-                          className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-lg font-semibold border border-white/20 transition-all"
-                        >
-                          {t.buttons.goBack}
-                        </button>
-                      </div>
+
+                    <div className="mt-8 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginForm(true)}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus:ring-2 focus:ring-cyan-400 dark:bg-white dark:text-slate-900 dark:hover:bg-gray-100"
+                      >
+                        <User className="h-4 w-4" />
+                        <span>{t.buttons.login}</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => navigate('/ciren/register')}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-black/10 bg-transparent px-4 py-2 text-sm font-medium text-slate-900 hover:bg-black/5 focus:ring-2 focus:ring-cyan-400 dark:border-white/10 dark:text-white dark:hover:bg-white/10"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        <span>{t.buttons.register}</span>
+                      </button>
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Footer */}
-          <div className="text-center mt-10 text-gray-500 text-sm">
-            <div className="mb-4">
-              <span className="mr-3">{t.languageSwitcher}:</span>
-              <button
-                onClick={() => setLanguage('en')}
-                className={`px-3 py-1 rounded-md text-xs transition-colors ${language === 'en' ? 'bg-blue-500 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}
-              >
-                EN
-              </button>
-              <button
-                onClick={() => setLanguage('ja')}
-                className={`ml-2 px-3 py-1 rounded-md text-xs transition-colors ${language === 'ja' ? 'bg-blue-500 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}
-              >
-                JP
-              </button>
-            </div>
-            <p>{t.footer}</p>
+                {/* Features */}
+                <div className="flex flex-col gap-3 sm:col-span-2">
+                  {Object.values(t.features).map((feat) => (
+                    <div key={feat.title} className="rounded-xl border border-black/10 bg-white/70 p-4 backdrop-blur-sm 
+                                                    dark:border-white/10 dark:bg-slate-800/60">
+                      <div className="text-sm font-medium">{feat.title}</div>
+                      <div className="mt-1 text-xs text-gray-700 dark:text-gray-400">{feat.description}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mx-auto w-full max-w-md">
+                <div className="rounded-2xl border border-black/10 bg-white/80 p-6 backdrop-blur-sm 
+                                dark:border-white/10 dark:bg-slate-800/60">
+                  <div className="mb-5 text-center">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-black/5 dark:bg-white/10">
+                      <User className="h-6 w-6" />
+                    </div>
+                    <h2 className="text-lg font-medium tracking-tight">{t.loginForm.title}</h2>
+                    <p className="mt-1 text-xs text-gray-700 dark:text-gray-400">{t.loginForm.subtitle}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label htmlFor="login-id" className="block text-xs text-gray-700 dark:text-gray-300">
+                      {t.loginForm.label}
+                    </label>
+                    <input
+                      id="login-id"
+                      type="text"
+                      value={userInput}
+                      onChange={(e) => setUserInput(e.target.value)}
+                      placeholder={t.loginForm.placeholder}
+                      className="w-full rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm text-slate-900 
+                                 placeholder-gray-500 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30
+                                 dark:border-white/10 dark:bg-slate-900/70 dark:text-white dark:placeholder-gray-400"
+                      onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                      aria-invalid={!!errorMsg}
+                    />
+                    <div className="text-[11px] text-gray-600 dark:text-gray-500">
+                      {t.loginForm.help}
+                    </div>
+
+                    {errorMsg && (
+                      <div
+                        role="status"
+                        className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200"
+                      >
+                        {errorMsg}
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleLogin}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus:ring-2 focus:ring-cyan-400 dark:bg-white dark:text-slate-900 dark:hover:bg-gray-100"
+                      >
+                        {t.buttons.submitLogin}
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowLoginForm(false); setUserInput(''); setErrorMsg(null); }}
+                        className="inline-flex items-center justify-center rounded-lg border border-black/10 bg-transparent px-3 py-2 text-sm font-medium text-slate-900 hover:bg-black/5 focus:ring-2 focus:ring-cyan-400 dark:border-white/10 dark:text-white dark:hover:bg-white/10"
+                      >
+                        {t.buttons.goBack}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        </main>
+
+        {/* Footer */}
+        <footer className="py-6 text-center text-xs text-gray-600 dark:text-gray-500 transition-colors">
+          {t.footer}
+        </footer>
       </div>
     </div>
   );
