@@ -373,7 +373,7 @@ export default function Dashboard() {
           if (!Number.isFinite(ts)) continue;
           if (!Array.isArray(rec.data)) continue;
           const sys = rec.data.find(h => {
-            const scid = String(h?.sensor_controller_id ?? h?.sensor_controller ?? "").toUpperCase();
+            const scid = (h?.sensor_controller_id ?? h?.sensor_controller ?? "").toUpperCase();
             return scid === "RASPI_SYS" || h._type === "raspi_status";
           });
           if (sys) {
