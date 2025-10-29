@@ -53,6 +53,7 @@ class Config:
     http_max_retry: int = int(os.environ.get("HTTP_MAX_RETRY", "3"))
     serial_detect_interval: float = float(os.environ.get("SERIAL_DETECT_INTERVAL_S", "3"))
     vps_api_url: str = os.environ.get("VPS_API_URL", "http://127.0.0.1:3000/api/iot-data")
+    vps_api_url: str = os.environ.get("VPS_API_URL", "http://192.168.103.174:3000/api/iot-data")
 
     # intervals
     heartbeat_to_receiver_sec: float = float(os.environ.get("HB_TO_RX_S", "5"))
