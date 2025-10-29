@@ -118,8 +118,7 @@ function parseTypeValue(raw) {
 
 function normalizeHubToController(hubObj) {
   const scidRaw = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
-  const scidUp = String(hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN").toUpperCase();
-
+  const scidUp = String(scidRaw).toUpperCase();
   if (scidUp === "RASPI_SYS" || hubObj._type === "raspi_status") return null;
 
   const nodes = [];
@@ -374,7 +373,7 @@ export default function Dashboard() {
           if (!Number.isFinite(ts)) continue;
           if (!Array.isArray(rec.data)) continue;
           const sys = rec.data.find(h => {
-            const scid = (h?.sensor_controller_id ?? h?.sensor_controller ?? "").toUpperCase();
+            const scid = String(h?.sensor_controller_id ?? h?.sensor_controller ?? "").toUpperCase();
             return scid === "RASPI_SYS" || h._type === "raspi_status";
           });
           if (sys) {
