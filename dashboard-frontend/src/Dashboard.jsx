@@ -283,6 +283,45 @@ function ControllerDetailView({ controller, onBack, t }) {
   );
 }
 
+/**************************  HELPER *****z**********************/
+
+function fmtHHMMSS(totalSeconds) {
+  if (!Number.isFinite(totalSeconds)) return "00:00:00";
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = String(Math.floor(s / 3600)).padStart(2, '0');
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${h}:${m}:${ss}`;
+}
+
+function normalizeHubToController(hubObj) {
+  // ⬇️ skip kalau ini paket status raspi
+  const scid = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
+  if (String(scid).toUpperCase() === "RASPI_SYS" || hubObj._type === "raspi_status") {
+    return null; // <-- JANGAN dirender sebagai controller
+  }
+  // ...lanjut seperti sebelumnya
+  const nodes = [];
+  for (let i = 1; i <= 8; i++) {
+    const key = `port-${i}`;
+    if (!hubObj[key]) continue;
+    const parsed = parseTypeValue(hubObj[key]);
+    nodes.push({
+      node_id: `P${i}`, sensor_type: parsed.type, value: parsed.value, unit: parsed.unit, status: "active",
+    });
+  }
+  return {
+    sensor_controller_id: scid,
+    controller_status: "online",
+    signal_strength: hubObj.signal_strength ?? -60,
+    battery_level: hubObj.battery_level ?? 80,
+    sensor_nodes: nodes,
+    latitude: hubObj.latitude,
+    longitude: hubObj.longitude,
+  };
+}
+
+
 /********************** Dashboard Utama (real data) **********************/
 export default function Dashboard() {
   const { userID } = useParams();
@@ -308,6 +347,13 @@ export default function Dashboard() {
   const hubLastSeenRef = useRef(new Map()); // hubId -> ms
   const hubSnapshotRef = useRef(new Map()); // hubId -> last ctrl snapshot (bisa nodes kosong)
   const nodeLastSeenRef = useRef(new Map()); // NODE LIVENESS: `${hubId}:${nodeId}` -> ms
+
+  const [raspiStatus, setRaspiStatus] = useState({
+    lastTs: 0,
+    tempC: null,
+    uptimeS: null,
+  });
+  const RASPI_ALIVE_MS = 15_000;
 
   // Running time
   useEffect(() => {
@@ -363,38 +409,52 @@ export default function Dashboard() {
           return tb - ta;
         });
 
-        // === Raspi online/offline berdasarkan timestamp terbaru ===
-        const latestEntry = entries[0];
-        let latestTs = 0;
-        if (latestEntry) {
-          latestTs = new Date(latestEntry.received_ts || latestEntry.timestamp || 0).getTime();
-        }
-        const nowMs = Date.now();
-        setRaspiOnline(isFinite(latestTs) && (nowMs - latestTs) <= RASPI_OFFLINE_MS);
-
-        // === Raspi temperature (opsional, fallback "—")
-        // cari di beberapa kemungkinan field yang mungkin kamu kirim dari backend
-        let cpuTemp = null;
-        if (latestEntry) {
-          // 1) field langsung di root (contoh: { raspi_temp: 52.3 })
-          cpuTemp = latestEntry.raspi_temp ?? latestEntry.pi_temp ?? null;
-
-          // 2) kalau tidak ada, coba lihat jika backend menaruh di meta/data lain
-          // misal: latestEntry.meta?.cpu_temp
-          if (cpuTemp == null && latestEntry.meta && typeof latestEntry.meta.cpu_temp !== 'undefined') {
-            cpuTemp = latestEntry.meta.cpu_temp;
-          }
-
-          // 3) (opsional) kalau suatu node khusus mengirim "temperature-<val>" dengan node_id "CPU"
-          //    atau controller khusus bernama "RASPI-CPU", kamu bisa tambahkan pencarian custom di sini
-          //    biarkan kosong bila belum ada
-        }
-        setRaspiTempC(typeof cpuTemp === 'number' ? cpuTemp : null);
-
-
         const now = Date.now();
 
-        // ------ 1) Last-seen maps ------
+        // ===========================
+        // 0) Tarik paket RASPI_SYS
+        // ===========================
+        let raspiTs = 0;
+        let raspiTemp = null;
+
+        for (const rec of entries) {
+          const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
+          if (!isFinite(ts)) continue;
+          if (!Array.isArray(rec.data)) continue;
+
+          // cari objek raspi
+          const raspiObj = rec.data.find(h => {
+            const scid = (h.sensor_controller_id ?? h.sensor_controller ?? "").toString().toUpperCase();
+            return scid === "RASPI_SYS" || h._type === "raspi_status";
+          });
+
+          if (raspiObj) {
+            raspiTs = ts;
+            // ambil suhu dari beberapa kemungkinan field
+            const candidates = [
+              raspiObj.raspi_temp_c,
+              raspiObj.pi_temp,
+              raspiObj.cpu_temp,
+              raspiObj.soc_temp_c,
+            ];
+            raspiTemp = candidates.find(v => typeof v === "number") ?? null;
+            break; // pakai yang terbaru saja
+          }
+        }
+
+        // set online/offline & suhu
+        if (typeof setRaspiOnline === "function") {
+          // gunakan ambang yang kamu pakai di komponen (misal RASPI_OFFLINE_MS)
+          const alive = raspiTs && isFinite(raspiTs) && (now - raspiTs) <= (typeof RASPI_OFFLINE_MS !== "undefined" ? RASPI_OFFLINE_MS : 15000);
+          setRaspiOnline(alive);
+        }
+        if (typeof setRaspiTempC === "function") {
+          setRaspiTempC(raspiTemp);
+        }
+
+        // ==================================================
+        // 1) Bangun peta last-seen HUB & NODE (skip RASPI)
+        // ==================================================
         const nodeLastSeen = new Map();  // `${hubId}:P${i}` -> ms
         const hubMetaLatest = new Map(); // hubId -> meta terbaru (tanpa nodes)
         const hubLastSeen = new Map();   // hubId -> ms
@@ -405,45 +465,53 @@ export default function Dashboard() {
           if (!Array.isArray(rec.data)) continue;
 
           for (const hubObj of rec.data) {
-            const ctrl = normalizeHubToController(hubObj);
-            const hubId = ctrl.sensor_controller_id;
+            const scidRaw = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
+            const scidUp = String(scidRaw).toUpperCase();
+            if (scidUp === "RASPI_SYS" || hubObj._type === "raspi_status") {
+              // abaikan status raspi sebagai "hub"
+              continue;
+            }
 
-            if (!hubMetaLatest.has(hubId)) {
-              hubMetaLatest.set(hubId, {
-                sensor_controller_id: hubId,
+            // meta hub (tanpa nodes)
+            if (!hubMetaLatest.has(scidRaw)) {
+              hubMetaLatest.set(scidRaw, {
+                sensor_controller_id: scidRaw,
                 controller_status: "online",
-                signal_strength: ctrl.signal_strength ?? -60,
-                battery_level: ctrl.battery_level ?? 80,
-                latitude: ctrl.latitude,
-                longitude: ctrl.longitude,
+                signal_strength: hubObj.signal_strength ?? -60,
+                battery_level: hubObj.battery_level ?? 80,
+                latitude: hubObj.latitude,
+                longitude: hubObj.longitude,
               });
             }
-            // update last seen hub dari timestamp record (ADA port atau TIDAK)
-            hubLastSeen.set(hubId, Math.max(hubLastSeen.get(hubId) || 0, ts));
+            // last seen hub (meski tak ada port di record ini)
+            hubLastSeen.set(scidRaw, Math.max(hubLastSeen.get(scidRaw) || 0, ts));
 
             // tandai port yang hadir di record ini
             for (let i = 1; i <= 8; i++) {
               const key = `port-${i}`;
               if (!hubObj[key]) continue;
-              nodeLastSeen.set(`${hubId}:P${i}`, Math.max(nodeLastSeen.get(`${hubId}:P${i}`) || 0, ts));
+              const k = `${scidRaw}:P${i}`;
+              nodeLastSeen.set(k, Math.max(nodeLastSeen.get(k) || 0, ts));
             }
           }
         }
 
-        // ------ 2) Susun daftar hub visible (dengan filter HUB_OFFLINE_MS / NODE_OFFLINE_MS) ------
+        // ==================================================
+        // 2) Susun daftar HUB visible (pakai HUB_OFFLINE_MS)
+        //    - selalu render hub yang alive (meski nodes kosong)
+        //    - node tampil jika last-seen ≤ NODE_OFFLINE_MS
+        // ==================================================
         let visible = [];
         for (const [hubId, meta] of hubMetaLatest.entries()) {
           const seenAt = hubLastSeen.get(hubId) || 0;
-          // pakai ambang HUB
-          if (now - seenAt > HUB_OFFLINE_MS) continue;
+          if (now - seenAt > HUB_OFFLINE_MS) continue; // hub dianggap offline
 
           const nodes = [];
           for (let i = 1; i <= 8; i++) {
             const key = `${hubId}:P${i}`;
             const last = nodeLastSeen.get(key) || 0;
-            // pakai ambang NODE
             if (now - last <= NODE_OFFLINE_MS) {
-              // ambil value terbaru untuk node ini dalam ambang NODE
+              // tarik nilai terbaru untuk port i dalam jendela node
               let nodeParsed = null;
               for (const rec of entries) {
                 const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
@@ -468,35 +536,46 @@ export default function Dashboard() {
             }
           }
 
-          // penting: SELALU dorong hub, meski nodes kosong (agar bisa tampil "No node connected")
-          visible.push({ ...meta, sensor_nodes: nodes });
+          visible.push({ ...meta, sensor_nodes: nodes }); // nodes bisa kosong => "No node connected"
         }
 
-        // ------ 3) Fallback “hub tanpa node” ------
+        // ==================================================
+        // 3) Fallback "snapshot terbaru" bila:
+        //    - tidak ada hub alive dalam ambang HUB_OFFLINE_MS,
+        //    - tapi masih ada rekaman terbaru yang cukup baru.
+        //    Tetap skip RASPI_SYS.
+        // ==================================================
         if (visible.length === 0 && entries.length > 0) {
           const latest = entries[0];
           const latestTs = new Date(latest.received_ts || latest.timestamp || 0).getTime();
 
-          if (isFinite(latestTs) && (Date.now() - latestTs) <= HUB_OFFLINE_MS && Array.isArray(latest.data)) {
-            visible = latest.data.map(hubObj => {
-              const ctrl = normalizeHubToController(hubObj);
-              return {
-                sensor_controller_id: ctrl.sensor_controller_id,
-                controller_status: "online",
-                signal_strength: ctrl.signal_strength ?? -60,
-                battery_level: ctrl.battery_level ?? 80,
-                latitude: ctrl.latitude,
-                longitude: ctrl.longitude,
-                sensor_nodes: [], // “No node connected”
-              };
-            });
+          if (isFinite(latestTs) && (now - latestTs) <= HUB_OFFLINE_MS && Array.isArray(latest.data)) {
+            visible = latest.data
+              .filter(h => {
+                const scid = h.sensor_controller_id ?? h.sensor_controller;
+                const up = String(scid).toUpperCase();
+                return up !== "RASPI_SYS" && h._type !== "raspi_status";
+              })
+              .map(h => {
+                // tampilkan hubnya, tapi nodes kosong (biar keluar "No node connected")
+                return {
+                  sensor_controller_id: h.sensor_controller_id ?? h.sensor_controller ?? "UNKNOWN",
+                  controller_status: "online",
+                  signal_strength: h.signal_strength ?? -60,
+                  battery_level: h.battery_level ?? 80,
+                  latitude: h.latitude,
+                  longitude: h.longitude,
+                  sensor_nodes: [],
+                };
+              });
           } else {
-            // snapshot sudah basi -> JANGAN fallback (biarkan kosong supaya hub hilang)
-            visible = [];
+            visible = []; // snapshot basi -> biarkan kosong (hilang)
           }
         }
 
-        // ------ 4) Commit ------
+        // ==================================================
+        // 4) Commit ke state + jaga selected panel
+        // ==================================================
         visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
         setControllersLatest(visible);
 
@@ -507,7 +586,6 @@ export default function Dashboard() {
         setErr(e.message || String(e));
       }
     }
-
 
     resolveAndLoad();
     return () => {
@@ -604,41 +682,42 @@ export default function Dashboard() {
                   <span>{t.dashboard.mainModuleStatus}</span>
                 </h2>
 
-                <div className="space-y-2 text-sm flex-grow">
-                  {/* Live Status (Raspi online/offline) */}
-                  <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
-                    <span className="text-gray-400 flex items-center space-x-2">
-                      <Eye className="w-4 h-4" />
-                      <span>{t.dashboard.liveStatus}</span>
-                    </span>
-                    <span className={`font-semibold ${raspiOnline ? 'text-green-400' : 'text-red-400'}`}>
-                      {raspiOnline ? t.dashboard.online : 'OFFLINE'}
-                    </span>
-                  </div>
+                {(() => {
+                  const online = raspiStatus.lastTs && (Date.now() - raspiStatus.lastTs <= RASPI_ALIVE_MS);
+                  const uptimeStr = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
+                  const tempStr = (raspiStatus.tempC != null) ? `${raspiStatus.tempC.toFixed ? raspiStatus.tempC.toFixed(1) : raspiStatus.tempC}°C` : '—';
 
-                  {/* Running Time (uptime aplikasi) */}
-                  <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
-                    <span className="text-gray-400 flex items-center space-x-2">
-                      <Clock className="w-4 h-4" />
-                      <span>{t.dashboard.runningTime}</span>
-                    </span>
-                    <span className="font-mono text-white">{runningTime}</span>
-                  </div>
+                  return (
+                    <div className="space-y-2 text-sm flex-grow">
+                      <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
+                        <span className="text-gray-400 flex items-center space-x-2">
+                          <Eye className="w-4 h-4" /><span>{t.dashboard.liveStatus}</span>
+                        </span>
+                        <span className={`font-semibold ${online ? 'text-green-400' : 'text-red-400'}`}>
+                          {online ? t.dashboard.online : 'OFFLINE'}
+                        </span>
+                      </div>
 
-                  {/* Raspi Temp (mengganti Avg Temp) */}
-                  <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
-                    <span className="text-gray-400 flex items-center space-x-2">
-                      <Thermometer className="w-4 h-4" />
-                      <span>{t.dashboard.avgTemp}</span>
-                    </span>
-                    <span className="font-mono text-white">
-                      {raspiTempC != null ? `${raspiTempC.toFixed(1)}°C` : '—'}
-                    </span>
-                  </div>
-                </div>
+                      <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
+                        <span className="text-gray-400 flex items-center space-x-2">
+                          <Clock className="w-4 h-4" /><span>{t.dashboard.runningTime}</span>
+                        </span>
+                        <span className="font-mono text-white">{uptimeStr}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-white/5 p-2 rounded-lg">
+                        <span className="text-gray-400 flex items-center space-x-2">
+                          <Thermometer className="w-4 h-4" /><span>Raspi Temp</span>
+                        </span>
+                        <span className="font-mono text-white">{tempStr}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <p className="text-center mt-4 text-gray-500 text-xs">{t.dashboard.footer}</p>
               </div>
+
 
             </div>
 
