@@ -35,7 +35,7 @@ const int RX_P4 = 27;
 const int RX_P5 = 33;
 const int RX_P6 = 34;
 const int RX_P7 = 35;
-const int RX_P8 = 39;
+const int RX_P8 = 26;
 
 // Buffers per-port (baris terakhir)
 String bufP1, bufP2, bufP3, bufP4, bufP5, bufP6, bufP7, bufP8;
