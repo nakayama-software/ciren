@@ -1,12 +1,19 @@
-# pip install pyserial
-import serial, time, re, json
+import serial, re, time, logging
 from datetime import datetime
 
-PORT = "/dev/ttyUSB3"
+PORT = "/dev/ttyUSB2"   # <-- use your AT-command port (not the NMEA streaming one)
 BAUD = 115200
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
+
+# +CGPSINFO: <lat>,<N/S>,<lon>,<E/W>,<date>,<time>,<alt>,<speed>,
 PATTERN = re.compile(
-    r"\+CGPSINFO:\s*([^,]+),(N|S),([^,]+),(E|W),(\d{6}),(\d{6}(?:\.\d+)?),([^,]*),([^,]*),?"
+    r"\+CGPSINFO:\s*([^,]*),([NS]?),(.*?),([EW]?),(.*?),(.*?),(.*?),(.*?),?$"
 )
 
 def dm_to_dd(dm_str: str) -> float:
@@ -15,44 +22,87 @@ def dm_to_dd(dm_str: str) -> float:
     minutes = dm - (degrees * 100)
     return degrees + minutes / 60.0
 
-def parse(line: str):
+def parse_cgpsinfo(line: str):
+    """
+    Returns dict with 'status' = 'fix' or 'nofix'.
+    When 'fix', includes lat/lon (decimal degrees) and other fields.
+    """
     m = PATTERN.search(line)
     if not m:
-        return None
-    lat_dm, lat_dir, lon_dm, lon_dir, dmy, hms, alt, spd = m.groups()
-    lat = dm_to_dd(lat_dm); lon = dm_to_dd(lon_dm)
-    if lat_dir == "S": lat = -lat
-    if lon_dir == "W": lon = -lon
-    dt_utc = None
+        return {"status": "invalid", "raw": line}
+
+    lat_dm, lat_dir, lon_dm, lon_dir, dmy, hms, alt, spd = [g.strip() for g in m.groups()]
+
+    # No-fix if latitude or longitude are empty
+    if not lat_dm or not lon_dm:
+        return {"status": "nofix"}
+
     try:
-        dt_utc = datetime.strptime(dmy + hms.split(".")[0], "%d%m%y%H%M%S")
+        lat = dm_to_dd(lat_dm)
+        lon = dm_to_dd(lon_dm)
+        if lat_dir == "S": lat = -lat
+        if lon_dir == "W": lon = -lon
+    except Exception:
+        return {"status": "invalid", "raw": line}
+
+    # Optional: parse date/time (UTC) if present
+    ts = None
+    try:
+        if dmy and hms:
+            ts = datetime.strptime(dmy + hms.split(".")[0], "%d%m%y%H%M%S")
     except Exception:
         pass
+
     return {
-        "lat": lat, "lon": lon,
-        "alt_m": float(alt) if alt.strip() else None,
-        "speed_knots": float(spd) if spd.strip() else None,
-        "utc": dt_utc.isoformat() + "Z" if dt_utc else None
+        "status": "fix",
+        "lat": lat,
+        "lon": lon,
+        "alt_m": float(alt) if alt else None,
+        "speed_knots": float(spd) if spd else None,
+        "utc": ts.isoformat() + "Z" if ts else None
     }
 
-def send_cmd(ser: serial.Serial, cmd: str, wait=0.2):
+def send_cmd(ser: serial.Serial, cmd: str, wait=0.4):
     ser.reset_input_buffer()
     ser.write((cmd + "\r\n").encode("ascii"))
     time.sleep(wait)
-    out = ser.read_all().decode("ascii", errors="ignore")
-    return out
+    return ser.read_all().decode("ascii", errors="ignore")
 
 def main():
+    last_status = None
+    last_warn_ts = 0
+    WARN_COOLDOWN_S = 5  # warn at most every 5s while no-fix persists
+
     with serial.Serial(PORT, BAUD, timeout=1) as ser:
-        # (Optional) power on/start GNSS for your module:
+        # Ensure GNSS is on for your module if needed (uncomment if required):
         # send_cmd(ser, "AT+CGPS=1")
+
         while True:
             resp = send_cmd(ser, "AT+CGPSINFO", wait=0.5)
             for line in resp.splitlines():
-                if "+CGPSINFO:" in line:
-                    data = parse(line)
-                    if data:
-                        print(json.dumps(data, ensure_ascii=False))
+                if "+CGPSINFO:" not in line:
+                    continue
+
+                st = parse_cgpsinfo(line)
+
+                if st["status"] == "fix":
+                    if last_status != "fix":
+                        logging.info("GPS fix acquired.")
+                    logging.info("Lat=%.8f  Lon=%.8f  Alt=%s  Speed(knots)=%s  UTC=%s",
+                                 st["lat"], st["lon"],
+                                 st.get("alt_m"), st.get("speed_knots"), st.get("utc"))
+                    last_status = "fix"
+
+                elif st["status"] == "nofix":
+                    now = time.time()
+                    if last_status != "nofix" or (now - last_warn_ts) > WARN_COOLDOWN_S:
+                        logging.warning("GPS has no fix — waiting for satellites...")
+                        last_warn_ts = now
+                    last_status = "nofix"
+
+                else:
+                    logging.debug("Unrecognized line: %s", st.get("raw", line))
+
             time.sleep(1.0)
 
 if __name__ == "__main__":
