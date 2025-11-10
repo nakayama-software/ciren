@@ -46,26 +46,45 @@ const UserAliasSchema = new mongoose.Schema({
 });
 const UserAlias = mongoose.model('UserAlias', UserAliasSchema);
 
+const GpsDataSchema = new mongoose.Schema({
+  raspi_serial_id: { type: String, index: true, trim: true, lowercase: true },
+  lat: Number,
+  lon: Number,
+  speed_kmh: Number,
+  altitude_m: Number,
+  sats: Number,
+  raw: mongoose.Schema.Types.Mixed,
+  timestamp: { type: Date, default: Date.now }
+});
+
+// ✅ MUST BE BEFORE model creation
+GpsDataSchema.index({ raspi_serial_id: 1, timestamp: -1 });
+
+const GpsData = mongoose.model('GpsData', GpsDataSchema);
+
+
+
+
 // ===== HELPERS =====
 function normalizePayload(body) {
-  const raspi_serial_id = body?.raspi_serial_id ? String(body.raspi_serial_id).toLowerCase().trim() : null;
+  const raspi_serial_id = body?.raspi_serial_id
+    ? String(body.raspi_serial_id).toLowerCase().trim()
+    : null;
+
   let records = null;
 
-  if (Array.isArray(body?.data)) {
-    records = body.data;
-  } else if (body?.data && typeof body.data === 'object') {
-    records = [body.data];
-  } else if (body?.metrics && typeof body.metrics === 'object') {
-    records = [body.metrics];
-  } else if (typeof body?.temperature === 'number') {
-    records = [{ temp_c: body.temperature }];
-  }
+  if (Array.isArray(body?.data)) records = body.data;
+  else if (typeof body?.data === 'object') records = [body.data];
+  else if (typeof body?.metrics === 'object') records = [body.metrics];
+  else if (typeof body?.temperature === 'number') records = [{ temp_c: body.temperature }];
 
-  // optional: attach server-side receive time
-  const ts = body?.timestamp ? new Date(body.timestamp) : new Date();
-
-  return { raspi_serial_id, records, timestamp: ts };
+  return {
+    raspi_serial_id,
+    records,
+    timestamp: new Date()
+  };
 }
+
 
 function extractTempC(doc) {
   if (!doc) return null;
@@ -180,6 +199,59 @@ app.post('/api/register-alias', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post('/api/gps', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const raspi_serial_id = String(body.raspi_serial_id || "").trim().toLowerCase();
+
+    if (!raspi_serial_id)
+      return res.status(400).json({ error: "Missing raspi_serial_id" });
+
+    // coord validation (0 is valid)
+    if (body.lat === undefined || body.lon === undefined)
+      return res.status(400).json({ error: "Missing GPS coordinates" });
+
+    const payload = {
+      raspi_serial_id,
+      lat: Number(body.lat),
+      lon: Number(body.lon),
+      speed_kmh: Number(body.speed_kmh || 0),
+      altitude_m: Number(body.altitude_m || 0),
+      sats: Number(body.sats || 0),
+      raw: body.raw || null,
+      timestamp: new Date()
+    };
+
+    const doc = new GpsData(payload);
+    await doc.save();
+
+    io.emit("gps-update", {
+      raspi_serial_id: doc.raspi_serial_id,
+      lat: doc.lat,
+      lon: doc.lon,
+      speed_kmh: doc.speed_kmh,
+      altitude_m: doc.altitude_m,
+      sats: doc.sats,
+      timestamp: doc.timestamp
+    });
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("[GPS ERROR]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.get('/api/gps/:raspiID/latest', async (req, res) => {
+  const raspiID = req.params.raspiID.toLowerCase();
+  const doc = await GpsData.findOne({ raspi_serial_id: raspiID })
+                           .sort({ timestamp: -1 });
+  if (!doc) return res.status(404).json({ message: "No GPS data" });
+  res.json(doc);
 });
 
 // ===== SOCKETS =====
