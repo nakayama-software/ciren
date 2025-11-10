@@ -105,8 +105,8 @@ function extractTempC(doc) {
 // ===== LOG INCOMING NON-GET =====
 app.use((req, _res, next) => {
   if (req.method !== 'GET') {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    try { console.log('BODY:', JSON.stringify(req.body).slice(0, 1000)); } catch { }
+    // console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    // try { console.log('BODY:', JSON.stringify(req.body).slice(0, 1000)); } catch { }
   }
   next();
 });
@@ -120,6 +120,7 @@ app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOStr
 // -------------------- IoT Data ------------------------
 app.post('/api/iot-data', async (req, res) => {
   try {
+    console.log("tesss")
     const { raspi_serial_id, records, timestamp } = normalizePayload(req.body || {});
     if (!raspi_serial_id || !records)
       return res.status(400).json({ error: 'Invalid IoT data' });
