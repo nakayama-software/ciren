@@ -266,7 +266,10 @@ def worker_push_sys_metrics():
     """Kirim paket RASPI_SYS ke server berkala, walau tak ada node."""
     while not STOP.is_set():
         try:
-            queue_put(build_raspi_sys())
+            data = build_raspi_sys()
+            data.setdefault("ts_iso", datetime.utcnow().isoformat() + "Z")
+            queue_put(data)
+
         except Exception as e:
             log.warning(f"[SYS METRICS ERROR] {e}")
         STOP.wait(CFG.push_sys_metrics_sec)
@@ -321,8 +324,17 @@ def worker_serial_reader():
                         if json_part.startswith("{") and json_part.endswith("}"):
                             try:
                                 parsed = json.loads(json_part)
+
+                                # ✅ Auto-normalize missing fields
+                                if "sensor_controller_id" not in parsed:
+                                    parsed["sensor_controller_id"] = parsed.get("id") or parsed.get("type") or "UNKNOWN"
+
+                                # ✅ Always include timestamp
+                                parsed.setdefault("ts_iso", datetime.utcnow().isoformat() + "Z")
+
                                 queue_put(parsed)
                                 log.debug("[QUEUE] hub JSON queued")
+
                             except json.JSONDecodeError as e:
                                 log.warning(f"[JSON ERROR] {e}: {json_part[:200]}")
                         else:
@@ -462,9 +474,11 @@ def worker_gps_reader():
                         "lon": st["lon"],
                         "speed_kmh": round(speed_kmh, 2),
                         "altitude_m": st.get("alt_m") or 0,
-                        "sats": 0,  # SIMCom CGPSINFO tidak sediakan jumlah satelit
+                        "sats": 0,
                         "raw": line.strip(),
+                        "timestamp": datetime.utcnow().isoformat() + "Z"
                     }
+
                     _gps_send_api(payload)
 
                 elif st["status"] == "nofix":
