@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Raspberry Pi → Express Server sender (tidy/optimized)
-
-Fitur:
-- Deteksi otomatis port ESP32 Receiver (USB) dan reconnect jika lepas/pasang.
-- Baca baris bertanda "[FOR_PI]{...json...}" dari receiver → antri → POST ke Express.
-- Heartbeat ke receiver tiap N detik: "[SVROK]\n".
-- Kirim serial number Raspberry ke receiver berkala untuk ditampilkan.
-- Push metrik sistem "RASPI_SYS" (suhu CPU, uptime, load, mem) berkala → ke server.
-- Logging rapi + shutdown mulus (Ctrl+C).
+pindah ke branch baru
 """
 
 from __future__ import annotations
