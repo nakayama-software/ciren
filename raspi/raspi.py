@@ -10,6 +10,13 @@ Fitur:
 - Kirim serial number Raspberry ke receiver berkala untuk ditampilkan.
 - Push metrik sistem "RASPI_SYS" (suhu CPU, uptime, load, mem) berkala → ke server.
 - Logging rapi + shutdown mulus (Ctrl+C).
+
+Tambahan (GPS):
+- Worker GPS terpisah (dedicated port; default /dev/ttyUSB3)
+- AT+CFUN=1, AT+CGPS=1 pada start
+- Poll AT+CGPSINFO berkala; konversi DM→DD
+- POST realtime ke API GPS baru (CFG.gps_api_url)
+- NO FIX → warning log (tidak POST agar sesuai kontrak server)
 """
 
 from __future__ import annotations
@@ -24,6 +31,8 @@ from dataclasses import dataclass
 from queue import Queue, Full, Empty
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
+import re
+import subprocess
 
 # --- optional deps ---
 try:
@@ -34,7 +43,6 @@ except Exception:
 import requests
 import serial  # pyserial
 from serial.tools import list_ports  # type: ignore
-import subprocess
 
 # ===================== Logging =====================
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -52,7 +60,6 @@ class Config:
     request_timeout: int = int(os.environ.get("REQUEST_TIMEOUT_S", "5"))
     http_max_retry: int = int(os.environ.get("HTTP_MAX_RETRY", "3"))
     serial_detect_interval: float = float(os.environ.get("SERIAL_DETECT_INTERVAL_S", "3"))
-    vps_api_url: str = os.environ.get("VPS_API_URL", "http://127.0.0.1:3000/api/iot-data")
     vps_api_url: str = os.environ.get("VPS_API_URL", "http://192.168.103.174:3000/api/iot-data")
 
     # intervals
@@ -63,11 +70,16 @@ class Config:
     # queue
     queue_maxsize: int = int(os.environ.get("QUEUE_MAXSIZE", "2000"))
 
+    # GPS
+    gps_port: str = os.environ.get("GPS_PORT", "/dev/ttyUSB3")
+    gps_poll_interval: float = float(os.environ.get("GPS_POLL_INTERVAL_S", "2"))
+    gps_api_url: str = os.environ.get("GPS_API_URL", "http://192.168.103.174:3000/api/gps")
+
 CFG = Config()
 
 # ================== Globals/State ==================
 STOP = threading.Event()        # sinyal shutdown
-SER_HANDLE: Optional[serial.Serial] = None
+SER_HANDLE: Optional[serial.Serial] = None  # ESP32 receiver
 SER_LOCK = threading.Lock()
 HTTP_SESSION = requests.Session()
 
@@ -76,9 +88,14 @@ PI_SERIAL: str = "UNKNOWN_PI"
 
 # ================== Helpers =======================
 def detect_serial_port() -> Optional[str]:
-    """Cari port USB ESP32 receiver. Kembalikan path atau None."""
+    """Cari port USB ESP32 receiver. Kembalikan path atau None.
+    Melewati port GPS agar tidak bentrok dengan worker GPS.
+    """
+    gps_dev = (CFG.gps_port or "").lower()
     for p in list_ports.comports():
         dev = p.device.lower()
+        if dev == gps_dev:
+            continue  # jangan ambil port GPS
         if any(tag in dev for tag in ("ttyusb", "ttyacm", "cu.usbserial", "cu.usbmodem")):
             log.info(f"[FOUND] ESP32 receiver at {p.device}")
             return p.device
@@ -107,15 +124,12 @@ def get_pi_serial() -> str:
 
 def get_raspi_cpu_temp_c() -> Optional[float]:
     """Ambil suhu CPU RasPi (°C). Prefer vcgencmd; fallback thermal_zone0."""
-    # vcgencmd
     try:
         out = subprocess.check_output(["vcgencmd", "measure_temp"], text=True).strip()
-        # contoh: temp=48.0'C
         if out.startswith("temp=") and out.endswith("'C"):
             return float(out[5:-2])
     except Exception:
         pass
-    # fallback thermal_zone0
     try:
         with open("/sys/class/thermal/thermal_zone0/temp") as f:
             return int(f.read().strip()) / 1000.0
@@ -174,7 +188,6 @@ def post_payload(payload: Dict[str, Any]) -> bool:
                 return True
         except requests.exceptions.RequestException as e:
             log.warning(f"[HTTP RETRY {attempt}] {e}")
-        # backoff ringan
         time.sleep(min(1 * attempt, 5))
     return False
 
@@ -185,7 +198,7 @@ def queue_put(data: Dict[str, Any]) -> None:
     except Full:
         log.warning("[QUEUE] Full, dropping payload")
 
-# ================== Workers ========================
+# ================== Workers (IoT/original) ========================
 def worker_http_sender():
     """Worker HTTP: ambil dari queue → kirim ke server → beri tag ke receiver."""
     global SER_HANDLE
@@ -265,7 +278,7 @@ def worker_serial_reader():
     last_port: Optional[str] = None
 
     while not STOP.is_set():
-        # pastikan ada port
+        # pastikan ada port (skip GPS port)
         port = detect_serial_port() or last_port
         if not port:
             STOP.wait(CFG.serial_detect_interval)
@@ -341,6 +354,153 @@ def worker_serial_reader():
                 SER_HANDLE = None
             STOP.wait(CFG.serial_detect_interval)
 
+# ================== GPS Worker (baru) ==================
+GPS_PATTERN = re.compile(
+    r"\+CGPSINFO:\s*([^,]*),([NS]?),(.*?),([EW]?),(.*?),(.*?),(.*?),(.*?),?$"
+)
+
+def _dm_to_dd(dm_str: str) -> float:
+    dm = float(dm_str)
+    d = int(dm // 100)
+    m = dm - d * 100
+    return d + m / 60.0
+
+def _parse_cgpsinfo(line: str) -> Dict[str, Any]:
+    m = GPS_PATTERN.search(line)
+    if not m:
+        return {"status": "invalid", "raw": line}
+    lat_dm, lat_dir, lon_dm, lon_dir, dmy, hms, alt, spd = [g.strip() for g in m.groups()]
+    if not lat_dm or not lon_dm:
+        return {"status": "nofix"}
+    try:
+        lat = _dm_to_dd(lat_dm)
+        lon = _dm_to_dd(lon_dm)
+        if lat_dir == "S": lat = -lat
+        if lon_dir == "W": lon = -lon
+    except Exception:
+        return {"status": "invalid", "raw": line}
+    return {
+        "status": "fix",
+        "lat": lat,
+        "lon": lon,
+        "alt_m": float(alt) if alt else None,
+        "speed_knots": float(spd) if spd else None,
+    }
+
+def _gps_send_api(payload: Dict[str, Any]) -> None:
+    try:
+        r = requests.post(CFG.gps_api_url, json=payload, timeout=CFG.request_timeout)
+        log.info(f"[GPS API] {r.status_code} {r.text[:160]}")
+    except requests.RequestException as e:
+        log.warning(f"[GPS API ERROR] {e}")
+
+def worker_gps_reader():
+    """GPS Reader dedicated:
+       - Open CFG.gps_port (bukan SER_HANDLE/shared)
+       - Init AT+CFUN=1; AT+CGPS=1
+       - Poll AT+CGPSINFO
+       - POST ke CFG.gps_api_url (lat/lon wajib → skip NO FIX)
+    """
+    port = CFG.gps_port
+    baud = CFG.baud_rate
+
+    def _open() -> Optional[serial.Serial]:
+        try:
+            s = serial.Serial(port, baud, timeout=1)
+            log.info(f"[GPS] Connected {port} @{baud}")
+            return s
+        except Exception as e:
+            log.error(f"[GPS] Cannot open {port}: {e}")
+            return None
+
+    def _send(ser: serial.Serial, cmd: str, wait=0.4) -> str:
+        try:
+            ser.reset_input_buffer()
+            ser.write((cmd + "\r\n").encode("ascii"))
+            ser.flush()
+            time.sleep(wait)
+            return ser.read_all().decode("ascii", errors="ignore")
+        except Exception as e:
+            log.debug(f"[GPS SEND ERROR] {e}")
+            return ""
+
+    ser = None
+    last_status = None
+    last_warn = 0.0
+    WARN_COOLDOWN = 5.0
+
+    while not STOP.is_set():
+        if ser is None:
+            ser = _open()
+            if ser is None:
+                STOP.wait(3.0)
+                continue
+            # init GNSS
+            _send(ser, "AT")
+            _send(ser, "ATE0")
+            _send(ser, "AT+CFUN=1", wait=1.0)
+            _send(ser, "AT+CGPS=1", wait=1.0)
+            log.info("[GPS] GNSS ON (CFUN=1, CGPS=1)")
+
+        try:
+            resp = _send(ser, "AT+CGPSINFO", wait=0.5)
+            for line in resp.splitlines():
+                if "+CGPSINFO:" not in line:
+                    continue
+                st = _parse_cgpsinfo(line)
+
+                if st["status"] == "fix":
+                    if last_status != "fix":
+                        log.info("[GPS] Fix acquired")
+                    last_status = "fix"
+
+                    # knots → km/h
+                    speed_kmh = st["speed_knots"] * 1.852 if st.get("speed_knots") is not None else 0.0
+                    payload = {
+                        "raspi_serial_id": (PI_SERIAL or "UNKNOWN_PI"),
+                        "lat": st["lat"],
+                        "lon": st["lon"],
+                        "speed_kmh": round(speed_kmh, 2),
+                        "altitude_m": st.get("alt_m") or 0,
+                        "sats": 0,  # SIMCom CGPSINFO tidak sediakan jumlah satelit
+                        "raw": line.strip(),
+                    }
+                    _gps_send_api(payload)
+
+                elif st["status"] == "nofix":
+                    now = time.time()
+                    if last_status != "nofix" or (now - last_warn) > WARN_COOLDOWN:
+                        log.warning("[GPS] No fix — waiting for satellites…")
+                        last_warn = now
+                    last_status = "nofix"
+                    # Jangan POST ke /api/gps karena endpoint butuh lat/lon
+
+                else:
+                    log.debug(f"[GPS RAW] {line.strip()}")
+
+        except serial.SerialException as e:
+            log.warning(f"[GPS DISCONNECTED] {e}")
+            try:
+                ser.close()
+            except Exception:
+                pass
+            ser = None
+        except Exception as e:
+            log.error(f"[GPS ERROR] {e}")
+            try:
+                ser.close()
+            except Exception:
+                pass
+            ser = None
+
+        STOP.wait(CFG.gps_poll_interval)
+
+    try:
+        if ser:
+            ser.close()
+    except Exception:
+        pass
+
 # =================== Main/Runner ===================
 def install_signal_handlers():
     def _handle(sig, _frame):
@@ -361,6 +521,8 @@ def main() -> int:
     global PI_SERIAL
     log.info("[START] RasPi sender")
     log.info(f"[CFG] POST → {CFG.vps_api_url}")
+    log.info(f"[CFG] GPS POST → {CFG.gps_api_url}")
+    log.info(f"[CFG] GPS PORT → {CFG.gps_port}")
     PI_SERIAL = get_pi_serial()
     log.info(f"[PI SERIAL] {PI_SERIAL}")
 
@@ -368,11 +530,12 @@ def main() -> int:
 
     # workers
     workers = [
-        start_thread(worker_http_sender,        "http-sender"),
+        start_thread(worker_http_sender,           "http-sender"),
         start_thread(worker_heartbeat_to_receiver, "hb-to-rx"),
-        start_thread(worker_send_pi_serial,     "send-pi-serial"),
-        start_thread(worker_push_sys_metrics,   "push-sys"),
-        start_thread(worker_serial_reader,      "serial-reader"),
+        start_thread(worker_send_pi_serial,        "send-pi-serial"),
+        start_thread(worker_push_sys_metrics,      "push-sys"),
+        start_thread(worker_serial_reader,         "serial-reader"),
+        start_thread(worker_gps_reader,            "gps-reader"),   # NEW
     ]
 
     # tunggu stop
