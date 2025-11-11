@@ -493,35 +493,17 @@ export default function Dashboard() {
         }
 
         // ===== 3) Fallback snapshot terbaru (skip RASPI_SYS) =====
-        if (visible.length === 0 && entries.length > 0) {
-          const latest = entries[0];
-          const latestTs = new Date(latest.received_ts || latest.timestamp || 0).getTime();
-          if (Number.isFinite(latestTs) && (now - latestTs) <= HUB_OFFLINE_MS && Array.isArray(latest.data)) {
-            visible = latest.data
-              .filter(h => {
-                const scidRaw = h?.sensor_controller_id ?? h?.sensor_controller ?? "";
-                const scidUp = String(scidRaw).toUpperCase();
-                return scidUp !== "RASPI_SYS" && h?._type !== "raspi_status";
-              })
-              .map(h => ({
-                sensor_controller_id: h?.sensor_controller_id ?? h?.sensor_controller ?? "UNKNOWN",
-                controller_status: "online",
-                signal_strength: h?.signal_strength ?? -60,
-                battery_level: h?.battery_level ?? 80,
-                latitude: h?.latitude,
-                longitude: h?.longitude,
-                sensor_nodes: [], // tampil "No node connected"
-              }));
-          }
+        if (visible.length === 0) {
+          visible=[]
         }
 
         // ===== 4) Commit =====
         visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
         setControllersLatest(visible);
 
-        if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
-          setSelectedControllerId(null);
-        }
+        // if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
+        //   setSelectedControllerId(null);
+        // }
       } catch (e) {
         setErr(e.message || String(e));
       }
