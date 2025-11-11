@@ -165,6 +165,15 @@ function fmtJaTime(date, locale) {
   return `${get('year')}/${get('month')}/${get('day')}(${get('weekday')}) ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
+function extractTs(rec) {
+  return new Date(
+    rec.timestamp ||
+    rec.received_ts ||
+    rec._received_ts ||
+    rec.ts_iso ||
+    0
+  ).getTime();
+}
 
 
 // ============================ Components ============================
@@ -372,8 +381,9 @@ export default function Dashboard() {
         let raspiTs = 0;
         let raspiTemp = null;
         let raspiUptime = null;
+        
         if (hb) {
-          raspiTs = extractTs(rec)
+          raspiTs = new Date(hb.timestamp || hb.received_ts || hb.ts_iso || 0).getTime();
           raspiTemp = hb.temp_c ?? null;
           raspiUptime = hb.uptime_s ?? null;
         }
@@ -394,16 +404,7 @@ export default function Dashboard() {
 
         const raw = hubJson;
         const entries = Array.isArray(raw) ? raw : (raw.iot || []);
-        
-        function extractTs(rec) {
-          return new Date(
-            rec.timestamp ||
-            rec.received_ts ||
-            rec._received_ts ||
-            rec.ts_iso ||
-            0
-          ).getTime();
-        }
+      
         
         entries.sort((a, b) => extractTs(b) - extractTs(a));
         
@@ -460,12 +461,12 @@ export default function Dashboard() {
             if (now - last > NODE_OFFLINE_MS) continue;
 
             const newest = entries.find(e => {
-              const ts = extractTs(rec)
               const row = Array.isArray(e.data)
                 ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
                 : null;
               return row && row[`port-${i}`];
             });
+            
 
             if (newest) {
               const row = newest.data.find(
