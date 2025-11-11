@@ -332,7 +332,7 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [startTime]);
 
-  // --- Fetch Data dari API ---
+
   useEffect(() => {
     let stop = false;
     let pollId;
@@ -342,11 +342,11 @@ export default function Dashboard() {
         setLoading(true);
         setErr(null);
 
+        // resolve alias → raspi_serial_id
         const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
-
         if (!r.ok) throw new Error("resolve failed");
         const jr = await r.json();
-        const raspiId = jr.raspi_serial_id || jr.raspi || jr;
+        const raspiId = jr.raspi_serial_id;
         if (stop) return;
         setRaspiID(raspiId);
 
@@ -361,113 +361,63 @@ export default function Dashboard() {
 
     async function fetchAndBuild(raspiId) {
       try {
-        const d = await fetch(`${API_BASE}/api/data/${encodeURIComponent(raspiId)}`);
+        // ============================
+        // ✅ 1) Ambil heartbeat RasPi
+        // ============================
+        const hbRes = await fetch(`${API_BASE}/api/status/${raspiId}`);
+        const hb = hbRes.ok ? await hbRes.json() : null;
 
+        let raspiTs = 0;
+        let raspiTemp = null;
+        let raspiUptime = null;
+        if (hb) {
+          raspiTs = new Date(hb.last_seen || 0).getTime();
+          raspiTemp = hb.temp_c ?? null;
+          raspiUptime = hb.uptime_s ?? null;
+        }
 
-        if (!d.ok) throw new Error("get data failed");
-        const jd = await d.json();
-        const entries = jd.iot || [];
+        setRaspiStatus({
+          lastTs: raspiTs,
+          tempC: raspiTemp,
+          uptimeS: raspiUptime,
+        });
 
+        // ===========================================
+        // ✅ 2) Ambil semua HUb data terbaru
+        // Endpoint baru mengganti /api/iot-data
+        // ===========================================
+        const hubRes = await fetch(`${API_BASE}/api/data/${raspiId}`);
+        if (!hubRes.ok) throw new Error("failed hub-data");
+        const hubJson = await hubRes.json();
 
-        // sort terbaru → lama
+        const entries = hubJson.iot || []; // tetap kompatibel bila backend masih memberi format lama
+
+        // sorting
         entries.sort((a, b) => {
-          const ta = new Date(a.received_ts || a.timestamp || 0).getTime();
-          const tb = new Date(b.received_ts || b.timestamp || 0).getTime();
+          const ta = new Date(a.timestamp || 0).getTime();
+          const tb = new Date(b.timestamp || 0).getTime();
           return tb - ta;
         });
 
         const now = Date.now();
 
-        // ===== 0) Tarik RASPI_SYS =====
-        let raspiTs = 0;
-        let raspiTemp = null;
-        let raspiUptime = null;
-
-        for (const rec of entries) {          
-          const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
-          if (!Number.isFinite(ts)) continue;
-
-          let sys = null;
-
-          // 1) Jika ada array data
-          if (Array.isArray(rec.data)) {
-            sys = rec.data.find((h) => {
-              const scid = (h?.sensor_controller_id ?? h?.sensor_controller ?? "")
-                .toString()
-                .toUpperCase();
-              return scid === "RASPI_SYS" || h?._type === "raspi_status";
-            });
-          }
-
-          // console.log("1111 ", sys)
-
-          // 2) ✅ PATCH: Jika tidak ada data[], cek apakah rec sendiri adalah RASPI_SYS
-          if (!sys) {
-            const scid = (rec.sensor_controller_id ?? rec.sensor_controller ?? "")
-              .toString()
-              .toUpperCase();
-            if (scid === "RASPI_SYS" || rec._type === "raspi_status") {
-              sys = rec;
-            }
-          }
-
-
-          console.log("2222 ", ts)
-          
-          if (sys) {
-            raspiTs = ts;
-            
-
-            const candidates = [
-              sys.raspi_temp_c,
-              sys.pi_temp,
-              sys.cpu_temp,
-              sys.soc_temp_c,
-            ];
-            raspiTemp = candidates.find((v) => typeof v === "number") ?? null;
-
-            if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
-            break;
-          }
-
-          if (sys) {
-            raspiTs = ts;
-            // Ambil suhu dari beberapa alias field
-            const candidates = [sys.raspi_temp_c, sys.pi_temp, sys.cpu_temp, sys.soc_temp_c];
-
-            raspiTemp = candidates.find(v => typeof v === "number") ?? null;
-            // Ambil uptime bila ada
-            if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
-            break; // pakai yang terbaru
-          }
-
-        }
-
-        setRaspiStatus({
-          lastTs: raspiTs || 0,
-          tempC: raspiTemp ?? null,
-          uptimeS: (typeof raspiUptime === 'number' ? raspiUptime : null),
-        });
-
-        // ===== 1) Peta last-seen HUB & NODE (skip RASPI_SYS) =====
-        const nodeLastSeen = new Map();  // `${hubId}:P${i}` -> ms
-        const hubMetaLatest = new Map(); // hubId -> meta
-        const hubLastSeen = new Map();   // hubId -> ms
+        // ===== interpretasi hub controllers =====
+        const hubMeta = new Map();
+        const hubSeen = new Map();
+        const nodeSeen = new Map();
 
         for (const rec of entries) {
-          const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
-          if (!Number.isFinite(ts)) continue;
+          const ts = new Date(rec.timestamp || 0).getTime();
           if (!Array.isArray(rec.data)) continue;
 
           for (const hubObj of rec.data) {
-            const scidRaw = hubObj?.sensor_controller_id ?? hubObj?.sensor_controller ?? "UNKNOWN";
-            const scidUp = String(scidRaw).toUpperCase();
-            if (scidUp === "RASPI_SYS" || hubObj?._type === "raspi_status") continue;
+            const scid = hubObj.sensor_controller_id || hubObj.sensor_controller || "UNKNOWN";
+            const up = String(scid).toUpperCase();
+            if (up === "RASPI_SYS" || hubObj._type === "raspi_status") continue;
 
-            // meta hub
-            if (!hubMetaLatest.has(scidRaw)) {
-              hubMetaLatest.set(scidRaw, {
-                sensor_controller_id: scidRaw,
+            if (!hubMeta.has(scid)) {
+              hubMeta.set(scid, {
+                sensor_controller_id: scid,
                 controller_status: "online",
                 signal_strength: hubObj.signal_strength ?? -60,
                 battery_level: hubObj.battery_level ?? 80,
@@ -475,77 +425,75 @@ export default function Dashboard() {
                 longitude: hubObj.longitude,
               });
             }
-            hubLastSeen.set(scidRaw, Math.max(hubLastSeen.get(scidRaw) || 0, ts));
 
-            // tandai node yang hadir
+            hubSeen.set(scid, Math.max(hubSeen.get(scid) || 0, ts));
+
             for (let i = 1; i <= 8; i++) {
               const key = `port-${i}`;
               if (!hubObj[key]) continue;
-              const k = `${scidRaw}:P${i}`;
-              nodeLastSeen.set(k, Math.max(nodeLastSeen.get(k) || 0, ts));
+              const k = `${scid}:P${i}`;
+              nodeSeen.set(k, Math.max(nodeSeen.get(k) || 0, ts));
             }
           }
         }
 
-        // ===== 2) Susun HUB visible =====
+        // ===== Build final controllers =====
         let visible = [];
-        for (const [hubId, meta] of hubMetaLatest.entries()) {
-          const seenAt = hubLastSeen.get(hubId) || 0;
-          if (now - seenAt > HUB_OFFLINE_MS) continue;
+        for (const [hubId, meta] of hubMeta.entries()) {
+          const lastHub = hubSeen.get(hubId) || 0;
+          if (now - lastHub > HUB_OFFLINE_MS) continue;
 
           const nodes = [];
+
           for (let i = 1; i <= 8; i++) {
-            const key = `${hubId}:P${i}`;
-            const last = nodeLastSeen.get(key) || 0;
-            if (now - last <= NODE_OFFLINE_MS) {
-              // ambil nilai terbaru untuk node i
-              let nodeParsed = null;
-              for (const rec of entries) {
-                const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
-                if (now - ts > NODE_OFFLINE_MS) break;
-                const row = Array.isArray(rec.data)
-                  ? rec.data.find(h => (h?.sensor_controller_id ?? h?.sensor_controller ?? "UNKNOWN") === hubId)
-                  : null;
-                if (!row) continue;
-                const raw = row[`port-${i}`];
-                if (!raw) continue;
-                const parsed = parseTypeValue(raw);
-                nodeParsed = {
-                  node_id: `P${i}`,
-                  sensor_type: parsed.type,
-                  value: parsed.value,
-                  unit: parsed.unit,
-                  status: "active",
-                };
-                break;
-              }
-              if (nodeParsed) nodes.push(nodeParsed);
+            const nodeKey = `${hubId}:P${i}`;
+            const last = nodeSeen.get(nodeKey) || 0;
+            if (now - last > NODE_OFFLINE_MS) continue;
+
+            const newest = entries.find(e => {
+              const ts = new Date(e.timestamp || 0).getTime();
+              const row = Array.isArray(e.data)
+                ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
+                : null;
+              return row && row[`port-${i}`];
+            });
+
+            if (newest) {
+              const row = newest.data.find(
+                h => (h.sensor_controller_id ?? h.sensor_controller) === hubId
+              );
+              const raw = row[`port-${i}`];
+              const parsed = parseTypeValue(raw);
+              nodes.push({
+                node_id: `P${i}`,
+                sensor_type: parsed.type,
+                value: parsed.value,
+                unit: parsed.unit,
+                status: "active",
+              });
             }
           }
 
-          visible.push({ ...meta, sensor_nodes: nodes }); // nodes bisa []
+          visible.push({ ...meta, sensor_nodes: nodes });
         }
 
-        // ===== 3) Fallback snapshot terbaru (skip RASPI_SYS) =====
-        if (visible.length === 0) {
-          visible = []
-        }
+        visible.sort((a, b) =>
+          String(a.sensor_controller_id).localeCompare(b.sensor_controller_id)
+        );
 
-        // ===== 4) Commit =====
-        visible.sort((a, b) => String(a.sensor_controller_id).localeCompare(String(b.sensor_controller_id)));
         setControllersLatest(visible);
 
-        // if (selectedControllerId && !visible.find(v => v.sensor_controller_id === selectedControllerId)) {
-        //   setSelectedControllerId(null);
-        // }
       } catch (e) {
         setErr(e.message || String(e));
       }
     }
 
     resolveAndLoad();
-    return () => { stop = true; if (pollId) clearInterval(pollId); };
-  }, [usernameProp, selectedControllerId]);
+    return () => {
+      stop = true;
+      if (pollId) clearInterval(pollId);
+    };
+  }, [usernameProp]);
 
   // --- Kondisi tampilan ---
   if (loading && !raspiID) {
@@ -566,9 +514,9 @@ export default function Dashboard() {
 
   const selectedController = controllersLatest.find(c => c.sensor_controller_id === selectedControllerId);
 
-  
+
   const raspiIsOnline = raspiStatus.lastTs && (Date.now() - raspiStatus.lastTs <= RASPI_ALIVE_MS);
-  console.log("55555 : ",raspiStatus.lastTs);
+  console.log("55555 : ", raspiStatus.lastTs);
 
   const uptimeStr = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
   const tempStr = raspiStatus.tempC != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';

@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Raspberry Pi → Express Server sender (tidy/optimized)
+Raspberry Pi → Express Server sender (clean + new API)
 
 Fitur:
 - Deteksi otomatis port ESP32 Receiver (USB) dan reconnect jika lepas/pasang.
-- Baca baris bertanda "[FOR_PI]{...json...}" dari receiver → antri → POST ke Express.
+- Baca baris bertanda "[FOR_PI]{...json...}" dari receiver → queue → POST ke /api/hub-data.
 - Heartbeat ke receiver tiap N detik: "[SVROK]\n".
-- Kirim serial number Raspberry ke receiver berkala untuk ditampilkan.
-- Push metrik sistem "RASPI_SYS" (suhu CPU, uptime, load, mem) berkala → ke server.
-- Logging rapi + shutdown mulus (Ctrl+C).
-
-Tambahan (GPS):
-- Worker GPS terpisah (dedicated port; default /dev/ttyUSB3)
-- AT+CFUN=1, AT+CGPS=1 pada start
-- Poll AT+CGPSINFO berkala; konversi DM→DD
-- POST realtime ke API GPS baru (CFG.gps_api_url)
-- NO FIX → warning log (tidak POST agar sesuai kontrak server)
+- Kirim serial number Raspberry ke receiver berkala untuk ditampilkan (OLED pihak ESP).
+- Push heartbeat RasPi (suhu CPU, uptime) ke /api/raspi-heartbeat berkala (status online independen ESP).
+- GPS worker terpisah: AT init, polling AT+CGPSINFO, POST ke /api/gps.
+- Graceful shutdown (Ctrl+C / SIGTERM), retry HTTP dengan STOP-aware backoff.
 """
 
 from __future__ import annotations
@@ -38,7 +32,7 @@ import subprocess
 try:
     import psutil  # type: ignore
 except Exception:
-    psutil = None  # graceful fallback tanpa mem metrics
+    psutil = None  # fallback tanpa psutil (mem metrics akan None)
 
 import requests
 import serial  # pyserial
@@ -56,15 +50,22 @@ log = logging.getLogger("raspi-sender")
 # ===================== Config ======================
 @dataclass(frozen=True)
 class Config:
+    # Serial
     baud_rate: int = int(os.environ.get("BAUD_RATE", "115200"))
+    serial_detect_interval: float = float(os.environ.get("SERIAL_DETECT_INTERVAL_S", "3"))
+
+    # HTTP
     request_timeout: int = int(os.environ.get("REQUEST_TIMEOUT_S", "5"))
     http_max_retry: int = int(os.environ.get("HTTP_MAX_RETRY", "3"))
-    serial_detect_interval: float = float(os.environ.get("SERIAL_DETECT_INTERVAL_S", "3"))
-    vps_api_url: str = os.environ.get("VPS_API_URL", "http://192.168.103.174:3000/api/iot-data")
+
+    # NEW API endpoints
+    raspi_hb_url: str = os.environ.get("RASPI_HB_URL", "http://192.168.103.174:3000/api/raspi-heartbeat")
+    hub_data_url: str = os.environ.get("HUB_DATA_URL", "http://192.168.103.174:3000/api/hub-data")
+    gps_api_url: str = os.environ.get("GPS_API_URL", "http://192.168.103.174:3000/api/gps")
 
     # intervals
     heartbeat_to_receiver_sec: float = float(os.environ.get("HB_TO_RX_S", "5"))
-    push_sys_metrics_sec: float = float(os.environ.get("PUSH_SYS_METRICS_S", "5"))
+    push_sys_metrics_sec: float = float(os.environ.get("PUSH_SYS_METRICS_S", "5"))  # frekuensi heartbeat RasPi
     send_pi_serial_sec: float = float(os.environ.get("SEND_PI_SERIAL_S", "30"))
 
     # queue
@@ -73,7 +74,6 @@ class Config:
     # GPS
     gps_port: str = os.environ.get("GPS_PORT", "/dev/ttyUSB3")
     gps_poll_interval: float = float(os.environ.get("GPS_POLL_INTERVAL_S", "2"))
-    gps_api_url: str = os.environ.get("GPS_API_URL", "http://192.168.103.174:3000/api/gps")
 
 CFG = Config()
 
@@ -160,6 +160,7 @@ def get_mem_mb() -> Tuple[Optional[int], Optional[int]]:
         return None, None
 
 def build_raspi_sys() -> Dict[str, Any]:
+    """Bangun paket metrik RasPi (informasi lokal)—untuk logging lokal/diagnostik."""
     temp_c = get_raspi_cpu_temp_c()
     uptime_s = get_uptime_s()
     l1, l5, l15 = get_loadavg()
@@ -173,29 +174,45 @@ def build_raspi_sys() -> Dict[str, Any]:
         "ts_iso": datetime.utcnow().isoformat() + "Z",
     }
 
-def post_payload(payload: Dict[str, Any]) -> bool:
+# ================== HTTP helpers ==================
+def _http_post(url: str, payload: Dict[str, Any], timeout: Optional[int] = None) -> bool:
+    """POST sederhana dengan retry & STOP-aware backoff."""
+    to = timeout if timeout is not None else CFG.request_timeout
     for attempt in range(1, CFG.http_max_retry + 1):
-        if STOP.is_set():  # <- biar langsung kabur saat shutdown
+        if STOP.is_set():
             return False
         try:
-            # Saat shutdown, jangan lama-lama
-            timeout = 1 if STOP.is_set() else CFG.request_timeout
-            
-            print("111111")
-            resp = HTTP_SESSION.post(CFG.vps_api_url, json=payload, timeout=timeout)
-            print("2222")
-            ok = 200 <= resp.status_code < 300
-            log.debug(f"[POST] {resp.status_code} {resp.text[:160]}")
-            if ok:
+            resp = HTTP_SESSION.post(url, json=payload, timeout=to)
+            if 200 <= resp.status_code < 300:
+                log.debug(f"[HTTP OK] {url} {resp.status_code}")
                 return True
+            log.warning(f"[HTTP {resp.status_code}] {url} {resp.text[:160]}")
         except requests.exceptions.RequestException as e:
-            log.warning(f"[HTTP RETRY {attempt}] {e}")
-
-        # ganti time.sleep(...) → STOP.wait(...)
-        backoff = min(1 * attempt, 5)
-        if STOP.wait(backoff):
+            log.warning(f"[HTTP RETRY {attempt}] {url} -> {e}")
+        # linear backoff, STOP-aware
+        if STOP.wait(min(1 * attempt, 5)):
             return False
     return False
+
+def post_heartbeat() -> bool:
+    """Kirim heartbeat RasPi ke /api/raspi-heartbeat (online status)."""
+    payload = {
+        "raspi_serial_id": PI_SERIAL,
+        "temp_c": get_raspi_cpu_temp_c(),
+        "uptime_s": get_uptime_s()
+    }
+    ok = _http_post(CFG.raspi_hb_url, payload)
+    if not ok:
+        log.debug("[HB] Failed")
+    return ok
+
+def send_hub_data(payload: Dict[str, Any]) -> bool:
+    """Kirim paket hub (ESP32) ke /api/hub-data."""
+    return _http_post(CFG.hub_data_url, payload)
+
+def gps_send_api(payload: Dict[str, Any]) -> bool:
+    """Kirim GPS ke /api/gps."""
+    return _http_post(CFG.gps_api_url, payload)
 
 def queue_put(data: Dict[str, Any]) -> None:
     """Masukkan data ke antrian tanpa melempar ke caller."""
@@ -206,34 +223,35 @@ def queue_put(data: Dict[str, Any]) -> None:
 
 # ================== Workers (IoT/original) ========================
 def worker_http_sender():
-    """Worker HTTP: ambil dari queue → kirim ke server → beri tag ke receiver."""
+    """Worker HTTP: ambil dari queue → kirim ke /api/hub-data → beri tag ke receiver."""
     global SER_HANDLE
     while not STOP.is_set():
         try:
             data = DATA_QUEUE.get(timeout=0.5)
         except Empty:
             continue
-        
-          # kalau STOP sudah set ketika dapat item, drop saja agar cepat bubar
+
         if STOP.is_set():
             DATA_QUEUE.task_done()
             break
-        
+
         try:
+            # normalisasi minimal
             if not isinstance(data, dict):
                 data = {"_raw": str(data)}
 
-            # enrich meta
             data.setdefault("_pi_serial", PI_SERIAL or "UNKNOWN_PI")
             data.setdefault("_received_ts", int(time.time()))
 
+            # Payload untuk /api/hub-data
             payload = {
                 "raspi_serial_id": str(PI_SERIAL or "UNKNOWN_PI"),
                 "data": [data],
             }
 
-            ok = post_payload(payload)
+            ok = send_hub_data(payload)
 
+            # Feedback tag ke ESP (opsional untuk status OLED)
             tag = b"[SVROK]\n" if ok else b"[SVRERR]\n"
             with SER_LOCK:
                 if SER_HANDLE and SER_HANDLE.writable():
@@ -249,7 +267,7 @@ def worker_http_sender():
             DATA_QUEUE.task_done()
 
 def worker_heartbeat_to_receiver():
-    """Heartbeat ke receiver agar OLED status server tetap segar."""
+    """Heartbeat ke receiver agar OLED status server tetap segar (link local RPi→ESP)."""
     while not STOP.is_set():
         with SER_LOCK:
             if SER_HANDLE and SER_HANDLE.writable():
@@ -275,15 +293,12 @@ def worker_send_pi_serial():
         STOP.wait(CFG.send_pi_serial_sec)
 
 def worker_push_sys_metrics():
-    """Kirim paket RASPI_SYS ke server berkala, walau tak ada node."""
+    """Kirim heartbeat RasPi ke server berkala (independen ESP/hub)."""
     while not STOP.is_set():
         try:
-            data = build_raspi_sys()
-            data.setdefault("ts_iso", datetime.utcnow().isoformat() + "Z")
-            queue_put(data)
-
+            post_heartbeat()
         except Exception as e:
-            log.warning(f"[SYS METRICS ERROR] {e}")
+            log.warning(f"[HB SEND ERROR] {e}")
         STOP.wait(CFG.push_sys_metrics_sec)
 
 def worker_serial_reader():
@@ -341,7 +356,7 @@ def worker_serial_reader():
                                 if "sensor_controller_id" not in parsed:
                                     parsed["sensor_controller_id"] = parsed.get("id") or parsed.get("type") or "UNKNOWN"
 
-                                # ✅ Always include timestamp
+                                # ✅ Always include timestamp (client-side)
                                 parsed.setdefault("ts_iso", datetime.utcnow().isoformat() + "Z")
 
                                 queue_put(parsed)
@@ -410,13 +425,6 @@ def _parse_cgpsinfo(line: str) -> Dict[str, Any]:
         "alt_m": float(alt) if alt else None,
         "speed_knots": float(spd) if spd else None,
     }
-
-def _gps_send_api(payload: Dict[str, Any]) -> None:
-    try:
-        r = requests.post(CFG.gps_api_url, json=payload, timeout=CFG.request_timeout)
-        log.info(f"[GPS API] {r.status_code} {r.text[:160]}")
-    except requests.RequestException as e:
-        log.warning(f"[GPS API ERROR] {e}")
 
 def worker_gps_reader():
     """GPS Reader dedicated:
@@ -491,7 +499,9 @@ def worker_gps_reader():
                         "timestamp": datetime.utcnow().isoformat() + "Z"
                     }
 
-                    _gps_send_api(payload)
+                    ok = gps_send_api(payload)
+                    if not ok:
+                        log.debug("[GPS API] failed send")
 
                 elif st["status"] == "nofix":
                     now = time.time()
@@ -514,7 +524,8 @@ def worker_gps_reader():
         except Exception as e:
             log.error(f"[GPS ERROR] {e}")
             try:
-                ser.close()
+                if ser:
+                    ser.close()
             except Exception:
                 pass
             ser = None
@@ -536,7 +547,7 @@ def install_signal_handlers():
         try:
             signal.signal(s, _handle)
         except Exception:
-            pass 
+            pass
 
 def start_thread(target, name: str):
     t = threading.Thread(target=target, name=name, daemon=True)
@@ -546,9 +557,10 @@ def start_thread(target, name: str):
 def main() -> int:
     global PI_SERIAL
     log.info("[START] RasPi sender")
-    log.info(f"[CFG] POST → {CFG.vps_api_url}")
-    log.info(f"[CFG] GPS POST → {CFG.gps_api_url}")
-    log.info(f"[CFG] GPS PORT → {CFG.gps_port}")
+    log.info(f"[CFG] Raspi HB  → {CFG.raspi_hb_url}")
+    log.info(f"[CFG] Hub Data  → {CFG.hub_data_url}")
+    log.info(f"[CFG] GPS POST  → {CFG.gps_api_url}")
+    log.info(f"[CFG] GPS PORT  → {CFG.gps_port}")
     PI_SERIAL = get_pi_serial()
     log.info(f"[PI SERIAL] {PI_SERIAL}")
 
@@ -559,9 +571,9 @@ def main() -> int:
         start_thread(worker_http_sender,           "http-sender"),
         start_thread(worker_heartbeat_to_receiver, "hb-to-rx"),
         start_thread(worker_send_pi_serial,        "send-pi-serial"),
-        start_thread(worker_push_sys_metrics,      "push-sys"),
+        start_thread(worker_push_sys_metrics,      "push-sys"),          # NEW: kirim heartbeat RasPi
         start_thread(worker_serial_reader,         "serial-reader"),
-        start_thread(worker_gps_reader,            "gps-reader"),   # NEW
+        start_thread(worker_gps_reader,            "gps-reader"),
     ]
 
     # tunggu stop
