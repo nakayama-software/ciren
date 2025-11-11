@@ -402,139 +402,37 @@ export default function Dashboard() {
         if (!hubRes.ok) throw new Error("failed hub-data");
         const hubJson = await hubRes.json();
 
-        console.log("hubJson : ", hubJson.hubs);
-          //       {
-          // "1": [
-          //   {
-          //     "_id": "6912d7ad4a09b2fc3273f2a5",
-          //     "raspi_serial_id": "10000000c65197f2",
-          //     "hub_id": "1",
-          //     "timestamp": "2025-11-11T06:29:01.300Z",
-          //     "signal_strength": -55,
-          //     "battery_level": 78,
-          //     "latitude": null,
-          //     "longitude": null,
-          //     "nodes": [],
-          //     "raw": {
-          //       "sensor_controller_id": 1,
-          //       "controller_status": "online",
-          //       "battery_level": 78,
-          //       "signal_strength": -55,
-          //       "ports_connected": 0,
-          //       "ts": 566,
-          //       "ts_iso": "2025-11-11T06:29:01.228630Z",
-          //       "_pi_serial": "10000000c65197f2",
-          //       "_received_ts": 1762842541
-          //     },
-          //     "__v": 0
-          //   },
-          //   {
-          //     "_id": "6912d7ab4a09b2fc3273f280",
-          //     "raspi_serial_id": "10000000c65197f2",
-          //     "hub_id": "1",
-          //     "timestamp": "2025-11-11T06:28:59.220Z",
-          //     "signal_strength": -55,
-          //     "battery_level": 78,
-          //     "latitude": null,
-          //     "longitude": null,
-          //     "nodes": [],
-          //     "raw": {
-          //       "sensor_controller_id": 1,
-          //       "controller_status": "online",
-          //       "battery_level": 78,
-          //       "signal_strength": -55,
-          //       "ports_connected": 0,
-          //       "ts": 564,
-          //       "ts_iso": "2025-11-11T06:28:59.238509Z",
-          //       "_pi_serial": "10000000c65197f2",
-          //       "_received_ts": 1762842539
-          //     },
-          //     "__v": 0
-          //   },
-          //   {
-          //     "_id": "6912d7a94a09b2fc3273f262",
-          //     "raspi_serial_id": "10000000c65197f2",
-          //     "hub_id": "1",
-          //     "timestamp": "2025-11-11T06:28:57.212Z",
-          //     "signal_strength": -55,
-          //     "battery_level": 78,
-          //     "latitude": null,
-          //     "longitude": null,
-          //     "nodes": [],
-          //     "raw": {
-          //       "sensor_controller_id": 1,
-          //       "controller_status": "online",
-          //       "battery_level": 78,
-          //       "signal_strength": -55,
-          //       "ports_connected": 0,
-          //       "ts": 562,
-          //       "ts_iso": "2025-11-11T06:28:57.233161Z",
-          //       "_pi_serial": "10000000c65197f2",
-          //       "_received_ts": 1762842537
-          //     },
-          //     "__v": 0
-          //   },
-          //   {
-          //     "_id": "6912d6854a09b2fc3273eb39",
-          //     "raspi_serial_id": "10000000c65197f2",
-          //     "hub_id": "1",
-          //     "timestamp": "2025-11-11T06:24:05.210Z",
-          //     "signal_strength": -55,
-          //     "battery_level": 78,
-          //     "latitude": null,
-          //     "longitude": null,
-          //     "nodes": [],
-          //     "raw": {
-          //       "sensor_controller_id": 1,
-          //       "controller_status": "online",
-          //       "battery_level": 78,
-          //       "signal_strength": -55,
-          //       "ports_connected": 0,
-          //       "ts": 270,
-          //       "ts_iso": "2025-11-11T06:24:05.231447Z",
-          //       "_pi_serial": "10000000c65197f2",
-          //       "_received_ts": 1762842245
-          //     },
-          //     "__v": 0
-          //   },
+        const hubsRaw = hubJson.hubs || {};
+        const now = Date.now();
+        const newControllers = [];
 
-          // ],
-          //   "5": [
-          //     {
-          //       "_id": "6912d7ae4a09b2fc3273f2ac",
-          //       "raspi_serial_id": "10000000c65197f2",
-          //       "hub_id": "5",
-          //       "timestamp": "2025-11-11T06:29:02.146Z",
-          //       "signal_strength": -55,
-          //       "battery_level": 78,
-          //       "latitude": null,
-          //       "longitude": null,
-          //       "nodes": [
-          //         {
-          //           "node_id": "P5",
-          //           "sensor_type": "temperature",
-          //           "value": 10343,
-          //           "unit": "°C",
-          //           "_id": "6912d7ae4a09b2fc3273f2ad"
-          //         }
-          //       ],
-          //       "raw": {
-          //         "sensor_controller_id": 5,
-          //         "controller_status": "online",
-          //         "battery_level": 78,
-          //         "signal_strength": -55,
-          //         "ports_connected": 1,
-          //         "ts": 20,
-          //         "port-5": "Temperature-10343",
-          //         "ts_iso": "2025-11-11T06:29:02.168395Z",
-          //         "_pi_serial": "10000000c65197f2",
-          //         "_received_ts": 1762842542
-          //       },
-          //       "__v": 0
-          //     },
-          //   ]
-          //       }
-        
+        for (const hubId of Object.keys(hubsRaw)) {
+          const records = hubsRaw[hubId];
+          if (!Array.isArray(records) || records.length === 0) continue;
+
+          // ambil record terbaru
+          const latest = records[0];
+          const ts = new Date(latest.timestamp).getTime();
+
+          // status online/offline
+          const online = now - ts <= HUB_OFFLINE_MS;
+
+          newControllers.push({
+            sensor_controller_id: hubId,
+            controller_status: online ? "online" : "offline",
+            battery_level: latest.battery_level ?? 0,
+            signal_strength: latest.signal_strength ?? 0,
+            sensor_nodes: latest.nodes || [],
+            latitude: latest.latitude,
+            longitude: latest.longitude,
+            last_seen: ts,
+          });
+        }
+
+        newControllers.sort((a, b) => Number(a.sensor_controller_id) - Number(b.sensor_controller_id));
+        setControllersLatest(newControllers);
+
+
         gpsDataSet(hubJson.gps)
 
       } catch (e) {
