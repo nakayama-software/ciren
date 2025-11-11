@@ -165,6 +165,17 @@ function fmtJaTime(date, locale) {
   return `${get('year')}/${get('month')}/${get('day')}(${get('weekday')}) ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
+function extractTs(rec) {
+  return new Date(
+    rec.timestamp ||
+    rec.received_ts ||
+    rec._received_ts ||
+    rec.ts_iso ||
+    0
+  ).getTime();
+}
+
+
 // ============================ Components ============================
 function SensorRenderer({ node }) {
   const t = translations.en.sensors;
@@ -371,7 +382,7 @@ export default function Dashboard() {
         let raspiTemp = null;
         let raspiUptime = null;
         if (hb) {
-          raspiTs = new Date(hb.last_seen || 0).getTime();
+          raspiTs = extractTs(rec)
           raspiTemp = hb.temp_c ?? null;
           raspiUptime = hb.uptime_s ?? null;
         }
@@ -390,14 +401,21 @@ export default function Dashboard() {
         if (!hubRes.ok) throw new Error("failed hub-data");
         const hubJson = await hubRes.json();
 
-        const entries = hubJson.iot || []; // tetap kompatibel bila backend masih memberi format lama
-
-        // sorting
-        entries.sort((a, b) => {
-          const ta = new Date(a.timestamp || 0).getTime();
-          const tb = new Date(b.timestamp || 0).getTime();
-          return tb - ta;
-        });
+        const raw = hubJson;
+        const entries = Array.isArray(raw) ? raw : (raw.iot || []);
+        
+        function extractTs(rec) {
+          return new Date(
+            rec.timestamp ||
+            rec.received_ts ||
+            rec._received_ts ||
+            rec.ts_iso ||
+            0
+          ).getTime();
+        }
+        
+        entries.sort((a, b) => extractTs(b) - extractTs(a));
+        
 
         const now = Date.now();
 
@@ -407,7 +425,7 @@ export default function Dashboard() {
         const nodeSeen = new Map();
 
         for (const rec of entries) {
-          const ts = new Date(rec.timestamp || 0).getTime();
+          const ts = extractTs(rec);
           if (!Array.isArray(rec.data)) continue;
 
           for (const hubObj of rec.data) {
@@ -451,7 +469,7 @@ export default function Dashboard() {
             if (now - last > NODE_OFFLINE_MS) continue;
 
             const newest = entries.find(e => {
-              const ts = new Date(e.timestamp || 0).getTime();
+              const ts = extractTs(rec)
               const row = Array.isArray(e.data)
                 ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
                 : null;
