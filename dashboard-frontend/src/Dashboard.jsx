@@ -368,8 +368,6 @@ export default function Dashboard() {
         const jd = await d.json();
         const entries = jd.iot || [];
 
-        console.log("xxxx : ", jd);
-
 
         // sort terbaru → lama
         entries.sort((a, b) => {
@@ -401,6 +399,8 @@ export default function Dashboard() {
             });
           }
 
+          console.log("1111 ", sys)
+
           // 2) ✅ PATCH: Jika tidak ada data[], cek apakah rec sendiri adalah RASPI_SYS
           if (!sys) {
             const scid = (rec.sensor_controller_id ?? rec.sensor_controller ?? "")
@@ -411,6 +411,8 @@ export default function Dashboard() {
             }
           }
 
+
+          console.log("2222 ", sys)
           if (sys) {
             raspiTs = ts;
 
@@ -427,7 +429,10 @@ export default function Dashboard() {
             break;
           }
 
+          console.log("3333 ", sys)
+
           if (sys) {
+            console.log("444 ")
             raspiTs = ts;
             // Ambil suhu dari beberapa alias field
             const candidates = [sys.raspi_temp_c, sys.pi_temp, sys.cpu_temp, sys.soc_temp_c];
@@ -437,6 +442,10 @@ export default function Dashboard() {
             if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
             break; // pakai yang terbaru
           }
+
+
+
+
         }
 
         setRaspiStatus({
