@@ -362,15 +362,15 @@ export default function Dashboard() {
     async function fetchAndBuild(raspiId) {
       try {
         const d = await fetch(`${API_BASE}/api/data/${encodeURIComponent(raspiId)}`);
-        
+
 
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
         const entries = jd.iot || [];
 
-        console.log("xxxx : ",jd);
-        
-      
+        console.log("xxxx : ", jd);
+
+
         // sort terbaru → lama
         entries.sort((a, b) => {
           const ta = new Date(a.received_ts || a.timestamp || 0).getTime();
@@ -388,33 +388,63 @@ export default function Dashboard() {
         for (const rec of entries) {
           const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
           if (!Number.isFinite(ts)) continue;
-          if (!Array.isArray(rec.data)) continue;
-          
 
+          let sys = null;
 
-          // objek Raspi khusus
-          const sys = rec.data.find(h => {
-            const scid = (h?.sensor_controller_id ?? h?.sensor_controller ?? "").toString().toUpperCase();
-            return scid === "RASPI_SYS" || h?._type === "raspi_status";
-          });
+          // 1) Jika ada array data
+          if (Array.isArray(rec.data)) {
+            sys = rec.data.find((h) => {
+              const scid = (h?.sensor_controller_id ?? h?.sensor_controller ?? "")
+                .toString()
+                .toUpperCase();
+              return scid === "RASPI_SYS" || h?._type === "raspi_status";
+            });
+          }
+
+          // 2) ✅ PATCH: Jika tidak ada data[], cek apakah rec sendiri adalah RASPI_SYS
+          if (!sys) {
+            const scid = (rec.sensor_controller_id ?? rec.sensor_controller ?? "")
+              .toString()
+              .toUpperCase();
+            if (scid === "RASPI_SYS" || rec._type === "raspi_status") {
+              sys = rec;
+            }
+          }
+
+          if (sys) {
+            raspiTs = ts;
+
+            const candidates = [
+              sys.raspi_temp_c,
+              sys.pi_temp,
+              sys.cpu_temp,
+              sys.soc_temp_c,
+            ];
+            raspiTemp = candidates.find((v) => typeof v === "number") ?? null;
+
+            if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
+
+            break;
+          }
+
           if (sys) {
             raspiTs = ts;
             // Ambil suhu dari beberapa alias field
             const candidates = [sys.raspi_temp_c, sys.pi_temp, sys.cpu_temp, sys.soc_temp_c];
-            
+
             raspiTemp = candidates.find(v => typeof v === "number") ?? null;
             // Ambil uptime bila ada
             if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
             break; // pakai yang terbaru
           }
         }
-        
+
         setRaspiStatus({
           lastTs: raspiTs || 0,
           tempC: raspiTemp ?? null,
           uptimeS: (typeof raspiUptime === 'number' ? raspiUptime : null),
         });
-        
+
         // ===== 1) Peta last-seen HUB & NODE (skip RASPI_SYS) =====
         const nodeLastSeen = new Map();  // `${hubId}:P${i}` -> ms
         const hubMetaLatest = new Map(); // hubId -> meta
@@ -494,7 +524,7 @@ export default function Dashboard() {
 
         // ===== 3) Fallback snapshot terbaru (skip RASPI_SYS) =====
         if (visible.length === 0) {
-          visible=[]
+          visible = []
         }
 
         // ===== 4) Commit =====
