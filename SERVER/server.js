@@ -235,7 +235,7 @@ app.post('/api/raspi-heartbeat', async (req, res) => {
 // -------------------- Hub Data from ESP32 (NEW) ------------------------
 app.post('/api/hub-data', async (req, res) => {
   try {
-    console.log("1111 : ",req.body);
+    // console.log("1111 : ",req.body);
     
     const raspi_serial_id = String(req.body?.raspi_serial_id || '').trim().toLowerCase();
     if (!raspi_serial_id) return res.status(400).json({ error: 'Missing raspi_serial_id' });
