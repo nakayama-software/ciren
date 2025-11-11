@@ -343,16 +343,15 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [startTime]);
 
-
   useEffect(() => {
     let stop = false;
     let pollId;
-
+  
     async function resolveAndLoad() {
       try {
         setLoading(true);
         setErr(null);
-
+  
         // resolve alias → raspi_serial_id
         const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
         if (!r.ok) throw new Error("resolve failed");
@@ -360,7 +359,7 @@ export default function Dashboard() {
         const raspiId = jr.raspi_serial_id;
         if (stop) return;
         setRaspiID(raspiId);
-
+  
         await fetchAndBuild(raspiId);
         pollId = setInterval(() => fetchAndBuild(raspiId), 1000);
       } catch (e) {
@@ -369,7 +368,7 @@ export default function Dashboard() {
         if (!stop) setLoading(false);
       }
     }
-
+  
     async function fetchAndBuild(raspiId) {
       try {
         // ============================
@@ -377,23 +376,22 @@ export default function Dashboard() {
         // ============================
         const hbRes = await fetch(`${API_BASE}/api/status/${raspiId}`);
         const hb = hbRes.ok ? await hbRes.json() : null;
-
+  
         let raspiTs = 0;
         let raspiTemp = null;
         let raspiUptime = null;
-        
         if (hb) {
-          raspiTs = new Date(hb.timestamp || hb.received_ts || hb.ts_iso || 0).getTime();
+          raspiTs = new Date(hb.last_seen || 0).getTime();
           raspiTemp = hb.temp_c ?? null;
           raspiUptime = hb.uptime_s ?? null;
         }
-
+  
         setRaspiStatus({
           lastTs: raspiTs,
           tempC: raspiTemp,
           uptimeS: raspiUptime,
         });
-
+  
         // ===========================================
         // ✅ 2) Ambil semua HUb data terbaru
         // Endpoint baru mengganti /api/iot-data
@@ -401,30 +399,32 @@ export default function Dashboard() {
         const hubRes = await fetch(`${API_BASE}/api/data/${raspiId}`);
         if (!hubRes.ok) throw new Error("failed hub-data");
         const hubJson = await hubRes.json();
-
-        const raw = hubJson;
-        const entries = Array.isArray(raw) ? raw : (raw.iot || []);
-      
-        
-        entries.sort((a, b) => extractTs(b) - extractTs(a));
-        
-
+  
+        const entries = hubJson.iot || []; // tetap kompatibel bila backend masih memberi format lama
+  
+        // sorting
+        entries.sort((a, b) => {
+          const ta = new Date(a.timestamp || 0).getTime();
+          const tb = new Date(b.timestamp || 0).getTime();
+          return tb - ta;
+        });
+  
         const now = Date.now();
-
+  
         // ===== interpretasi hub controllers =====
         const hubMeta = new Map();
         const hubSeen = new Map();
         const nodeSeen = new Map();
-
+  
         for (const rec of entries) {
-          const ts = extractTs(rec);
+          const ts = new Date(rec.timestamp || 0).getTime();
           if (!Array.isArray(rec.data)) continue;
-
+  
           for (const hubObj of rec.data) {
             const scid = hubObj.sensor_controller_id || hubObj.sensor_controller || "UNKNOWN";
             const up = String(scid).toUpperCase();
             if (up === "RASPI_SYS" || hubObj._type === "raspi_status") continue;
-
+  
             if (!hubMeta.has(scid)) {
               hubMeta.set(scid, {
                 sensor_controller_id: scid,
@@ -435,9 +435,9 @@ export default function Dashboard() {
                 longitude: hubObj.longitude,
               });
             }
-
+  
             hubSeen.set(scid, Math.max(hubSeen.get(scid) || 0, ts));
-
+  
             for (let i = 1; i <= 8; i++) {
               const key = `port-${i}`;
               if (!hubObj[key]) continue;
@@ -446,28 +446,28 @@ export default function Dashboard() {
             }
           }
         }
-
+  
         // ===== Build final controllers =====
         let visible = [];
         for (const [hubId, meta] of hubMeta.entries()) {
           const lastHub = hubSeen.get(hubId) || 0;
           if (now - lastHub > HUB_OFFLINE_MS) continue;
-
+  
           const nodes = [];
-
+  
           for (let i = 1; i <= 8; i++) {
             const nodeKey = `${hubId}:P${i}`;
             const last = nodeSeen.get(nodeKey) || 0;
             if (now - last > NODE_OFFLINE_MS) continue;
-
+  
             const newest = entries.find(e => {
+              const ts = new Date(e.timestamp || 0).getTime();
               const row = Array.isArray(e.data)
                 ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
                 : null;
               return row && row[`port-${i}`];
             });
-            
-
+  
             if (newest) {
               const row = newest.data.find(
                 h => (h.sensor_controller_id ?? h.sensor_controller) === hubId
@@ -483,21 +483,21 @@ export default function Dashboard() {
               });
             }
           }
-
+  
           visible.push({ ...meta, sensor_nodes: nodes });
         }
-
+  
         visible.sort((a, b) =>
           String(a.sensor_controller_id).localeCompare(b.sensor_controller_id)
         );
-
+  
         setControllersLatest(visible);
-
+  
       } catch (e) {
         setErr(e.message || String(e));
       }
     }
-
+  
     resolveAndLoad();
     return () => {
       stop = true;
