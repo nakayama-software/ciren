@@ -174,21 +174,27 @@ def build_raspi_sys() -> Dict[str, Any]:
     }
 
 def post_payload(payload: Dict[str, Any]) -> bool:
-    """Kirim payload ke VPS dengan retry/backoff linier ringan."""
     for attempt in range(1, CFG.http_max_retry + 1):
+        if STOP.is_set():  # <- biar langsung kabur saat shutdown
+            return False
         try:
-            resp = HTTP_SESSION.post(
-                CFG.vps_api_url,
-                json=payload,
-                timeout=CFG.request_timeout,
-            )
+            # Saat shutdown, jangan lama-lama
+            timeout = 1 if STOP.is_set() else CFG.request_timeout
+            
+            print("111111")
+            resp = HTTP_SESSION.post(CFG.vps_api_url, json=payload, timeout=timeout)
+            print("2222")
             ok = 200 <= resp.status_code < 300
             log.debug(f"[POST] {resp.status_code} {resp.text[:160]}")
             if ok:
                 return True
         except requests.exceptions.RequestException as e:
             log.warning(f"[HTTP RETRY {attempt}] {e}")
-        time.sleep(min(1 * attempt, 5))
+
+        # ganti time.sleep(...) → STOP.wait(...)
+        backoff = min(1 * attempt, 5)
+        if STOP.wait(backoff):
+            return False
     return False
 
 def queue_put(data: Dict[str, Any]) -> None:
@@ -207,6 +213,12 @@ def worker_http_sender():
             data = DATA_QUEUE.get(timeout=0.5)
         except Empty:
             continue
+        
+          # kalau STOP sudah set ketika dapat item, drop saja agar cepat bubar
+        if STOP.is_set():
+            DATA_QUEUE.task_done()
+            break
+        
         try:
             if not isinstance(data, dict):
                 data = {"_raw": str(data)}
@@ -524,7 +536,7 @@ def install_signal_handlers():
         try:
             signal.signal(s, _handle)
         except Exception:
-            pass  # pada Windows bisa gagal untuk SIGTERM
+            pass 
 
 def start_thread(target, name: str):
     t = threading.Thread(target=target, name=name, daemon=True)
