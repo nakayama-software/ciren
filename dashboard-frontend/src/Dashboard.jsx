@@ -165,15 +165,6 @@ function fmtJaTime(date, locale) {
   return `${get('year')}/${get('month')}/${get('day')}(${get('weekday')}) ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
-function extractTs(rec) {
-  return new Date(
-    rec.timestamp ||
-    rec.received_ts ||
-    rec._received_ts ||
-    rec.ts_iso ||
-    0
-  ).getTime();
-}
 
 
 // ============================ Components ============================
