@@ -383,7 +383,7 @@ export default function Dashboard() {
         let raspiTemp = null;
         let raspiUptime = null;
 
-        for (const rec of entries) {
+        for (const rec of entries) {          
           const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
           if (!Number.isFinite(ts)) continue;
 
@@ -399,7 +399,7 @@ export default function Dashboard() {
             });
           }
 
-          console.log("1111 ", sys)
+          // console.log("1111 ", sys)
 
           // 2) ✅ PATCH: Jika tidak ada data[], cek apakah rec sendiri adalah RASPI_SYS
           if (!sys) {
@@ -412,9 +412,11 @@ export default function Dashboard() {
           }
 
 
-          console.log("2222 ", sys)
+          console.log("2222 ", ts)
+          
           if (sys) {
             raspiTs = ts;
+            
 
             const candidates = [
               sys.raspi_temp_c,
@@ -425,14 +427,10 @@ export default function Dashboard() {
             raspiTemp = candidates.find((v) => typeof v === "number") ?? null;
 
             if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
-
             break;
           }
 
-          console.log("3333 ", sys)
-
           if (sys) {
-            console.log("444 ")
             raspiTs = ts;
             // Ambil suhu dari beberapa alias field
             const candidates = [sys.raspi_temp_c, sys.pi_temp, sys.cpu_temp, sys.soc_temp_c];
@@ -442,9 +440,6 @@ export default function Dashboard() {
             if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
             break; // pakai yang terbaru
           }
-
-
-
 
         }
 
@@ -570,7 +565,11 @@ export default function Dashboard() {
   }
 
   const selectedController = controllersLatest.find(c => c.sensor_controller_id === selectedControllerId);
+
+  
   const raspiIsOnline = raspiStatus.lastTs && (Date.now() - raspiStatus.lastTs <= RASPI_ALIVE_MS);
+  console.log("55555 : ",raspiStatus.lastTs);
+
   const uptimeStr = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
   const tempStr = raspiStatus.tempC != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
 
