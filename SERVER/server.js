@@ -383,31 +383,32 @@ app.post('/api/gps', async (req, res) => {
   }
 });
 
-// -------------------- MERGED DATA (clean) ------------------------
+// -------------------- MERGED DATA (clean + grouped hubs) ------------------------
 app.get('/api/data/:raspiID', async (req, res) => {
   const raspiID = String(req.params.raspiID).toLowerCase();
   try {
-    // Raspi status
     const status = await RaspiStatus.findOne({ raspi_serial_id: raspiID }).lean();
 
-    // Hubs (ambil yang terbaru; limit agar ringan)
-    const hubs = await HubData.find({ raspi_serial_id: raspiID })
+    // Ambil max 200 hub logs
+    const hubsRaw = await HubData.find({ raspi_serial_id: raspiID })
       .sort({ timestamp: -1 })
-      .limit(100)
+      .limit(200)
       .lean();
 
-    // GPS terbaru
+    // ==== GROUP BY HUB ID ====
+    const hubs = {};
+    for (const h of hubsRaw) {
+      if (!h.hub_id) continue;
+      if (!hubs[h.hub_id]) hubs[h.hub_id] = [];
+      hubs[h.hub_id].push(h);
+    }
+
+    // GPS
     const gpsDoc = await GpsData.findOne({ raspi_serial_id: raspiID })
       .sort({ timestamp: -1 })
       .lean();
 
-    // Legacy iotDocs (opsional, untuk kompatibilitas UI lama)
-    const iotDocs = await SensorData.find({ raspi_serial_id: raspiID })
-      .sort({ timestamp: -1 })
-      .limit(1)
-      .lean();
-
-    return res.json({
+    res.json({
       raspi_serial_id: raspiID,
       raspi_status: status
         ? {
@@ -416,15 +417,45 @@ app.get('/api/data/:raspiID', async (req, res) => {
             uptime_s: status.uptime_s,
           }
         : null,
-      hubs, // array HubData yang sudah normalized
+      hubs,                // ✅ GROUPED HUBS
+      hubs_count: Object.keys(hubs).length,
       gps: gpsDoc || null,
-      // legacy: tetap dikirim kalau UI lama masih butuh
-      // raspiData: iotDocs,
     });
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// -------------------- HUB SPECIFIC ------------------------
+app.get('/api/hub/:raspiID/:hubID', async (req, res) => {
+  const raspiID = String(req.params.raspiID).toLowerCase();
+  const hubID = String(req.params.hubID).trim();
+
+  try {
+    const logs = await HubData.find({
+      raspi_serial_id: raspiID,
+      hub_id: hubID,
+    })
+      .sort({ timestamp: -1 })
+      .limit(200)
+      .lean();
+
+    if (!logs.length)
+      return res.status(404).json({ message: 'Hub not found or empty' });
+
+    res.json({
+      hub_id: hubID,
+      raspi_serial_id: raspiID,
+      latest: logs[0],
+      history: logs,
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // -------------------- Temperature Helper ------------------------
 app.get('/api/temp/:raspiID/latest', async (req, res) => {
@@ -436,6 +467,18 @@ app.get('/api/temp/:raspiID/latest', async (req, res) => {
     raspi_serial_id: raspiID,
     timestamp: doc.timestamp,
     temp_c: extractTempC(doc),
+  });
+});
+
+app.get('/api/hubs/:raspiID', async (req, res) => {
+  const raspiID = String(req.params.raspiID).toLowerCase();
+
+  const hubIDs = await HubData.distinct('hub_id', { raspi_serial_id: raspiID });
+
+  res.json({
+    raspi_serial_id: raspiID,
+    hubs: hubIDs,
+    count: hubIDs.length,
   });
 });
 
