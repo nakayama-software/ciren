@@ -116,35 +116,6 @@ function parseTypeValue(raw) {
   };
 }
 
-function normalizeHubToController(hubObj) {
-  const scidRaw = hubObj.sensor_controller_id ?? hubObj.sensor_controller ?? "UNKNOWN";
-  const scidUp = String(scidRaw).toUpperCase();
-  if (scidUp === "RASPI_SYS" || hubObj._type === "raspi_status") return null;
-
-  const nodes = [];
-  for (let i = 1; i <= 8; i++) {
-    const key = `port-${i}`;
-    if (!hubObj[key]) continue;
-    const parsed = parseTypeValue(hubObj[key]);
-    nodes.push({
-      node_id: `P${i}`,
-      sensor_type: parsed.type,
-      value: parsed.value,
-      unit: parsed.unit,
-      status: "active",
-    });
-  }
-  return {
-    sensor_controller_id: scidRaw,
-    controller_status: "online",
-    signal_strength: hubObj.signal_strength ?? -60,
-    battery_level: hubObj.battery_level ?? 80,
-    sensor_nodes: nodes,
-    latitude: hubObj.latitude,
-    longitude: hubObj.longitude,
-  };
-}
-
 function fmtHHMMSS(totalSeconds) {
   if (!Number.isFinite(totalSeconds)) return "00:00:00";
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -163,16 +134,6 @@ function fmtJaTime(date, locale) {
   }).formatToParts(date);
   const get = (t) => o.find(p => p.type === t)?.value || '';
   return `${get('year')}/${get('month')}/${get('day')}(${get('weekday')}) ${get('hour')}:${get('minute')}:${get('second')}`;
-}
-
-function extractTs(rec) {
-  return new Date(
-    rec.timestamp ||
-    rec.received_ts ||
-    rec._received_ts ||
-    rec.ts_iso ||
-    0
-  ).getTime();
 }
 
 
@@ -201,19 +162,54 @@ function SensorRenderer({ node }) {
   );
 }
 
-function LeafletMap({ controllers }) {
-  const mapDivRef = useRef(null);
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+const LeafletMap = ({ gpsData }) => {
+  // Kalau data belum ada, tampilkan placeholder
+  if (!gpsData) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-500">
+        No GPS data available
+      </div>
+    );
+  }
+
+  // Buat icon marker manual agar tampil di semua bundler
+  const markerIcon = new L.Icon({
+    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+  });
+
   return (
-    <div
-      ref={mapDivRef}
-      className="w-full h-full rounded-xl border border-black/10 bg-slate-100 
-                 dark:border-white/10 dark:bg-slate-900 flex items-center justify-center
-                 text-sm text-gray-500 dark:text-gray-400"
-    >
-      Map visualization ({controllers.length} controllers)
+    <div className="w-full h-full rounded-xl border border-black/10 bg-slate-100 dark:bg-slate-900">
+      <MapContainer
+        center={[gpsData.lat, gpsData.lon]}
+        zoom={15}
+        className="w-full h-full rounded-xl"
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <Marker position={[gpsData.lat, gpsData.lon]} icon={markerIcon}>
+          <Popup>
+            <div>
+              <b>Raspberry ID:</b> {gpsData.raspi_serial_id} <br />
+              <b>Speed:</b> {gpsData.speed_kmh} km/h <br />
+              <b>Altitude:</b> {gpsData.altitude_m} m <br />
+              <b>Timestamp:</b>{" "}
+              {new Date(gpsData.timestamp).toLocaleString("ja-JP")}
+            </div>
+          </Popup>
+        </Marker>
+      </MapContainer>
     </div>
   );
-}
+};
 
 function ControllerDetailView({ controller, onBack, t }) {
   return (
@@ -333,6 +329,8 @@ export default function Dashboard() {
   const [startTime] = useState(new Date());
   const [runningTime, setRunningTime] = useState('00:00:00');
 
+  const [gpsData, gpsDataSet] = useState()
+
   // --- Timer waktu lokal ---
   useEffect(() => {
     const timer = setInterval(() => {
@@ -346,12 +344,12 @@ export default function Dashboard() {
   useEffect(() => {
     let stop = false;
     let pollId;
-  
+
     async function resolveAndLoad() {
       try {
         setLoading(true);
         setErr(null);
-  
+
         // resolve alias → raspi_serial_id
         const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
         if (!r.ok) throw new Error("resolve failed");
@@ -360,7 +358,7 @@ export default function Dashboard() {
 
         if (stop) return;
         setRaspiID(raspiId);
-  
+
         await fetchAndBuild(raspiId);
         pollId = setInterval(() => fetchAndBuild(raspiId), 1000);
       } catch (e) {
@@ -369,7 +367,7 @@ export default function Dashboard() {
         if (!stop) setLoading(false);
       }
     }
-  
+
     async function fetchAndBuild(raspiId) {
       try {
         // ============================
@@ -377,9 +375,9 @@ export default function Dashboard() {
         // ============================
         const hbRes = await fetch(`${API_BASE}/api/status/${raspiId}`);
         const hb = hbRes.ok ? await hbRes.json() : null;
-  
-        console.log("hb : ",hb);
-        
+
+        // console.log("hb : ", hb);
+
 
         let raspiTs = 0;
         let raspiTemp = null;
@@ -389,13 +387,13 @@ export default function Dashboard() {
           raspiTemp = hb.temp_c ?? null;
           raspiUptime = hb.uptime_s ?? null;
         }
-  
+
         setRaspiStatus({
           lastTs: raspiTs,
           tempC: raspiTemp,
           uptimeS: raspiUptime,
         });
-  
+
         // ===========================================
         // ✅ 2) Ambil semua HUb data terbaru
         // Endpoint baru mengganti /api/iot-data
@@ -404,113 +402,15 @@ export default function Dashboard() {
         if (!hubRes.ok) throw new Error("failed hub-data");
         const hubJson = await hubRes.json();
 
-        console.log("hubJson : ",hubJson);
+        console.log("hubJson : ", hubJson);
 
-        const {altitude_m, latitude, longitude} = hubJson.gps        
-        
-        // const raspiTemp = hubJson.raspiData[0].data[0].raspi_temp_c || 0; 
-  
-        // // sorting
-        // raspiData.sort((a, b) => {
-        //   const ta = new Date(a.timestamp || 0).getTime();
-        //   const tb = new Date(b.timestamp || 0).getTime();
-        //   return tb - ta;
-        // });
+        gpsDataSet(hubJson.gps)
 
-        // // console.log("raspiData : ",raspiData);
-  
-        // const now = Date.now();
-  
-        // // ===== interpretasi raspi controllers =====
-        // const hubMeta = new Map();
-        // const hubSeen = new Map();
-        // const nodeSeen = new Map();
-  
-        // for (const rec of raspiData) {
-        //   const ts = new Date(rec.timestamp || 0).getTime();
-        //   if (!Array.isArray(rec.data)) continue;
-  
-        //   for (const hubObj of rec.data) {
-        //     const scid = hubObj.sensor_controller_id || hubObj.sensor_controller || "UNKNOWN";
-        //     const up = String(scid).toUpperCase();
-        //     // console.log("hubObj : ",hubObj);
-            
-        //     if (up === "RASPI_SYS" || hubObj._type === "raspi_status") continue;
-  
-        //     if (!hubMeta.has(scid)) {
-        //       hubMeta.set(scid, {
-        //         sensor_controller_id: scid,
-        //         controller_status: "online",
-        //         signal_strength: hubObj.signal_strength ?? -60,
-        //         battery_level: hubObj.battery_level ?? 80,
-        //         latitude: hubObj.latitude,
-        //         longitude: hubObj.longitude,
-        //       });
-        //     }
-  
-        //     hubSeen.set(scid, Math.max(hubSeen.get(scid) || 0, ts));
-  
-        //     for (let i = 1; i <= 8; i++) {
-        //       const key = `port-${i}`;
-        //       if (!hubObj[key]) continue;
-        //       const k = `${scid}:P${i}`;
-        //       nodeSeen.set(k, Math.max(nodeSeen.get(k) || 0, ts));
-        //     }
-        //   }
-        // }
-        
-
-        // // ===== Build final controllers =====
-        // let visible = [];
-        // for (const [hubId, meta] of hubMeta.raspiData()) {
-        //   const lastHub = hubSeen.get(hubId) || 0;
-        //   if (now - lastHub > HUB_OFFLINE_MS) continue;
-  
-        //   const nodes = [];
-  
-        //   for (let i = 1; i <= 8; i++) {
-        //     const nodeKey = `${hubId}:P${i}`;
-        //     const last = nodeSeen.get(nodeKey) || 0;
-        //     if (now - last > NODE_OFFLINE_MS) continue;
-  
-        //     const newest = raspiData.find(e => {
-        //       const ts = new Date(e.timestamp || 0).getTime();
-        //       const row = Array.isArray(e.data)
-        //         ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
-        //         : null;
-        //       return row && row[`port-${i}`];
-        //     });
-  
-        //     if (newest) {
-        //       const row = newest.data.find(
-        //         h => (h.sensor_controller_id ?? h.sensor_controller) === hubId
-        //       );
-        //       const raw = row[`port-${i}`];
-        //       const parsed = parseTypeValue(raw);
-        //       nodes.push({
-        //         node_id: `P${i}`,
-        //         sensor_type: parsed.type,
-        //         value: parsed.value,
-        //         unit: parsed.unit,
-        //         status: "active",
-        //       });
-        //     }
-        //   }
-  
-        //   visible.push({ ...meta, sensor_nodes: nodes });
-        // }
-  
-        // visible.sort((a, b) =>
-        //   String(a.sensor_controller_id).localeCompare(b.sensor_controller_id)
-        // );
-  
-        // setControllersLatest(visible);
-  
       } catch (e) {
         setErr(e.message || String(e));
       }
     }
-  
+
     resolveAndLoad();
     return () => {
       stop = true;
@@ -616,7 +516,7 @@ export default function Dashboard() {
                     <span>{t.dashboard.controllerPositions}</span>
                   </h2>
                   <div className="w-full h-[calc(100%-2.5rem)]">
-                    <LeafletMap controllers={controllersLatest} />
+                    <LeafletMap gpsData={gpsData} />
                   </div>
                 </div>
 
