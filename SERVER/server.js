@@ -235,6 +235,8 @@ app.post('/api/raspi-heartbeat', async (req, res) => {
 // -------------------- Hub Data from ESP32 (NEW) ------------------------
 app.post('/api/hub-data', async (req, res) => {
   try {
+    console.log("1111 : ",req.body);
+    
     const raspi_serial_id = String(req.body?.raspi_serial_id || '').trim().toLowerCase();
     if (!raspi_serial_id) return res.status(400).json({ error: 'Missing raspi_serial_id' });
 
@@ -297,6 +299,7 @@ app.post('/api/hub-data', async (req, res) => {
 
 // -------------------- IoT Data (LEGACY/compat) ------------------------
 app.post('/api/iot-data', async (req, res) => {
+  // console.log("222 : ",req.body);
   try {
     const { raspi_serial_id, records, timestamp } = normalizePayload(req.body || {});
     if (!raspi_serial_id || !records) return res.status(400).json({ error: 'Invalid IoT data' });
@@ -401,7 +404,7 @@ app.get('/api/data/:raspiID', async (req, res) => {
     // Legacy iotDocs (opsional, untuk kompatibilitas UI lama)
     const iotDocs = await SensorData.find({ raspi_serial_id: raspiID })
       .sort({ timestamp: -1 })
-      .limit(100)
+      .limit(1)
       .lean();
 
     return res.json({
@@ -416,7 +419,7 @@ app.get('/api/data/:raspiID', async (req, res) => {
       hubs, // array HubData yang sudah normalized
       gps: gpsDoc || null,
       // legacy: tetap dikirim kalau UI lama masih butuh
-      iot: iotDocs,
+      // raspiData: iotDocs,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

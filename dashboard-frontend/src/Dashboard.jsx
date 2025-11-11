@@ -357,6 +357,7 @@ export default function Dashboard() {
         if (!r.ok) throw new Error("resolve failed");
         const jr = await r.json();
         const raspiId = jr.raspi_serial_id;
+
         if (stop) return;
         setRaspiID(raspiId);
   
@@ -377,6 +378,9 @@ export default function Dashboard() {
         const hbRes = await fetch(`${API_BASE}/api/status/${raspiId}`);
         const hb = hbRes.ok ? await hbRes.json() : null;
   
+        console.log("hb : ",hb);
+        
+
         let raspiTs = 0;
         let raspiTemp = null;
         let raspiUptime = null;
@@ -399,99 +403,108 @@ export default function Dashboard() {
         const hubRes = await fetch(`${API_BASE}/api/data/${raspiId}`);
         if (!hubRes.ok) throw new Error("failed hub-data");
         const hubJson = await hubRes.json();
+
+        console.log("hubJson : ",hubJson);
+
+        const {altitude_m, latitude, longitude} = hubJson.gps        
+        
+        // const raspiTemp = hubJson.raspiData[0].data[0].raspi_temp_c || 0; 
   
-        const entries = hubJson.iot || []; // tetap kompatibel bila backend masih memberi format lama
+        // // sorting
+        // raspiData.sort((a, b) => {
+        //   const ta = new Date(a.timestamp || 0).getTime();
+        //   const tb = new Date(b.timestamp || 0).getTime();
+        //   return tb - ta;
+        // });
+
+        // // console.log("raspiData : ",raspiData);
   
-        // sorting
-        entries.sort((a, b) => {
-          const ta = new Date(a.timestamp || 0).getTime();
-          const tb = new Date(b.timestamp || 0).getTime();
-          return tb - ta;
-        });
+        // const now = Date.now();
   
-        const now = Date.now();
+        // // ===== interpretasi raspi controllers =====
+        // const hubMeta = new Map();
+        // const hubSeen = new Map();
+        // const nodeSeen = new Map();
   
-        // ===== interpretasi hub controllers =====
-        const hubMeta = new Map();
-        const hubSeen = new Map();
-        const nodeSeen = new Map();
+        // for (const rec of raspiData) {
+        //   const ts = new Date(rec.timestamp || 0).getTime();
+        //   if (!Array.isArray(rec.data)) continue;
   
-        for (const rec of entries) {
-          const ts = new Date(rec.timestamp || 0).getTime();
-          if (!Array.isArray(rec.data)) continue;
+        //   for (const hubObj of rec.data) {
+        //     const scid = hubObj.sensor_controller_id || hubObj.sensor_controller || "UNKNOWN";
+        //     const up = String(scid).toUpperCase();
+        //     // console.log("hubObj : ",hubObj);
+            
+        //     if (up === "RASPI_SYS" || hubObj._type === "raspi_status") continue;
   
-          for (const hubObj of rec.data) {
-            const scid = hubObj.sensor_controller_id || hubObj.sensor_controller || "UNKNOWN";
-            const up = String(scid).toUpperCase();
-            if (up === "RASPI_SYS" || hubObj._type === "raspi_status") continue;
+        //     if (!hubMeta.has(scid)) {
+        //       hubMeta.set(scid, {
+        //         sensor_controller_id: scid,
+        //         controller_status: "online",
+        //         signal_strength: hubObj.signal_strength ?? -60,
+        //         battery_level: hubObj.battery_level ?? 80,
+        //         latitude: hubObj.latitude,
+        //         longitude: hubObj.longitude,
+        //       });
+        //     }
   
-            if (!hubMeta.has(scid)) {
-              hubMeta.set(scid, {
-                sensor_controller_id: scid,
-                controller_status: "online",
-                signal_strength: hubObj.signal_strength ?? -60,
-                battery_level: hubObj.battery_level ?? 80,
-                latitude: hubObj.latitude,
-                longitude: hubObj.longitude,
-              });
-            }
+        //     hubSeen.set(scid, Math.max(hubSeen.get(scid) || 0, ts));
   
-            hubSeen.set(scid, Math.max(hubSeen.get(scid) || 0, ts));
+        //     for (let i = 1; i <= 8; i++) {
+        //       const key = `port-${i}`;
+        //       if (!hubObj[key]) continue;
+        //       const k = `${scid}:P${i}`;
+        //       nodeSeen.set(k, Math.max(nodeSeen.get(k) || 0, ts));
+        //     }
+        //   }
+        // }
+        
+
+        // // ===== Build final controllers =====
+        // let visible = [];
+        // for (const [hubId, meta] of hubMeta.raspiData()) {
+        //   const lastHub = hubSeen.get(hubId) || 0;
+        //   if (now - lastHub > HUB_OFFLINE_MS) continue;
   
-            for (let i = 1; i <= 8; i++) {
-              const key = `port-${i}`;
-              if (!hubObj[key]) continue;
-              const k = `${scid}:P${i}`;
-              nodeSeen.set(k, Math.max(nodeSeen.get(k) || 0, ts));
-            }
-          }
-        }
+        //   const nodes = [];
   
-        // ===== Build final controllers =====
-        let visible = [];
-        for (const [hubId, meta] of hubMeta.entries()) {
-          const lastHub = hubSeen.get(hubId) || 0;
-          if (now - lastHub > HUB_OFFLINE_MS) continue;
+        //   for (let i = 1; i <= 8; i++) {
+        //     const nodeKey = `${hubId}:P${i}`;
+        //     const last = nodeSeen.get(nodeKey) || 0;
+        //     if (now - last > NODE_OFFLINE_MS) continue;
   
-          const nodes = [];
+        //     const newest = raspiData.find(e => {
+        //       const ts = new Date(e.timestamp || 0).getTime();
+        //       const row = Array.isArray(e.data)
+        //         ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
+        //         : null;
+        //       return row && row[`port-${i}`];
+        //     });
   
-          for (let i = 1; i <= 8; i++) {
-            const nodeKey = `${hubId}:P${i}`;
-            const last = nodeSeen.get(nodeKey) || 0;
-            if (now - last > NODE_OFFLINE_MS) continue;
+        //     if (newest) {
+        //       const row = newest.data.find(
+        //         h => (h.sensor_controller_id ?? h.sensor_controller) === hubId
+        //       );
+        //       const raw = row[`port-${i}`];
+        //       const parsed = parseTypeValue(raw);
+        //       nodes.push({
+        //         node_id: `P${i}`,
+        //         sensor_type: parsed.type,
+        //         value: parsed.value,
+        //         unit: parsed.unit,
+        //         status: "active",
+        //       });
+        //     }
+        //   }
   
-            const newest = entries.find(e => {
-              const ts = new Date(e.timestamp || 0).getTime();
-              const row = Array.isArray(e.data)
-                ? e.data.find(h => (h.sensor_controller_id ?? h.sensor_controller) === hubId)
-                : null;
-              return row && row[`port-${i}`];
-            });
+        //   visible.push({ ...meta, sensor_nodes: nodes });
+        // }
   
-            if (newest) {
-              const row = newest.data.find(
-                h => (h.sensor_controller_id ?? h.sensor_controller) === hubId
-              );
-              const raw = row[`port-${i}`];
-              const parsed = parseTypeValue(raw);
-              nodes.push({
-                node_id: `P${i}`,
-                sensor_type: parsed.type,
-                value: parsed.value,
-                unit: parsed.unit,
-                status: "active",
-              });
-            }
-          }
+        // visible.sort((a, b) =>
+        //   String(a.sensor_controller_id).localeCompare(b.sensor_controller_id)
+        // );
   
-          visible.push({ ...meta, sensor_nodes: nodes });
-        }
-  
-        visible.sort((a, b) =>
-          String(a.sensor_controller_id).localeCompare(b.sensor_controller_id)
-        );
-  
-        setControllersLatest(visible);
+        // setControllersLatest(visible);
   
       } catch (e) {
         setErr(e.message || String(e));
