@@ -343,6 +343,7 @@ export default function Dashboard() {
         setErr(null);
 
         const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
+
         if (!r.ok) throw new Error("resolve failed");
         const jr = await r.json();
         const raspiId = jr.raspi_serial_id || jr.raspi || jr;
@@ -361,10 +362,15 @@ export default function Dashboard() {
     async function fetchAndBuild(raspiId) {
       try {
         const d = await fetch(`${API_BASE}/api/data/${encodeURIComponent(raspiId)}`);
+        
+
         if (!d.ok) throw new Error("get data failed");
         const jd = await d.json();
-        const entries = Array.isArray(jd) ? jd : [];
+        const entries = jd.iot || [];
 
+        console.log("xxxx : ",jd);
+        
+      
         // sort terbaru → lama
         entries.sort((a, b) => {
           const ta = new Date(a.received_ts || a.timestamp || 0).getTime();
@@ -383,6 +389,8 @@ export default function Dashboard() {
           const ts = new Date(rec.received_ts || rec.timestamp || 0).getTime();
           if (!Number.isFinite(ts)) continue;
           if (!Array.isArray(rec.data)) continue;
+          
+
 
           // objek Raspi khusus
           const sys = rec.data.find(h => {
@@ -393,19 +401,20 @@ export default function Dashboard() {
             raspiTs = ts;
             // Ambil suhu dari beberapa alias field
             const candidates = [sys.raspi_temp_c, sys.pi_temp, sys.cpu_temp, sys.soc_temp_c];
+            
             raspiTemp = candidates.find(v => typeof v === "number") ?? null;
             // Ambil uptime bila ada
             if (typeof sys.uptime_s === "number") raspiUptime = sys.uptime_s;
             break; // pakai yang terbaru
           }
         }
-
+        
         setRaspiStatus({
           lastTs: raspiTs || 0,
           tempC: raspiTemp ?? null,
           uptimeS: (typeof raspiUptime === 'number' ? raspiUptime : null),
         });
-
+        
         // ===== 1) Peta last-seen HUB & NODE (skip RASPI_SYS) =====
         const nodeLastSeen = new Map();  // `${hubId}:P${i}` -> ms
         const hubMetaLatest = new Map(); // hubId -> meta

@@ -151,6 +151,7 @@ app.post('/api/iot-data', async (req, res) => {
 app.get('/api/data/:raspiID', async (req, res) => {
   const raspiID = String(req.params.raspiID).toLowerCase();
 
+
   try {
     const iotDocs = await SensorData
       .find({ raspi_serial_id: raspiID })
