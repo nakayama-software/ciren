@@ -1,8 +1,23 @@
-import React from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import React, { useEffect, useState } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 
+const GPS_TIMEOUT_MS = 15000; // 15 detik
+
 export default function LeafletMap({ gpsData }) {
+  const [gpsDisconnected, setGpsDisconnected] = useState(false);
+
+  useEffect(() => {
+    if (!gpsData) {
+      setGpsDisconnected(true);
+      return;
+    }
+
+    const ts = new Date(gpsData.timestamp).getTime();
+    const now = Date.now();
+    setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
+  }, [gpsData]);
+
   if (!gpsData) {
     return (
       <div className="w-full h-full flex items-center justify-center text-gray-500">
@@ -19,21 +34,30 @@ export default function LeafletMap({ gpsData }) {
   });
 
   return (
-    <MapContainer
-      center={[gpsData.lat, gpsData.lon]}
-      zoom={15}
-      className="w-full h-full rounded-xl"
-    >
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+    <div className="relative w-full h-full">
+      <MapContainer
+        center={[gpsData.lat, gpsData.lon]}
+        zoom={15}
+        className="w-full h-full rounded-xl"
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-      <Marker position={[gpsData.lat, gpsData.lon]} icon={markerIcon}>
-        <Popup>
-          <b>Raspberry ID:</b> {gpsData.raspi_serial_id} <br />
-          <b>Speed:</b> {gpsData.speed_kmh} km/h <br />
-          <b>Altitude:</b> {gpsData.altitude_m} m <br />
-          <b>Timestamp:</b> {new Date(gpsData.timestamp).toLocaleString("ja-JP")}
-        </Popup>
-      </Marker>
-    </MapContainer>
+        <Marker position={[gpsData.lat, gpsData.lon]} icon={markerIcon}>
+          <Popup>
+            <b>Raspberry ID:</b> {gpsData.raspi_serial_id} <br />
+            <b>Speed:</b> {gpsData.speed_kmh} km/h <br />
+            <b>Altitude:</b> {gpsData.altitude_m} m <br />
+            <b>Timestamp:</b>{" "}
+            {new Date(gpsData.timestamp).toLocaleString("ja-JP")}
+          </Popup>
+        </Marker>
+      </MapContainer>
+
+      {gpsDisconnected && (
+        <div className="absolute bottom-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse">
+          GPS not connected
+        </div>
+      )}
+    </div>
   );
 }
