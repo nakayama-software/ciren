@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 
 const GPS_TIMEOUT_MS = 15000; // 15 detik
@@ -13,9 +13,15 @@ export default function LeafletMap({ gpsData }) {
       return;
     }
 
-    const ts = new Date(gpsData.timestamp).getTime();
-    const now = Date.now();
-    setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
+    const checkConnection = () => {
+      const ts = new Date(gpsData.timestamp).getTime();
+      const now = Date.now();
+      setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
+    };
+
+    checkConnection(); // periksa langsung saat data masuk
+    const timer = setInterval(checkConnection, 1000); // periksa setiap detik
+    return () => clearInterval(timer);
   }, [gpsData]);
 
   if (!gpsData) {
@@ -41,7 +47,6 @@ export default function LeafletMap({ gpsData }) {
         className="w-full h-full rounded-xl"
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-
         <Marker position={[gpsData.lat, gpsData.lon]} icon={markerIcon}>
           <Popup>
             <b>Raspberry ID:</b> {gpsData.raspi_serial_id} <br />
@@ -53,8 +58,9 @@ export default function LeafletMap({ gpsData }) {
         </Marker>
       </MapContainer>
 
+      {/* ✅ Overlay selalu re-render karena berada di luar MapContainer */}
       {gpsDisconnected && (
-        <div className="absolute bottom-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse">
+        <div className="absolute bottom-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse transition-opacity duration-300">
           GPS not connected
         </div>
       )}
