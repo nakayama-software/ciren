@@ -13,6 +13,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || '';
 const HUB_OFFLINE_MS = 12_000;
 const NODE_OFFLINE_MS = 8_000;
 const RASPI_ALIVE_MS = 15_000;
+const MAX_HUB_AGE = 10_000; 
 
 // ============================ Main Component ============================
 export default function Dashboard() {
@@ -125,17 +126,18 @@ export default function Dashboard() {
         for (const hubId of Object.keys(hubsRaw)) {
           const records = hubsRaw[hubId];
           if (!Array.isArray(records) || records.length === 0) continue;
-
-          // ambil record terbaru
+        
           const latest = records[0];
           const ts = new Date(latest.timestamp).getTime();
-
-          // status online/offline
-          const online = now - ts <= HUB_OFFLINE_MS;
-
+        
+          // ✅ skip hub if last seen lebih dari 10 detik
+          if (now - ts > MAX_HUB_AGE) {
+            continue;
+          }
+        
           newControllers.push({
             sensor_controller_id: hubId,
-            controller_status: online ? "online" : "offline",
+            controller_status: "online", // ✅ hanya online yang masuk
             battery_level: latest.battery_level ?? 0,
             signal_strength: latest.signal_strength ?? 0,
             sensor_nodes: latest.nodes || [],
