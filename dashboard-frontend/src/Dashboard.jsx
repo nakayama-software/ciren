@@ -7,6 +7,7 @@ import {
 import { translations } from './utils/translation';
 import { fmtHHMMSS, fmtJaTime } from './utils/helpers';
 import LeafletMap from './components/LeafletMap';
+import ControllerDetailView from './components/ControllerDetailView';
 
 // Konfigurasi dasar
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -50,6 +51,14 @@ export default function Dashboard() {
 
   const [gpsData, gpsDataSet] = useState()
 
+  // console.log("controllersLatest : ", controllersLatest);
+
+  useEffect(() => {
+    if (gpsData) {
+      // console.log("gpsData updated:", gpsData);
+    }
+  }, [gpsData]);
+
   // --- Timer waktu lokal ---
   useEffect(() => {
     const timer = setInterval(() => {
@@ -76,6 +85,9 @@ export default function Dashboard() {
         const raspiId = jr.raspi_serial_id;
 
         if (stop) return;
+
+        console.log(raspiId);
+
         setRaspiID(raspiId);
 
         await fetchAndBuild(raspiId);
@@ -89,38 +101,23 @@ export default function Dashboard() {
 
     async function fetchAndBuild(raspiId) {
       try {
-        // ============================
-        // ✅ 1) Ambil heartbeat RasPi
-        // ============================
-        const hbRes = await fetch(`${API_BASE}/api/status/${raspiId}`);
-        const hb = hbRes.ok ? await hbRes.json() : null;
-
-        // console.log("hb : ", hb);
-
-
-        let raspiTs = 0;
-        let raspiTemp = null;
-        let raspiUptime = null;
-        if (hb) {
-          raspiTs = new Date(hb.last_seen || 0).getTime();
-          raspiTemp = hb.temp_c ?? null;
-          raspiUptime = hb.uptime_s ?? null;
-        }
-
-        setRaspiStatus({
-          lastTs: raspiTs,
-          tempC: raspiTemp,
-          uptimeS: raspiUptime,
-        });
-
         // ===========================================
-        // ✅ 2) Ambil semua HUb data terbaru
-        // Endpoint baru mengganti /api/iot-data
+        // ✅ Satu panggilan saja: /api/data/:raspiID
         // ===========================================
         const hubRes = await fetch(`${API_BASE}/api/data/${raspiId}`);
-        if (!hubRes.ok) throw new Error("failed hub-data");
+        if (!hubRes.ok) throw new Error("failed /api/data");
         const hubJson = await hubRes.json();
 
+        // console.log("hubJson : ", hubJson);
+        
+        // ---- Raspi status dari /api/data
+        const rs = hubJson.raspi_status || null;
+        const lastTs = rs?.last_seen ? new Date(rs.last_seen).getTime() : 0;
+        const tempC = typeof rs?.temp_c === 'number' ? rs.temp_c : null;
+        const uptimeS = typeof rs?.uptime_s === 'number' ? rs.uptime_s : null;
+        setRaspiStatus({ lastTs, tempC, uptimeS });
+
+        // ---- Hubs (grouped) → flatten kartu controller terbaru saja
         const hubsRaw = hubJson.hubs || {};
         const now = Date.now();
         const newControllers = [];
@@ -131,20 +128,13 @@ export default function Dashboard() {
 
           const latest = records[0];
           const ts = new Date(latest.timestamp).getTime();
-
-          // ✅ skip hub if last seen lebih dari 10 detik
-          if (now - ts > MAX_HUB_AGE) {
-            continue;
-          }
+          // skip jika last seen > MAX_HUB_AGE
+          if (now - ts > MAX_HUB_AGE) continue;
 
           newControllers.push({
+            raspi_id: hubJson.raspi_serial_id,
             sensor_controller_id: hubId,
-            controller_status: "online", // ✅ hanya online yang masuk
-            battery_level: latest.battery_level ?? 0,
-            signal_strength: latest.signal_strength ?? 0,
             sensor_nodes: latest.nodes || [],
-            latitude: latest.latitude,
-            longitude: latest.longitude,
             last_seen: ts,
           });
         }
@@ -152,13 +142,17 @@ export default function Dashboard() {
         newControllers.sort((a, b) => Number(a.sensor_controller_id) - Number(b.sensor_controller_id));
         setControllersLatest(newControllers);
 
-        gpsDataSet(hubJson.gps)
+        // ---- GPS
+        const gps = hubJson.gps || null;
+        gpsDataSet(gps);
 
+        // Hindari error saat gps null
         const checkConnection = () => {
-          const ts = new Date(gpsData.timestamp).getTime();
+          const ts = gps?.timestamp ? new Date(gps.timestamp).getTime() : 0;
           const now = Date.now();
-            setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
+          setGpsDisconnected(!gps || (now - ts > GPS_TIMEOUT_MS));
         };
+        checkConnection();
 
       } catch (e) {
         setErr(e.message || String(e));
@@ -171,6 +165,7 @@ export default function Dashboard() {
       if (pollId) clearInterval(pollId);
     };
   }, [usernameProp]);
+
 
   // --- Kondisi tampilan ---
   if (loading && !raspiID) {
@@ -272,9 +267,11 @@ export default function Dashboard() {
                   <div className="w-full h-[calc(100%-2.5rem)]">
                     <LeafletMap gpsData={gpsData} />
                   </div>
-                  <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse transition-opacity duration-300 z-100">
-                    GPS not connected
-                  </div>
+                  {gpsDisconnected && (
+                    <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse transition-opacity duration-300 z-100">
+                      GPS not connected
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-2xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm 

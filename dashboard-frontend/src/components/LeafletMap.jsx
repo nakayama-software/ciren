@@ -6,31 +6,14 @@ const GPS_TIMEOUT_MS = 15000; // 15 detik
 
 export default function LeafletMap({ gpsData }) {
 
-
-  useEffect(() => {
-    if (!gpsData) {
-      setGpsDisconnected(true);
-      return;
-    }
-
-    const checkConnection = () => {
-      const ts = new Date(gpsData.timestamp).getTime();
-      const now = Date.now();
-    //   setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
-    };
-
-    checkConnection(); // periksa langsung saat data masuk
-    const timer = setInterval(checkConnection, 1000); // periksa setiap detik
-    return () => clearInterval(timer);
-  }, [gpsData]);
-
   if (!gpsData) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-gray-500">
-        No GPS data available
+      <div className="flex items-center justify-center h-full text-gray-500">
+        Waiting for GPS data...
       </div>
     );
   }
+  
 
   const markerIcon = new L.Icon({
     iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",

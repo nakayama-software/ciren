@@ -47,7 +47,7 @@ function Register() {
   const [raspiID, setRaspiID] = useState('');
   const [language, setLanguage] = useState('ja');
   const [errorMsg, setErrorMsg] = useState(null);
-  
+
   const [theme, setTheme] = useState(() => {
     const prefersDark = typeof window !== 'undefined'
       && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -77,23 +77,33 @@ function Register() {
     }
 
     try {
-      const res = await fetch('/api/register-alias', {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/register-alias`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, raspi_serial_id: raspiID })
+        body: JSON.stringify({ username, raspi_serial_id: raspiID }),
       });
 
+      // ✅ jika tidak JSON, tangani aman
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        // response kosong atau bukan JSON
+        data = {};
+      }
+
       if (res.ok) {
+        alert(t.alerts.success);
         window.location.href = `/ciren/${username}/dashboard`;
       } else {
-        const err = await res.json();
-        setErrorMsg(`${t.alerts.failed}: ${err.error || t.alerts.genericError}`);
+        setErrorMsg(`${t.alerts.failed}: ${data.error || t.alerts.genericError}`);
       }
     } catch (error) {
       console.error("Registration failed:", error);
       setErrorMsg(t.alerts.connectionError);
     }
   };
+
 
   const LangSwitch = () => (
     <div className="flex items-center gap-2">
@@ -170,7 +180,7 @@ function Register() {
           <div className="w-full max-w-md">
             <div className="rounded-2xl border border-black/10 bg-white/80 p-6 backdrop-blur-sm 
                             dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
-              
+
               {/* Icon & Title */}
               <div className="mb-6 text-center">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full 
@@ -188,8 +198,8 @@ function Register() {
               {/* Form Fields */}
               <div className="space-y-4">
                 <div>
-                  <label 
-                    htmlFor="username" 
+                  <label
+                    htmlFor="username"
                     className="block text-xs text-gray-700 dark:text-gray-300 mb-2"
                   >
                     {t.usernameLabel}
@@ -208,8 +218,8 @@ function Register() {
                 </div>
 
                 <div>
-                  <label 
-                    htmlFor="raspiID" 
+                  <label
+                    htmlFor="raspiID"
                     className="block text-xs text-gray-700 dark:text-gray-300 mb-2"
                   >
                     {t.raspiIdLabel}
@@ -245,7 +255,7 @@ function Register() {
                     {t.registerButton}
                     <ArrowRight className="h-4 w-4" />
                   </button>
-                  
+
                   <button
                     type="button"
                     onClick={() => window.location.href = '/ciren'}
