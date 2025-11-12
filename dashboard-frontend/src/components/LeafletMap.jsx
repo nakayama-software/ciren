@@ -5,7 +5,7 @@ import L from "leaflet";
 const GPS_TIMEOUT_MS = 15000; // 15 detik
 
 export default function LeafletMap({ gpsData }) {
-  const [gpsDisconnected, setGpsDisconnected] = useState(false);
+
 
   useEffect(() => {
     if (!gpsData) {
@@ -16,7 +16,7 @@ export default function LeafletMap({ gpsData }) {
     const checkConnection = () => {
       const ts = new Date(gpsData.timestamp).getTime();
       const now = Date.now();
-      setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
+    //   setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
     };
 
     checkConnection(); // periksa langsung saat data masuk
@@ -44,7 +44,7 @@ export default function LeafletMap({ gpsData }) {
       <MapContainer
         center={[gpsData.lat, gpsData.lon]}
         zoom={15}
-        className="w-full h-full rounded-xl"
+        className="w-full h-full rounded-xl z-2"
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <Marker position={[gpsData.lat, gpsData.lon]} icon={markerIcon}>
@@ -57,13 +57,6 @@ export default function LeafletMap({ gpsData }) {
           </Popup>
         </Marker>
       </MapContainer>
-
-      {/* ✅ Overlay selalu re-render karena berada di luar MapContainer */}
-      {gpsDisconnected && (
-        <div className="absolute bottom-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse transition-opacity duration-300">
-          GPS not connected
-        </div>
-      )}
     </div>
   );
 }

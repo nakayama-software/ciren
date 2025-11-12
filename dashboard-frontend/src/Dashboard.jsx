@@ -13,7 +13,8 @@ const API_BASE = import.meta.env.VITE_API_BASE || '';
 const HUB_OFFLINE_MS = 12_000;
 const NODE_OFFLINE_MS = 8_000;
 const RASPI_ALIVE_MS = 15_000;
-const MAX_HUB_AGE = 10_000; 
+const MAX_HUB_AGE = 10_000;
+const GPS_TIMEOUT_MS = 15000; // 15 detik
 
 // ============================ Main Component ============================
 export default function Dashboard() {
@@ -45,6 +46,7 @@ export default function Dashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [startTime] = useState(new Date());
   const [runningTime, setRunningTime] = useState('00:00:00');
+  const [gpsDisconnected, setGpsDisconnected] = useState(false);
 
   const [gpsData, gpsDataSet] = useState()
 
@@ -126,15 +128,15 @@ export default function Dashboard() {
         for (const hubId of Object.keys(hubsRaw)) {
           const records = hubsRaw[hubId];
           if (!Array.isArray(records) || records.length === 0) continue;
-        
+
           const latest = records[0];
           const ts = new Date(latest.timestamp).getTime();
-        
+
           // ✅ skip hub if last seen lebih dari 10 detik
           if (now - ts > MAX_HUB_AGE) {
             continue;
           }
-        
+
           newControllers.push({
             sensor_controller_id: hubId,
             controller_status: "online", // ✅ hanya online yang masuk
@@ -150,8 +152,13 @@ export default function Dashboard() {
         newControllers.sort((a, b) => Number(a.sensor_controller_id) - Number(b.sensor_controller_id));
         setControllersLatest(newControllers);
 
-
         gpsDataSet(hubJson.gps)
+
+        const checkConnection = () => {
+          const ts = new Date(gpsData.timestamp).getTime();
+          const now = Date.now();
+            setGpsDisconnected(now - ts > GPS_TIMEOUT_MS);
+        };
 
       } catch (e) {
         setErr(e.message || String(e));
@@ -189,9 +196,6 @@ export default function Dashboard() {
 
   const uptimeStr = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
   const tempStr = raspiStatus.tempC != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
-
-  console.log("controllersLatest : ", controllersLatest);
-
 
   // --- UI utama ---
   return (
@@ -260,13 +264,16 @@ export default function Dashboard() {
               {/* Map + Status */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 rounded-2xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm 
-                                dark:border-white/10 dark:bg-slate-800/60 shadow-sm h-[26rem]">
+                                dark:border-white/10 dark:bg-slate-800/60 shadow-sm h-[26rem] relative">
                   <h2 className="text-base font-medium tracking-tight text-slate-900 dark:text-white flex items-center gap-2 mb-3">
                     <MapPin className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
                     <span>{t.dashboard.controllerPositions}</span>
                   </h2>
                   <div className="w-full h-[calc(100%-2.5rem)]">
                     <LeafletMap gpsData={gpsData} />
+                  </div>
+                  <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse transition-opacity duration-300 z-100">
+                    GPS not connected
                   </div>
                 </div>
 
