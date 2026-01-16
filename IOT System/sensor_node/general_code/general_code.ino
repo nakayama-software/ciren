@@ -1,15 +1,9 @@
-<<<<<<< HEAD
 
 const char* DEVICE_ID = "us";  
 
 
 const uint8_t PIN_TRIG = 4;
 const uint8_t PIN_ECHO = 10;
-=======
-// XIAO SAMD21: TX=D6, RX=D7 (Serial1)
-// const char* SensorType = "Ultrasonic";  // ubah per unit atau rakit dari UID
-const char* SensorType = "Temperature";  // ubah per unit atau rakit dari UID
->>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 
 void setup() {
   Serial.begin(115200);
@@ -44,7 +38,6 @@ float readUltrasonicCM() {
 
 void loop() {
   static uint32_t c = 0;
-<<<<<<< HEAD
 
   float jarak = readUltrasonicCM();
 
@@ -63,11 +56,5 @@ void loop() {
     Serial1.println(jarak, 2); // 2 angka desimal
   }
 
-=======
-  Serial1.print(SensorType);
-  Serial1.print("-");
-  Serial1.print("");
-  Serial1.println(c++);
->>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   delay(500);
 }
