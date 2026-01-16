@@ -35,6 +35,7 @@ HardwareSerial U2(2);  // P1 (portId 1)
 HardwareSerial U1(1);  // P2 (portId 2)
 
 // ====== SW UARTs (EspSoftwareSerial @9600) ======
+// ====== SW UARTs (EspSoftwareSerial @9600) ======
 SoftwareSerial U3;  // P3 (portId 3)
 SoftwareSerial U4;  // P4 (portId 4)
 SoftwareSerial U5;  // P5 (portId 5)
@@ -51,6 +52,7 @@ const int RX_P4 = 27;
 const int RX_P5 = 33;
 const int RX_P6 = 34;
 const int RX_P7 = 35;
+const int RX_P8 = 26;
 const int RX_P8 = 26;
 
 <<<<<<< HEAD
@@ -90,6 +92,7 @@ unsigned long lastSendMs = 0;
 #define OLED_ADDR 0x3C
 
 #define BUTTON_NEXT 12
+#define BUTTON_INC 14
 #define BUTTON_INC 14
 
 TwoWire WireOLED = TwoWire(1);
@@ -147,6 +150,7 @@ void loadMAC(uint8_t* mac);
 bool isValidMAC(uint8_t* mac);
 void resetEEPROM();
 int loadSenderID();
+int loadSenderID();
 void saveSenderID(int id);
 
 void drawMainScreen();
@@ -185,6 +189,7 @@ struct SWPort {
 HWPort hwPorts[] = {
   { &U2, &bufP1, "P1", 1 },
   { &U1, &bufP2, "P2", 2 },
+  { &U1, &bufP2, "P2", 2 },
 };
 SWPort swPorts[] = {
   { &U3, &bufP3, "P3", 3 },
@@ -193,13 +198,17 @@ SWPort swPorts[] = {
   { &U6, &bufP6, "P6", 6 },
   { &U7, &bufP7, "P7", 7 },
   { &U8, &bufP8, "P8", 8 },
+  { &U8, &bufP8, "P8", 8 },
 };
 const int HW_PORT_COUNT = sizeof(hwPorts) / sizeof(hwPorts[0]);
 const int SW_PORT_COUNT = sizeof(swPorts) / sizeof(swPorts[0]);
 
 // ======== Helpers ========
+// ======== Helpers ========
 void recalcOnlineCount() {
   int c = 0;
+  for (int i = 0; i < 8; ++i)
+    if (nodeOnline[i]) ++c;
   for (int i = 0; i < 8; ++i)
     if (nodeOnline[i]) ++c;
   onlineCount = c;
@@ -219,6 +228,8 @@ static String normalizeKV(const String& line) {
   }
   String jenis = t.substring(0, dash);
   String value = t.substring(dash + 1);
+  jenis.trim();
+  value.trim();
   jenis.trim();
   value.trim();
   jenis.replace(' ', '_');
@@ -274,10 +285,13 @@ void setup() {
 }
 
 // ========== setup ==========
+// ========== setup ==========
 void setup() {
   Serial.begin(115200);
 
   // HW UART
+  U2.begin(9600, SERIAL_8N1, RX_P1, -1);
+  U1.begin(9600, SERIAL_8N1, RX_P2, -1);
   U2.begin(9600, SERIAL_8N1, RX_P1, -1);
   U1.begin(9600, SERIAL_8N1, RX_P2, -1);
 
@@ -292,6 +306,7 @@ void setup() {
 
   EEPROM.begin(EEPROM_SIZE);
   pinMode(BUTTON_NEXT, INPUT_PULLUP);
+  pinMode(BUTTON_INC, INPUT_PULLUP);
   pinMode(BUTTON_INC, INPUT_PULLUP);
 
   WireOLED.begin(OLED_SDA, OLED_SCL, 400000);
@@ -369,6 +384,7 @@ void setup() {
     addPeer(currentMac);
     senderID = loadSenderID();
     macValid = true;
+
 
     Serial.print("Loaded MAC: ");
     for (int i = 0; i < 6; i++) {
@@ -516,6 +532,7 @@ void initESPNow() {
 // ========== loop ==========
 void loop() {
   // UI MAC entry mode
+  // UI MAC entry mode
   if (!inputConfirmed && !macValid) {
     if (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW) {
       uint8_t mac[6];
@@ -545,6 +562,7 @@ void loop() {
   }
 
   // Toggle page (klik singkat NEXT)
+  // Toggle page (klik singkat NEXT)
   static int prevNext = HIGH;
   static unsigned long nextPressTime = 0;
   int curNext = digitalRead(BUTTON_NEXT);
@@ -561,6 +579,7 @@ void loop() {
   prevNext = curNext;
 
   // Long-press INC -> ganti senderID
+  // Long-press INC -> ganti senderID
   static unsigned long idPressStart = 0;
   if (digitalRead(BUTTON_INC) == LOW) {
     if (idPressStart == 0) idPressStart = millis();
@@ -568,6 +587,7 @@ void loop() {
       senderID = (senderID % maxSenderID) + 1;
       saveSenderID(senderID);
       drawMainScreen();
+      payloadDirty = true;  // kirim JSON dengan ID baru
       payloadDirty = true;  // kirim JSON dengan ID baru
       delay(500);
       idPressStart = 0;
@@ -586,11 +606,59 @@ void loop() {
   }
 
   // Kirim JSON (data/heartbeat)
+  // Kirim JSON (data/heartbeat)
   maybeSendJson();
 
   delay(0);
 }
 
+// ====== Serial polling ======
+bool readLine(Stream& s, String& buf, String& out) {
+  while (s.available()) {
+    char c = (char)s.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      out = buf;
+      buf = "";
+      out.trim();
+      return out.length();
+    }
+    buf += c;
+    if (buf.length() > 200) buf = "";  // guard jika tanpa newline
+  }
+  return false;
+}
+void pollSerials() {
+  String line;
+  // HW
+  for (int i = 0; i < HW_PORT_COUNT; ++i) {
+    if (readLine(*hwPorts[i].port, *hwPorts[i].buffer, line)) {
+      handleLine(hwPorts[i].name, hwPorts[i].portId, line);
+    }
+  }
+  // SW
+  for (int i = 0; i < SW_PORT_COUNT; ++i) {
+    swPorts[i].port->listen();
+    if (readLine(*swPorts[i].port, *swPorts[i].buffer, line)) {
+      handleLine(swPorts[i].name, swPorts[i].portId, line);
+    }
+  }
+}
+
+// ====== Node liveness ======
+void checkNodeTimeouts() {
+  unsigned long now = millis();
+  for (int i = 0; i < 8; ++i) {
+    if (nodeOnline[i] && (now - lastSeenMs[i] > OFFLINE_TIMEOUT_MS)) {
+      nodeOnline[i] = false;
+      statusChanged = true;
+      payloadDirty = true;  // paksa kirim agar port ini hilang dari JSON
+      Serial.printf("Port P%d -> OFFLINE (timeout)\n", i + 1);
+    }
+  }
+}
+
+// ====== ESPNOW ======
 // ====== Serial polling ======
 bool readLine(Stream& s, String& buf, String& out) {
   while (s.available()) {
@@ -666,6 +734,7 @@ void sendToReceiver(const String& msg) {
 
 =======
   if (!macValid) {
+    Serial.println("MAC belum valid - tidak mengirim.");
     Serial.println("MAC belum valid - tidak mengirim.");
     return;
   }
@@ -857,6 +926,7 @@ void maybeSendJson() {
   unsigned long now = millis();
   bool timeToSend = (now - lastSendMs >= SEND_INTERVAL_MS);
   if (!timeToSend && !payloadDirty) return;
+  if (!timeToSend && !payloadDirty) return;
   if (!macValid) return;
 
   if (onlineCount == 0) {
@@ -899,6 +969,8 @@ void hexToBytes(char* str, uint8_t* mac) {
   for (int i = 0; i < 6; i++) {
     char b[3] = { str[i * 2], str[i * 2 + 1], '\0' };
     mac[i] = strtoul(b, NULL, 16);
+    char b[3] = { str[i * 2], str[i * 2 + 1], '\0' };
+    mac[i] = strtoul(b, NULL, 16);
   }
 }
 <<<<<<< HEAD
@@ -938,6 +1010,7 @@ void resetEEPROM() {
 }
 int loadSenderID() {
   int id = EEPROM.read(EEPROM_ID_ADDR);
+  return (id < 1 || id > 9) ? 1 : id;
   return (id < 1 || id > 9) ? 1 : id;
 }
 void saveSenderID(int id) {
@@ -989,6 +1062,7 @@ void drawNodeStatusPage() {
 >>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   for (int r = 0; r < 4; ++r) {
     int idx = r, y = startY + r * rowGap;
+    int idx = r, y = startY + r * rowGap;
     display.setCursor(leftX, y);
     display.print("P");
     display.print(idx + 1);
@@ -997,6 +1071,7 @@ void drawNodeStatusPage() {
   }
 
   for (int r = 0; r < 4; ++r) {
+    int idx = r + 4, y = startY + r * rowGap;
     int idx = r + 4, y = startY + r * rowGap;
     display.setCursor(rightX, y);
     display.print("P");
@@ -1032,6 +1107,9 @@ void printMacFormatted(const char* raw, int cursorIndex) {
     int nibble = cursorIndex;
     int pairIdx = nibble / 2;
     int nibbleInPair = nibble % 2;
+    int nibble = cursorIndex;
+    int pairIdx = nibble / 2;
+    int nibbleInPair = nibble % 2;
     bool topRow = (pairIdx < 3);
 <<<<<<< HEAD
     int charPosInLine = (pairIdx % 3) * 3 + nibbleInPair;
@@ -1053,6 +1131,7 @@ void printMacFormatted(const char* raw, int cursorIndex) {
   display.setCursor(0, y2 + 14);
   display.print("Sender ID: ");
   if (cursorIndex == 12) {
+    int xSID = display.getCursorX(), ySID = y2 + 14;
     int xSID = display.getCursorX(), ySID = y2 + 14;
     char sidBuf[8];
     snprintf(sidBuf, sizeof(sidBuf), "%d", senderID);
@@ -1078,10 +1157,13 @@ void showMACEntry() {
 }
 
 void showMessage(const char* l1, const char* l2) {
+void showMessage(const char* l1, const char* l2) {
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println(l1);
+  display.println(l1);
   display.setCursor(0, 20);
+  display.println(l2);
   display.println(l2);
   if (!g_i2cPollBusy) display.display();
 }
