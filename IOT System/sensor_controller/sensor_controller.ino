@@ -1,3 +1,14 @@
+<<<<<<< HEAD
+=======
+// ESP32_8port_UART_Hub_Heartbeat.ino
+// - 8 port (2 HW UART + 6 SW UART)
+// - Auto liveness per-port (timeout)
+// - ALWAYS send JSON every interval:
+//     * with ports     -> include "port-*" fields
+//     * without ports  -> heartbeat only (no "port-*", ports_connected=0)
+// - JSON meta: sensor_controller_id, controller_status, battery_level, signal_strength, ports_connected, ts
+
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 #include <HardwareSerial.h>
 #include <SoftwareSerial.h>
 #include <WiFi.h>
@@ -7,6 +18,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+<<<<<<< HEAD
 HardwareSerial U2(2);
 HardwareSerial U1(1);
 
@@ -17,6 +29,21 @@ SoftwareSerial U6;
 SoftwareSerial U7;
 SoftwareSerial U8;
 
+=======
+// ====== HW UARTs ======
+HardwareSerial U2(2);  // P1 (portId 1)
+HardwareSerial U1(1);  // P2 (portId 2)
+
+// ====== SW UARTs (EspSoftwareSerial @9600) ======
+SoftwareSerial U3;  // P3 (portId 3)
+SoftwareSerial U4;  // P4 (portId 4)
+SoftwareSerial U5;  // P5 (portId 5)
+SoftwareSerial U6;  // P6 (portId 6)
+SoftwareSerial U7;  // P7 (portId 7)
+SoftwareSerial U8;  // P8 (portId 8)
+
+// Pin mapping (RX only; TX = -1)
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 const int RX_P1 = 16;
 const int RX_P2 = 25;
 const int RX_P3 = 4;
@@ -26,6 +53,7 @@ const int RX_P6 = 34;
 const int RX_P7 = 35;
 const int RX_P8 = 26;
 
+<<<<<<< HEAD
 String bufP1, bufP2, bufP3, bufP4, bufP5, bufP6, bufP7, bufP8;
 
 int senderID = 1;
@@ -33,11 +61,28 @@ const int maxSenderID = 9;
 
 const unsigned long OFFLINE_TIMEOUT_MS = 10000UL;
 const unsigned long SEND_INTERVAL_MS = 2000UL;
+=======
+// Buffers per-port (baris terakhir)
+String bufP1, bufP2, bufP3, bufP4, bufP5, bufP6, bufP7, bufP8;
+
+// ========== GLOBALS ==========
+int senderID = 1;  // identitas hub (1..9 tersimpan di EEPROM)
+const int maxSenderID = 9;
+
+const unsigned long OFFLINE_TIMEOUT_MS = 10000UL;  // node diberi OFFLINE jika >10s tak terlihat
+const unsigned long SEND_INTERVAL_MS = 2000UL;     // kirim JSON setiap 2s (data/heartbeat)
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 unsigned long lastSendMs = 0;
 
 #define EEPROM_SIZE 7
+<<<<<<< HEAD
 #define EEPROM_ID_ADDR 6
 
+=======
+#define EEPROM_ID_ADDR 6  // ID disimpan di byte 6
+
+// ========== OLED / I2C ==========
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_SDA 21
@@ -50,6 +95,10 @@ unsigned long lastSendMs = 0;
 TwoWire WireOLED = TwoWire(1);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &WireOLED, -1);
 
+<<<<<<< HEAD
+=======
+// ===== MAC input UI =====
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 char macStr[13] = "000000000000";
 int cursor = 0;
 bool inputConfirmed = false;
@@ -58,18 +107,35 @@ uint8_t currentMac[6];
 
 volatile bool g_i2cPollBusy = false;
 
+<<<<<<< HEAD
 bool nodeOnline[8] = { false, false, false, false, false, false, false, false };
 unsigned long lastSeenMs[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 String lastPayload[8];
+=======
+// ===== Node tracking (8 ports) =====
+bool nodeOnline[8] = { false, false, false, false, false, false, false, false };
+unsigned long lastSeenMs[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+String lastPayload[8];  // "jenis-value" (tanpa spasi)
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 int onlineCount = 0;
 
 volatile bool statusChanged = false;
+<<<<<<< HEAD
 volatile bool payloadDirty = false;
 
+=======
+volatile bool payloadDirty = false;  // set true jika ada data baru/port berubah
+
+// Pages
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 #define PAGE_MAIN 0
 #define PAGE_NODESTATUS 1
 int displayPage = PAGE_MAIN;
 
+<<<<<<< HEAD
+=======
+// ======= FORWARD DECL =======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 void initESPNow();
 void addPeer(uint8_t* peerMac);
 void sendToReceiver(const String& msg);
@@ -96,16 +162,19 @@ void recalcOnlineCount();
 
 void maybeSendJson();
 
+<<<<<<< HEAD
 String buildDataJsonForPorts(const int* ports, int portCount, int seq, int tot);
 void sendDataJsonAutoSplit();
 
+=======
+// ======== Port descriptors ========
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 struct HWPort {
   HardwareSerial* port;
   String* buffer;
   const char* name;
   uint8_t portId;
 };
-
 struct SWPort {
   SoftwareSerial* port;
   String* buffer;
@@ -117,7 +186,6 @@ HWPort hwPorts[] = {
   { &U2, &bufP1, "P1", 1 },
   { &U1, &bufP2, "P2", 2 },
 };
-
 SWPort swPorts[] = {
   { &U3, &bufP3, "P3", 3 },
   { &U4, &bufP4, "P4", 4 },
@@ -126,16 +194,21 @@ SWPort swPorts[] = {
   { &U7, &bufP7, "P7", 7 },
   { &U8, &bufP8, "P8", 8 },
 };
-
 const int HW_PORT_COUNT = sizeof(hwPorts) / sizeof(hwPorts[0]);
 const int SW_PORT_COUNT = sizeof(swPorts) / sizeof(swPorts[0]);
 
+// ======== Helpers ========
 void recalcOnlineCount() {
   int c = 0;
-  for (int i = 0; i < 8; ++i) if (nodeOnline[i]) ++c;
+  for (int i = 0; i < 8; ++i)
+    if (nodeOnline[i]) ++c;
   onlineCount = c;
 }
 
+<<<<<<< HEAD
+=======
+// Normalisasi: "jenis sensor - value" -> "jenis_sensor-value"
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 static String normalizeKV(const String& line) {
   String t = line;
   t.trim();
@@ -153,6 +226,7 @@ static String normalizeKV(const String& line) {
   return jenis + "-" + value;
 }
 
+<<<<<<< HEAD
 int readBatteryPercent() {
   return 78;
 }
@@ -161,6 +235,19 @@ int readLinkRssi() {
   return -55;
 }
 
+=======
+// Simulasi pembacaan battery dan RSSI link (sesuaikan dengan hardware kamu)
+int readBatteryPercent() {
+  // TODO: ganti dengan pembacaan ADC real
+  return 78;  // dummy
+}
+int readLinkRssi() {
+  // ESPNOW tak selalu punya RSSI; boleh gunakan nilai estimasi/konstan
+  return -55;  // dummy
+}
+
+// Handle satu baris dari port tertentu
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 void handleLine(const char* portName, uint8_t portId, const String& line) {
   String norm = normalizeKV(line);
   Serial.printf("[%s:%d] %s\n", portName, portId, norm.c_str());
@@ -172,6 +259,7 @@ void handleLine(const char* portName, uint8_t portId, const String& line) {
     Serial.printf("Port P%d -> ONLINE\n", portId);
   }
   lastPayload[idx] = norm;
+<<<<<<< HEAD
   payloadDirty = true;
 }
 
@@ -181,6 +269,20 @@ void setup() {
   U2.begin(9600, SERIAL_8N1, RX_P1, -1);
   U1.begin(9600, SERIAL_8N1, RX_P2, -1);
 
+=======
+  payloadDirty = true;  // akan memicu pengiriman pada maybeSendJson()
+}
+
+// ========== setup ==========
+void setup() {
+  Serial.begin(115200);
+
+  // HW UART
+  U2.begin(9600, SERIAL_8N1, RX_P1, -1);
+  U1.begin(9600, SERIAL_8N1, RX_P2, -1);
+
+  // SW UART
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   U3.begin(9600, SWSERIAL_8N1, RX_P3, -1, false, 256);
   U4.begin(9600, SWSERIAL_8N1, RX_P4, -1, false, 256);
   U5.begin(9600, SWSERIAL_8N1, RX_P5, -1, false, 256);
@@ -195,7 +297,12 @@ void setup() {
   WireOLED.begin(OLED_SDA, OLED_SCL, 400000);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("OLED failed");
+<<<<<<< HEAD
     while (1);
+=======
+    while (1)
+      ;
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   }
 
   display.setTextSize(1);
@@ -203,12 +310,24 @@ void setup() {
   display.clearDisplay();
   display.setTextColor(WHITE);
 
+<<<<<<< HEAD
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW Init failed");
     while (1);
   }
 
+=======
+  // WiFi & ESPNOW
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW Init failed");
+    while (1)
+      ;
+  }
+
+  // Opsi: reset EEPROM saat startup (dua tombol ditekan)
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   bool resetPressed = (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW);
   if (resetPressed) {
     delay(800);
@@ -219,7 +338,11 @@ void setup() {
       delay(1500);
     }
   }
+<<<<<<< HEAD
 
+=======
+  // Reset hanya MAC (tahan NEXT)
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   if (digitalRead(BUTTON_NEXT) == LOW) {
     delay(800);
     if (digitalRead(BUTTON_NEXT) == LOW) {
@@ -229,6 +352,10 @@ void setup() {
     }
   }
 
+<<<<<<< HEAD
+=======
+  // Load MAC peer dari EEPROM
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   uint8_t storedMac[6];
   loadMAC(storedMac);
 
@@ -257,6 +384,7 @@ void setup() {
 
   recalcOnlineCount();
   Serial.println("ESP32 8-port UART hub ready.");
+<<<<<<< HEAD
 }
 
 void loop() {
@@ -382,9 +510,142 @@ void initESPNow() {
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW Init failed");
     while (1);
+=======
+}
+
+// ========== loop ==========
+void loop() {
+  // UI MAC entry mode
+  if (!inputConfirmed && !macValid) {
+    if (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW) {
+      uint8_t mac[6];
+      hexToBytes(macStr, mac);
+      memcpy(currentMac, mac, 6);
+      saveMAC(mac, senderID);
+      saveSenderID(senderID);
+      addPeer(mac);
+      macValid = true;
+      inputConfirmed = true;
+      drawMainScreen();
+      delay(800);
+      return;
+    }
+    // cursor/inc
+    if (digitalRead(BUTTON_NEXT) == LOW) {
+      cursor = (cursor + 1) % 13;
+      delay(200);
+    }
+    if (digitalRead(BUTTON_INC) == LOW) {
+      if (cursor < 12) macStr[cursor] = nextHexChar(macStr[cursor]);
+      else if (cursor == 12) { senderID = (senderID % maxSenderID) + 1; }
+      delay(200);
+    }
+    showMACEntry();
+    return;
+  }
+
+  // Toggle page (klik singkat NEXT)
+  static int prevNext = HIGH;
+  static unsigned long nextPressTime = 0;
+  int curNext = digitalRead(BUTTON_NEXT);
+  if (prevNext == HIGH && curNext == LOW) nextPressTime = millis();
+  else if (prevNext == LOW && curNext == HIGH) {
+    unsigned long dur = millis() - nextPressTime;
+    if (dur < 800) {
+      displayPage = (displayPage == PAGE_MAIN) ? PAGE_NODESTATUS : PAGE_MAIN;
+      if (displayPage == PAGE_MAIN) drawMainScreen();
+      else drawNodeStatusPage();
+      delay(120);
+    }
+  }
+  prevNext = curNext;
+
+  // Long-press INC -> ganti senderID
+  static unsigned long idPressStart = 0;
+  if (digitalRead(BUTTON_INC) == LOW) {
+    if (idPressStart == 0) idPressStart = millis();
+    if (millis() - idPressStart > 1000) {
+      senderID = (senderID % maxSenderID) + 1;
+      saveSenderID(senderID);
+      drawMainScreen();
+      payloadDirty = true;  // kirim JSON dengan ID baru
+      delay(500);
+      idPressStart = 0;
+    }
+  } else idPressStart = 0;
+
+  // I/O
+  pollSerials();
+  checkNodeTimeouts();
+
+  if (statusChanged) {
+    recalcOnlineCount();
+    if (displayPage == PAGE_NODESTATUS) drawNodeStatusPage();
+    else drawMainScreen();
+    statusChanged = false;
+  }
+
+  // Kirim JSON (data/heartbeat)
+  maybeSendJson();
+
+  delay(0);
+}
+
+// ====== Serial polling ======
+bool readLine(Stream& s, String& buf, String& out) {
+  while (s.available()) {
+    char c = (char)s.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      out = buf;
+      buf = "";
+      out.trim();
+      return out.length();
+    }
+    buf += c;
+    if (buf.length() > 200) buf = "";  // guard jika tanpa newline
+  }
+  return false;
+}
+void pollSerials() {
+  String line;
+  // HW
+  for (int i = 0; i < HW_PORT_COUNT; ++i) {
+    if (readLine(*hwPorts[i].port, *hwPorts[i].buffer, line)) {
+      handleLine(hwPorts[i].name, hwPorts[i].portId, line);
+    }
+  }
+  // SW
+  for (int i = 0; i < SW_PORT_COUNT; ++i) {
+    swPorts[i].port->listen();
+    if (readLine(*swPorts[i].port, *swPorts[i].buffer, line)) {
+      handleLine(swPorts[i].name, swPorts[i].portId, line);
+    }
   }
 }
 
+// ====== Node liveness ======
+void checkNodeTimeouts() {
+  unsigned long now = millis();
+  for (int i = 0; i < 8; ++i) {
+    if (nodeOnline[i] && (now - lastSeenMs[i] > OFFLINE_TIMEOUT_MS)) {
+      nodeOnline[i] = false;
+      statusChanged = true;
+      payloadDirty = true;  // paksa kirim agar port ini hilang dari JSON
+      Serial.printf("Port P%d -> OFFLINE (timeout)\n", i + 1);
+    }
+  }
+}
+
+// ====== ESPNOW ======
+void initESPNow() {
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW Init failed");
+    while (1)
+      ;
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
+  }
+}
 void addPeer(uint8_t* peerMac) {
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, peerMac, 6);
@@ -394,8 +655,8 @@ void addPeer(uint8_t* peerMac) {
     Serial.println("Add peer failed");
   }
 }
-
 void sendToReceiver(const String& msg) {
+<<<<<<< HEAD
   if (!macValid) return;
 
   if (msg.length() > 240) {
@@ -403,19 +664,37 @@ void sendToReceiver(const String& msg) {
     return;
   }
 
+=======
+  if (!macValid) {
+    Serial.println("MAC belum valid - tidak mengirim.");
+    return;
+  }
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   esp_err_t result = esp_now_send(currentMac, (uint8_t*)msg.c_str(), msg.length());
   Serial.print("Forwarding JSON -> ");
   Serial.print(msg);
   Serial.print(" => ");
+<<<<<<< HEAD
   Serial.printf("len=%d result=%d\n", msg.length(), (int)result);
 }
 
 String buildHeartbeatJson() {
+=======
+  Serial.println(result == ESP_OK ? "✅ OK" : "❌ FAIL");
+}
+
+// ====== JSON builders ======
+String buildHeartbeatJson() {
+  // heartbeat TANPA port-*, ports_connected=0
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   int batt = readBatteryPercent();
   int rssi = readLinkRssi();
   char buf[200];
   unsigned long ts = millis() / 1000;
+<<<<<<< HEAD
 
+=======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   snprintf(buf, sizeof(buf),
            "{\"sensor_controller_id\":%d,"
            "\"controller_status\":\"online\","
@@ -424,15 +703,25 @@ String buildHeartbeatJson() {
            "\"ports_connected\":0,"
            "\"ts\":%lu}",
            senderID, batt, rssi, ts);
+<<<<<<< HEAD
 
+=======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   return String(buf);
 }
 
 String buildDataJson() {
+<<<<<<< HEAD
   int batt = readBatteryPercent();
   int rssi = readLinkRssi();
   String s;
 
+=======
+  // data DENGAN port-* + meta
+  int batt = readBatteryPercent();
+  int rssi = readLinkRssi();
+  String s;
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   s.reserve(256);
   s = "{\"sensor_controller_id\":";
   s += String(senderID);
@@ -449,7 +738,10 @@ String buildDataJson() {
   for (int i = 0; i < 8; ++i) {
     if (!nodeOnline[i]) continue;
     if (lastPayload[i].length() == 0) continue;
+<<<<<<< HEAD
 
+=======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
     s += ",\"port-";
     s += String(i + 1);
     s += "\":\"";
@@ -458,11 +750,15 @@ String buildDataJson() {
     s += v;
     s += "\"";
   }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   s += "}";
   return s;
 }
 
+<<<<<<< HEAD
 String buildDataJsonForPorts(const int* ports, int portCount, int seq, int tot) {
   int batt = readBatteryPercent();
   int rssi = readLinkRssi();
@@ -573,63 +869,86 @@ void maybeSendJson() {
       sendDataJsonAutoSplit();
     }
   }
+=======
+// Kirim selalu tiap interval (data kalau ada port, heartbeat kalau tidak)
+void maybeSendJson() {
+  unsigned long now = millis();
+  bool timeToSend = (now - lastSendMs >= SEND_INTERVAL_MS);
+  if (!timeToSend && !payloadDirty) return;
+  if (!macValid) return;
+
+  String json = (onlineCount > 0) ? buildDataJson() : buildHeartbeatJson();
+  sendToReceiver(json);
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 
   lastSendMs = now;
   payloadDirty = false;
 }
 
+<<<<<<< HEAD
+=======
+// ====== EEPROM utils ======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 char nextHexChar(char c) {
   if (c >= '0' && c < '9') return c + 1;
   if (c == '9') return 'A';
   if (c >= 'A' && c < 'F') return c + 1;
   return '0';
 }
-
 void hexToBytes(char* str, uint8_t* mac) {
   for (int i = 0; i < 6; i++) {
     char b[3] = { str[i * 2], str[i * 2 + 1], '\0' };
     mac[i] = strtoul(b, NULL, 16);
   }
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 void bytesToHex(uint8_t* mac, char* out) {
   for (int i = 0; i < 6; i++) sprintf(out + i * 2, "%02X", mac[i]);
   out[12] = '\0';
 }
-
 void saveMAC(uint8_t* mac, int id) {
   for (int i = 0; i < 6; i++) EEPROM.write(i, mac[i]);
   EEPROM.write(EEPROM_ID_ADDR, id);
   EEPROM.commit();
 }
-
 void loadMAC(uint8_t* mac) {
   for (int i = 0; i < 6; i++) mac[i] = EEPROM.read(i);
 }
-
 bool isValidMAC(uint8_t* mac) {
   bool allFF = true;
+<<<<<<< HEAD
   for (int i = 0; i < 6; i++) {
     if (mac[i] != 0xFF) { allFF = false; break; }
   }
+=======
+  for (int i = 0; i < 6; i++)
+    if (mac[i] != 0xFF) {
+      allFF = false;
+      break;
+    }
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   return !allFF;
 }
-
 void resetEEPROM() {
   for (int i = 0; i < EEPROM_SIZE; i++) EEPROM.write(i, 0xFF);
   EEPROM.commit();
 }
-
 int loadSenderID() {
   int id = EEPROM.read(EEPROM_ID_ADDR);
   return (id < 1 || id > 9) ? 1 : id;
 }
-
 void saveSenderID(int id) {
   EEPROM.write(EEPROM_ID_ADDR, id);
   EEPROM.commit();
 }
 
+<<<<<<< HEAD
+=======
+// ====== OLED UI ======
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 void drawMainScreen() {
   display.clearDisplay();
   display.setTextSize(1);
@@ -661,9 +980,13 @@ void drawNodeStatusPage() {
   display.setTextWrap(false);
   display.setCursor(0, 0);
   display.println("Node Status:");
+<<<<<<< HEAD
 
   const int leftX = 0, rightX = 64, startY = 12, rowGap = 12;
 
+=======
+  const int leftX = 0, rightX = 64, startY = 12, rowGap = 12;
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   for (int r = 0; r < 4; ++r) {
     int idx = r, y = startY + r * rowGap;
     display.setCursor(leftX, y);
@@ -681,17 +1004,25 @@ void drawNodeStatusPage() {
     display.print(": ");
     display.print(nodeOnline[idx] ? "On " : "Off");
   }
-
   if (!g_i2cPollBusy) display.display();
 }
 
+<<<<<<< HEAD
+=======
+// Tampilkan MAC dua baris dengan highlight cursor
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 void printMacFormatted(const char* raw, int cursorIndex) {
   char line1[16], line2[16];
   snprintf(line1, sizeof(line1), "%c%c:%c%c:%c%c", raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]);
   snprintf(line2, sizeof(line2), "%c%c:%c%c:%c%c", raw[6], raw[7], raw[8], raw[9], raw[10], raw[11]);
+<<<<<<< HEAD
 
   const int x0 = 0, y1 = 14, y2 = y1 + 14, charW = 6, charH = 8;
 
+=======
+  const int x0 = 0, y1 = 14, y2 = y1 + 14, charW = 6, charH = 8;
+
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
   display.setCursor(x0, y1);
   display.print(line1);
   display.setCursor(x0, y2);
@@ -702,7 +1033,11 @@ void printMacFormatted(const char* raw, int cursorIndex) {
     int pairIdx = nibble / 2;
     int nibbleInPair = nibble % 2;
     bool topRow = (pairIdx < 3);
+<<<<<<< HEAD
     int charPosInLine = (pairIdx % 3) * 3 + nibbleInPair;
+=======
+    int charPosInLine = (pairIdx % 3) * 3 + nibbleInPair;  // 0..7 (':' di 2 & 5)
+>>>>>>> 953068afb92ea3b82e975e5bb24adca037db264e
 
     int x = x0 + charPosInLine * charW;
     int y = topRow ? y1 : y2;

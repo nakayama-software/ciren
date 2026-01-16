@@ -1,6 +1,9 @@
-// =======================
-// ESP32 Receiver Firmware
-// =======================
+// ESP32_Receiver_ESPNOW_Forwarder.ino
+// - Menerima ESPNOW dari HUB
+// - Hanya forward payload JSON-valid (object) ke Serial dengan prefix [FOR_PI]
+// - OLED: tampil Raspberry ID / MAC sendiri / status Server Online / jumlah devices aktif
+// - Timeout peer 6s (sedikit di atas heartbeat 5s agar tidak balapan)
+
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_now.h>
@@ -8,7 +11,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// OLED config
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -17,74 +19,54 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Device tracking
 #define MAX_DEVICES 50
-#define TIMEOUT_MS 6000  // 6s timeout (sedikit di atas heartbeat 5s agar tidak balapan)
+#define TIMEOUT_MS 6000
 
 struct DeviceEntry {
   uint8_t mac[6];
   unsigned long lastSeen;
 };
-
 DeviceEntry knownDevices[MAX_DEVICES];
 int deviceCount = 0;
 
-// untuk menghindari redraw berlebihan
 int lastDisplayedActiveCount = -1;
+char raspberrySerialStr[18];  // maks 17 + null
+uint8_t selfMac[6];
 
-// Raspberry Pi serial (untuk ditampilkan)
-char raspberrySerialStr[18];   // maks 17 + null
-uint8_t selfMac[6];            // MAC ESP32 ini
-
-// Status server dari heartbeat Pi
 bool serverOnline = false;
 unsigned long serverOnlineUntil = 0;
-const unsigned long SERVER_OK_TTL = 8000; // “Online” hingga 8s sejak heartbeat terakhir
+const unsigned long SERVER_OK_TTL = 8000;
 
-// ────────────────────────────────
-// Utils
 bool isSameMac(const uint8_t* a, const uint8_t* b) {
   return memcmp(a, b, 6) == 0;
 }
-
 int findDeviceIndex(const uint8_t* mac) {
-  for (int i = 0; i < deviceCount; i++) {
+  for (int i = 0; i < deviceCount; i++)
     if (isSameMac(knownDevices[i].mac, mac)) return i;
-  }
   return -1;
 }
-
 void addOrUpdateDevice(const uint8_t* mac) {
-  // Jangan pernah memasukkan diri sendiri
   if (isSameMac(mac, selfMac)) return;
-
   int index = findDeviceIndex(mac);
-  if (index != -1) {
-    knownDevices[index].lastSeen = millis();
-  } else if (deviceCount < MAX_DEVICES) {
+  if (index != -1) knownDevices[index].lastSeen = millis();
+  else if (deviceCount < MAX_DEVICES) {
     memcpy(knownDevices[deviceCount].mac, mac, 6);
     knownDevices[deviceCount].lastSeen = millis();
     deviceCount++;
   }
 }
-
 void removeDevice(int index) {
-  for (int i = index; i < deviceCount - 1; i++) {
-    knownDevices[i] = knownDevices[i + 1];
-  }
+  for (int i = index; i < deviceCount - 1; i++) knownDevices[i] = knownDevices[i + 1];
   deviceCount--;
 }
-
 int countActivePeers() {
   int c = 0;
-  for (int i = 0; i < deviceCount; i++) {
+  for (int i = 0; i < deviceCount; i++)
     if (!isSameMac(knownDevices[i].mac, selfMac)) c++;
-  }
   return c;
 }
 
-// ────────────────────────────────
-// OLED
 unsigned long lastSwitchTime = 0;
-bool showingServerStatus = true;  // toggle tiap 3 detik
+bool showingServerStatus = true;
 
 void drawMacLine(uint8_t mac[6]) {
   for (int i = 0; i < 6; i++) {
@@ -103,19 +85,16 @@ void updateDisplay(bool force = false) {
     display.setTextSize(1);
     display.setTextColor(WHITE);
 
-    // Raspberry Pi Serial Number
     display.setCursor(0, 0);
     display.println("RASPBERRY ID:");
     display.setCursor(0, 12);
     display.println(raspberrySerialStr);
 
-    // MAC address
     display.setCursor(0, 24);
     display.println("MAC address:");
     display.setCursor(0, 36);
     drawMacLine(selfMac);
 
-    // Toggle status vs device count
     if (millis() - lastSwitchTime > 3000) {
       showingServerStatus = !showingServerStatus;
       lastSwitchTime = millis();
@@ -136,10 +115,7 @@ void updateDisplay(bool force = false) {
   }
 }
 
-// ────────────────────────────────
-// ESP-NOW Receive Callback
 void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int len) {
-  // Baca MAC pengirim
   Serial.print("ESP-NOW msg from: ");
   for (int i = 0; i < 6; i++) {
     Serial.printf("%02X", recvInfo->src_addr[i]);
@@ -147,52 +123,46 @@ void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int l
   }
   Serial.println();
 
-  // Salin payload ke buffer char, paksa null-terminated
-  static char jsonBuf[300]; // aman untuk payload JSON pendek
+  static char jsonBuf[300];
   int copyLen = min(len, (int)sizeof(jsonBuf) - 1);
   memcpy(jsonBuf, data, copyLen);
   jsonBuf[copyLen] = '\0';
 
-  // Logging ringkas
   Serial.print("Data: ");
   Serial.println(jsonBuf);
 
-  // Hanya forward kalau kelihatannya JSON object (dimulai '{' dan berakhir '}')
-  // Ini mencegah noise string lain ikut dikirim ke Pi.
   String s = String(jsonBuf);
   s.trim();
   bool looksJsonObject = s.length() >= 2 && s[0] == '{' && s[s.length() - 1] == '}';
 
   if (looksJsonObject) {
+    // forward ke Raspberry (Python bridge membaca baris ini)
     Serial.print("[FOR_PI] ");
-    Serial.println(s); // satu baris JSON valid
+    Serial.println(s);
   } else {
     Serial.println("[WARN] Dropped non-JSON payload");
   }
 
-  // Update daftar device dari ESP-NOW packet
   addOrUpdateDevice(recvInfo->src_addr);
   updateDisplay();
 }
 
-// ────────────────────────────────
-// Setup
 void getSelfMac() {
   esp_wifi_get_mac(WIFI_IF_STA, selfMac);
 }
 
 void setup() {
   Serial.begin(115200);
-  raspberrySerialStr[0] = '\0';  // tampilan awal rapi
+  raspberrySerialStr[0] = '\0';
 
   WiFi.mode(WIFI_STA);
   getSelfMac();
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS)) {
     Serial.println("OLED failed");
-    while (1);
+    while (1)
+      ;
   }
-
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
@@ -204,22 +174,20 @@ void setup() {
     display.clearDisplay();
     display.println("ESP-NOW Init Failed");
     display.display();
-    while (1);
+    while (1)
+      ;
   }
 
   esp_now_register_recv_cb(onDataReceive);
-
   updateDisplay(true);
   Serial.println("Receiver ready. Waiting for data...");
 }
 
-// ────────────────────────────────
-// Loop
 void loop() {
   unsigned long now = millis();
   bool changed = false;
 
-  // Hapus device yang timeout
+  // purge timeout peers
   for (int i = 0; i < deviceCount;) {
     if (now - knownDevices[i].lastSeen > TIMEOUT_MS) {
       Serial.print("[TIMEOUT] Removed: ");
@@ -230,12 +198,10 @@ void loop() {
       Serial.println();
       removeDevice(i);
       changed = true;
-    } else {
-      i++;
-    }
+    } else i++;
   }
 
-  // Baca per baris dari USB Serial: bisa berisi Raspberry ID atau heartbeat tag
+  // Baca heartbeat/ID dari Raspberry (USB serial)
   if (Serial.available()) {
     char lineBuf[64];
     int rlen = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
@@ -246,17 +212,15 @@ void loop() {
       serverOnline = true;
       serverOnlineUntil = millis() + SERVER_OK_TTL;
     } else if (strstr(lineBuf, "[SVRERR]")) {
-      serverOnline = false; // langsung offline saat error eksplisit
+      serverOnline = false;
     } else {
-      // Anggap ini adalah Raspberry ID (batasi panjang 17 char untuk OLED)
+      // anggap ini Raspberry ID singkat (dipotong agar muat OLED)
       strncpy(raspberrySerialStr, lineBuf, sizeof(raspberrySerialStr) - 1);
       raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
     }
-
     updateDisplay();
   }
 
   if (changed) updateDisplay();
-
   delay(100);
 }

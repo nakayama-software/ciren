@@ -1,10 +1,9 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { UserPlus, ArrowRight, ChevronLeft, Globe } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { UserPlus, ArrowRight, ArrowLeft, Globe, Sun, Moon } from 'lucide-react';
 
-// Translations for the component
 const translations = {
   en: {
+    locale: 'en-US',
     title: "Create New Account",
     subtitle: "Register your username and IoT device.",
     usernameLabel: "Username",
@@ -13,7 +12,7 @@ const translations = {
     raspiIdPlaceholder: "Enter your device's serial ID...",
     registerButton: "Register & Login",
     backButton: "Back",
-    footer: "© 2024 CIREN - Connected IoT Real-time Environmental Network",
+    footer: "© 2025 CIREN",
     alerts: {
       fillAllFields: "Please fill in all fields.",
       success: "Registration successful!",
@@ -23,6 +22,7 @@ const translations = {
     }
   },
   ja: {
+    locale: 'ja-JP',
     title: "新規アカウント作成",
     subtitle: "ユーザー名とIoTデバイスを登録します。",
     usernameLabel: "ユーザー名",
@@ -31,7 +31,7 @@ const translations = {
     raspiIdPlaceholder: "デバイスのシリアルIDを入力してください...",
     registerButton: "登録してログイン",
     backButton: "戻る",
-    footer: "© 2024 CIREN - コネクテッドIoTリアルタイム環境ネットワーク",
+    footer: "© 2025 CIREN",
     alerts: {
       fillAllFields: "すべてのフィールドに入力してください。",
       success: "登録に成功しました！",
@@ -42,120 +42,237 @@ const translations = {
   }
 };
 
-
 function Register() {
-  const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [raspiID, setRaspiID] = useState('');
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = useState('ja');
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  // Memoize the translations object to prevent re-renders
+  const [theme, setTheme] = useState(() => {
+    const prefersDark = typeof window !== 'undefined'
+      && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'dark' : 'light';
+  });
+
   const t = useMemo(() => translations[language], [language]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    const html = document.querySelector('html');
+    if (!html) return;
+    if (theme === 'dark') {
+      html.classList.add('dark');
+      html.style.colorScheme = 'dark';
+    } else {
+      html.classList.remove('dark');
+      html.style.colorScheme = 'light';
+    }
+  }, [theme]);
+
+  const handleSubmit = async () => {
+    setErrorMsg(null);
 
     if (!username.trim() || !raspiID.trim()) {
-      alert(t.alerts.fillAllFields);
+      setErrorMsg(t.alerts.fillAllFields);
       return;
     }
 
     try {
-      const res = await fetch('http://localhost:3000/api/register-alias', {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/register-alias`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, raspi_serial_id: raspiID })
+        body: JSON.stringify({ username, raspi_serial_id: raspiID }),
       });
+
+      // ✅ jika tidak JSON, tangani aman
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        // response kosong atau bukan JSON
+        data = {};
+      }
 
       if (res.ok) {
         alert(t.alerts.success);
-        navigate(`/ciren/${username}/dashboard`);
+        window.location.href = `/ciren/${username}/dashboard`;
       } else {
-        const err = await res.json();
-        alert(`${t.alerts.failed}: ${err.error || t.alerts.genericError}`);
+        setErrorMsg(`${t.alerts.failed}: ${data.error || t.alerts.genericError}`);
       }
     } catch (error) {
       console.error("Registration failed:", error);
-      alert(t.alerts.connectionError);
+      setErrorMsg(t.alerts.connectionError);
     }
   };
 
+
+  const LangSwitch = () => (
+    <div className="flex items-center gap-2">
+      <Globe className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+      <div className="inline-flex rounded-md bg-black/5 p-1 border border-black/10 dark:border-white/10 dark:bg-white/10">
+        <button
+          type="button"
+          onClick={() => setLanguage('ja')}
+          className={`px-3 py-1 text-xs rounded ${language === 'ja'
+            ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+            : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'}`}
+        >
+          日本語
+        </button>
+        <button
+          type="button"
+          onClick={() => setLanguage('en')}
+          className={`px-3 py-1 text-xs rounded ${language === 'en'
+            ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+            : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'}`}
+        >
+          EN
+        </button>
+      </div>
+    </div>
+  );
+
+  const ThemeSwitch = () => (
+    <button
+      type="button"
+      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      className="inline-flex items-center gap-2 rounded-md border border-black/10 bg-black/5 px-3 py-1 text-xs text-gray-700 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20"
+    >
+      {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      <span>{theme === 'dark' ? (language === 'ja' ? 'ライト' : 'Light') : (language === 'ja' ? 'ダーク' : 'Dark')}</span>
+    </button>
+  );
+
   return (
-    <div className="h-screen w-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white flex items-center justify-center p-4">
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-cyan-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse delay-1000"></div>
+    <div
+      lang={t.locale}
+      className="fixed inset-0 min-h-screen overflow-hidden font-['Noto_Sans_JP','Hiragino Kaku Gothic ProN','Yu Gothic UI',system-ui,sans-serif]
+                 selection:bg-cyan-300/30 selection:text-white
+                 bg-slate-50 text-slate-900 dark:text-white
+                 dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-950
+                 transition-colors duration-500"
+    >
+      {/* Background gradient */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 -right-24 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="absolute -bottom-32 -left-24 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
       </div>
 
-      <div className="relative z-10 max-w-md w-full">
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl sm:rounded-3xl p-6 sm:p-8 border border-white/20 shadow-2xl">
-          <div className="text-center mb-6 sm:mb-8">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4">
-              <UserPlus className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+      <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col px-5">
+        {/* Header */}
+        <header className="flex items-center justify-between py-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 dark:bg-white/10">
+              <UserPlus className="h-5 w-5" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">{t.title}</h1>
-            <p className="text-gray-300 text-sm sm:text-base">{t.subtitle}</p>
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight">CIREN</h1>
+              <p className="text-xs text-gray-600 dark:text-gray-400">Registration</p>
+            </div>
           </div>
+          <div className="flex items-center gap-3">
+            <ThemeSwitch />
+            <LangSwitch />
+          </div>
+        </header>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2" htmlFor="username">
-                {t.usernameLabel}
-              </label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder={t.usernamePlaceholder}
-                required
-                className="w-full px-4 py-3 bg-white/10 backdrop-blur-lg border border-white/20 rounded-xl text-white placeholder-gray-400 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 focus:outline-none transition-all"
-              />
-            </div>
+        {/* Main */}
+        <main className="flex flex-1 flex-col items-center justify-center">
+          <div className="w-full max-w-md">
+            <div className="rounded-2xl border border-black/10 bg-white/80 p-6 backdrop-blur-sm 
+                            dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
 
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2" htmlFor="raspiID">
-                {t.raspiIdLabel}
-              </label>
-              <input
-                id="raspiID"
-                type="text"
-                value={raspiID}
-                onChange={(e) => setRaspiID(e.target.value)}
-                placeholder={t.raspiIdPlaceholder}
-                required
-                className="w-full px-4 py-3 bg-white/10 backdrop-blur-lg border border-white/20 rounded-xl text-white placeholder-gray-400 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 focus:outline-none transition-all"
-              />
-            </div>
+              {/* Icon & Title */}
+              <div className="mb-6 text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full 
+                                bg-gradient-to-r from-cyan-500 to-indigo-500">
+                  <UserPlus className="h-6 w-6 text-white" />
+                </div>
+                <h2 className="text-lg font-medium tracking-tight text-slate-900 dark:text-white">
+                  {t.title}
+                </h2>
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-400">
+                  {t.subtitle}
+                </p>
+              </div>
 
-            <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 pt-4">
-              <button
-                type="submit"
-                className="flex-1 group bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white py-3 rounded-xl font-semibold transform transition-all duration-300 hover:scale-105 hover:shadow-lg flex items-center justify-center space-x-2"
-              >
-                <span>{t.registerButton}</span>
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => navigate('/ciren')}
-                className="sm:flex-shrink-0 px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-semibold transition-all duration-300 border border-white/20 flex items-center justify-center space-x-2"
-              >
-                <ChevronLeft className="w-5 h-5" />
-                <span>{t.backButton}</span>
-              </button>
+              {/* Form Fields */}
+              <div className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="username"
+                    className="block text-xs text-gray-700 dark:text-gray-300 mb-2"
+                  >
+                    {t.usernameLabel}
+                  </label>
+                  <input
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder={t.usernamePlaceholder}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                    className="w-full rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm text-slate-900 
+                               placeholder-gray-500 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30
+                               dark:border-white/10 dark:bg-slate-900/70 dark:text-white dark:placeholder-gray-400"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="raspiID"
+                    className="block text-xs text-gray-700 dark:text-gray-300 mb-2"
+                  >
+                    {t.raspiIdLabel}
+                  </label>
+                  <input
+                    id="raspiID"
+                    type="text"
+                    value={raspiID}
+                    onChange={(e) => setRaspiID(e.target.value)}
+                    placeholder={t.raspiIdPlaceholder}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                    className="w-full rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm text-slate-900 
+                               placeholder-gray-500 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30
+                               dark:border-white/10 dark:bg-slate-900/70 dark:text-white dark:placeholder-gray-400"
+                  />
+                </div>
+
+                {errorMsg && (
+                  <div
+                    role="alert"
+                    className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200"
+                  >
+                    {errorMsg}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus:ring-2 focus:ring-cyan-400 dark:bg-white dark:text-slate-900 dark:hover:bg-gray-100"
+                  >
+                    {t.registerButton}
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.location.href = '/ciren'}
+                    className="inline-flex items-center justify-center rounded-lg border border-black/10 bg-transparent px-3 py-2 text-sm font-medium text-slate-900 hover:bg-black/5 focus:ring-2 focus:ring-cyan-400 dark:border-white/10 dark:text-white dark:hover:bg-white/10"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
             </div>
-          </form>
-        </div>
-         <div className="text-center mt-6 text-gray-500 text-sm">
-            <div className="mb-4 flex items-center justify-center space-x-4">
-                <Globe className="w-5 h-5 text-gray-400" />
-                <button onClick={() => setLanguage('en')} className={`px-3 py-1 text-xs rounded-md transition-colors ${language === 'en' ? 'bg-cyan-500 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>EN</button>
-                <button onClick={() => setLanguage('ja')} className={`px-3 py-1 text-xs rounded-md transition-colors ${language === 'ja' ? 'bg-cyan-500 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>JP</button>
-            </div>
-            <p>{t.footer}</p>
-        </div>
+          </div>
+        </main>
+
+        {/* Footer */}
+        <footer className="py-6 text-center text-xs text-gray-600 dark:text-gray-500">
+          {t.footer}
+        </footer>
       </div>
     </div>
   );
