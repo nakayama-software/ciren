@@ -115,10 +115,10 @@ void updateDisplay(bool force = false) {
   }
 }
 
-void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int len) {
+void onDataReceive(const uint8_t* mac_addr, const uint8_t* data, int len) {
   Serial.print("ESP-NOW msg from: ");
   for (int i = 0; i < 6; i++) {
-    Serial.printf("%02X", recvInfo->src_addr[i]);
+    Serial.printf("%02X", mac_addr[i]);
     if (i < 5) Serial.print(":");
   }
   Serial.println();
@@ -136,16 +136,16 @@ void onDataReceive(const esp_now_recv_info* recvInfo, const uint8_t* data, int l
   bool looksJsonObject = s.length() >= 2 && s[0] == '{' && s[s.length() - 1] == '}';
 
   if (looksJsonObject) {
-    // forward ke Raspberry (Python bridge membaca baris ini)
     Serial.print("[FOR_PI] ");
     Serial.println(s);
   } else {
     Serial.println("[WARN] Dropped non-JSON payload");
   }
 
-  addOrUpdateDevice(recvInfo->src_addr);
+  addOrUpdateDevice(mac_addr);
   updateDisplay();
 }
+
 
 void getSelfMac() {
   esp_wifi_get_mac(WIFI_IF_STA, selfMac);
