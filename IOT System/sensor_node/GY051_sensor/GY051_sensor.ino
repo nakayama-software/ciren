@@ -34,6 +34,7 @@ void loop()
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
+  // Debug ke Serial (boleh pakai spasi)
   Serial.print("Accel (m/s^2): ");
   Serial.print(a.acceleration.x);
   Serial.print(", ");
@@ -51,21 +52,22 @@ void loop()
   Serial.print(" | Temp (C): ");
   Serial.println(temp.temperature);
 
+  // Kirim ke Serial1 - TANPA SPASI setelah koma
   Serial1.print("ID=");
   Serial1.print(DEVICE_ID);
   Serial1.print(";VAL=");
   Serial1.print(a.acceleration.x);
-  Serial1.print(", ");
+  Serial1.print(",");  // ✅ No space
   Serial1.print(a.acceleration.y);
-  Serial1.print(", ");
+  Serial1.print(",");  // ✅ No space
   Serial1.print(a.acceleration.z);
-  Serial1.print("| ");
+  Serial1.print("|");  // ✅ No space
   Serial1.print(g.gyro.x);
-  Serial1.print(", ");
+  Serial1.print(",");  // ✅ No space
   Serial1.print(g.gyro.y);
-  Serial1.print(", ");
+  Serial1.print(",");  // ✅ No space
   Serial1.print(g.gyro.z);
-  Serial1.print("| ");
+  Serial1.print("|");  // ✅ No space
   Serial1.println(temp.temperature);
 
   delay(50);

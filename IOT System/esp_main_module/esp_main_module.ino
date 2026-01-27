@@ -204,22 +204,30 @@ void loop() {
   // Baca heartbeat/ID dari Raspberry (USB serial)
   if (Serial.available()) {
     char lineBuf[64];
-    int rlen = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
-    if (rlen < 0) rlen = 0;
+    size_t rlen = Serial.readBytesUntil('\n', lineBuf, sizeof(lineBuf) - 1);
     lineBuf[rlen] = '\0';
 
-    if (strstr(lineBuf, "[SVROK]")) {
+    String line(lineBuf);
+    line.trim();  // buang spasi + \r
+
+    if (line.length() == 0) {
+      // Jangan hapus ID kalau yang kebaca kosong
+    } else if (line.indexOf("[SVROK]") >= 0) {
       serverOnline = true;
       serverOnlineUntil = millis() + SERVER_OK_TTL;
-    } else if (strstr(lineBuf, "[SVRERR]")) {
+    } else if (line.indexOf("[SVRERR]") >= 0) {
       serverOnline = false;
     } else {
-      // anggap ini Raspberry ID singkat (dipotong agar muat OLED)
-      strncpy(raspberrySerialStr, lineBuf, sizeof(raspberrySerialStr) - 1);
-      raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
+      // Opsional: hanya terima ID kalau panjangnya masuk akal
+      if (line.length() >= 8) {
+        strncpy(raspberrySerialStr, line.c_str(), sizeof(raspberrySerialStr) - 1);
+        raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
+      }
     }
+
     updateDisplay();
   }
+
 
   if (changed) updateDisplay();
   delay(100);

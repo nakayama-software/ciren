@@ -4,7 +4,7 @@
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
-const char* DEVICE_ID = "humidity";
+const char* DEVICE_ID = "hum_temp";
 
 void setup() {
   Serial.begin(115200);

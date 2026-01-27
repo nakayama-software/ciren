@@ -34,10 +34,6 @@ export const translations = {
       ultrasonic: "Ultrasonic",
       infrared: "Infrared",
       imu: "IMU",
-      voltage: "Voltage",
-      current: "Current",
-      vibration: "Vibration",
-      rotary_sensor: "Rotary",
     },
   },
 
@@ -76,10 +72,6 @@ export const translations = {
       ultrasonic: "超音波",
       infrared: "赤外線",
       imu: "IMU",
-      voltage: "電圧",
-      current: "電流",
-      vibration: "振動",
-      rotary_sensor: "ロータリー",
     },
   }
 };

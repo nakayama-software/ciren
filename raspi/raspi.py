@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Raspberry Pi → Express Server sender (clean + new API)
+Raspberry Pi → Express Server sender (IMPROVED with packet buffering)
 
-Fitur:
-- Deteksi otomatis port ESP32 Receiver (USB) dan reconnect jika lepas/pasang.
-- Baca baris bertanda "[FOR_PI]{...json...}" dari receiver → queue → POST ke /api/hub-data.
-- Heartbeat ke receiver tiap N detik: "[SVROK]\n".
-- Kirim serial number Raspberry ke receiver berkala untuk ditampilkan (OLED pihak ESP).
-- Push heartbeat RasPi (suhu CPU, uptime) ke /api/raspi-heartbeat berkala (status online independen ESP).
-- GPS worker terpisah: AT init, polling AT+CGPSINFO, POST ke /api/gps.
-- Graceful shutdown (Ctrl+C / SIGTERM), retry HTTP dengan STOP-aware backoff.
+NEW FEATURES:
+- Multi-packet buffering: Automatically buffers and merges split packets from hub
+- Smart packet assembly: Combines packets with seq/tot fields before sending to server
+- Buffer cleanup: Auto-removes stale incomplete packets after timeout
+- Backward compatible: Single packets pass through unchanged
+
+Original features:
+- Auto-detect ESP32 Receiver port (USB) with reconnect on disconnect
+- Read "[FOR_PI]{...json...}" lines from receiver → queue → POST to /api/hub-data
+- Heartbeat to receiver every N seconds: "[SVROK]\n"
+- Send Raspberry serial number to receiver periodically (for OLED display)
+- Push RasPi heartbeat (CPU temp, uptime) to /api/raspi-heartbeat periodically
+- Separate GPS worker: AT init, polling AT+CGPSINFO, POST to /api/gps
+- Graceful shutdown (Ctrl+C / SIGTERM), HTTP retry with STOP-aware backoff
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ import subprocess
 try:
     import psutil  # type: ignore
 except Exception:
-    psutil = None  # fallback tanpa psutil (mem metrics akan None)
+    psutil = None  # fallback without psutil (mem metrics will be None)
 
 import requests
 import serial  # pyserial
@@ -50,9 +56,14 @@ log = logging.getLogger("raspi-sender")
 # ===================== Config ======================
 @dataclass(frozen=True)
 class Config:
-    # Serial
+
     baud_rate: int = int(os.environ.get("BAUD_RATE", "115200"))
-    serial_detect_interval: float = float(os.environ.get("SERIAL_DETECT_INTERVAL_S", "3"))
+
+    # opsional: kalau Anda mau paksa pakai port tertentu
+    receiver_port_hint: str = os.environ.get("RECEIVER_ESP", "").strip()
+
+    # interval scan untuk cari port ESP32 (detik)
+    serial_detect_interval_sec: float = float(os.environ.get("SERIAL_DETECT_INTERVAL_S", "1.0"))
 
     # HTTP
     request_timeout: int = int(os.environ.get("REQUEST_TIMEOUT_S", "5"))
@@ -65,7 +76,7 @@ class Config:
 
     # intervals
     heartbeat_to_receiver_sec: float = float(os.environ.get("HB_TO_RX_S", "5"))
-    push_sys_metrics_sec: float = float(os.environ.get("PUSH_SYS_METRICS_S", "5"))  # frekuensi heartbeat RasPi
+    push_sys_metrics_sec: float = float(os.environ.get("PUSH_SYS_METRICS_S", "5"))
     send_pi_serial_sec: float = float(os.environ.get("SEND_PI_SERIAL_S", "30"))
 
     # queue
@@ -75,10 +86,13 @@ class Config:
     gps_port: str = os.environ.get("GPS_PORT", "/dev/ttyUSB3")
     gps_poll_interval: float = float(os.environ.get("GPS_POLL_INTERVAL_S", "2"))
 
+    # NEW: Multi-packet buffer settings
+    packet_buffer_timeout: float = float(os.environ.get("PACKET_BUFFER_TIMEOUT_S", "10"))
+
 CFG = Config()
 
 # ================== Globals/State ==================
-STOP = threading.Event()        # sinyal shutdown
+STOP = threading.Event()        # shutdown signal
 SER_HANDLE: Optional[serial.Serial] = None  # ESP32 receiver
 SER_LOCK = threading.Lock()
 HTTP_SESSION = requests.Session()
@@ -86,16 +100,21 @@ HTTP_SESSION = requests.Session()
 DATA_QUEUE: "Queue[Dict[str, Any]]" = Queue(maxsize=CFG.queue_maxsize)
 PI_SERIAL: str = "UNKNOWN_PI"
 
+# NEW: Multi-packet buffer
+# Structure: {buffer_key: {"packets": {seq: packet}, "timestamp": float, "total": int}}
+PACKET_BUFFER: Dict[str, Dict[str, Any]] = {}
+BUFFER_LOCK = threading.Lock()
+
 # ================== Helpers =======================
 def detect_serial_port() -> Optional[str]:
-    """Cari port USB ESP32 receiver. Kembalikan path atau None.
-    Melewati port GPS agar tidak bentrok dengan worker GPS.
+    """Find ESP32 receiver USB port. Return path or None.
+    Skip GPS port to avoid conflict with GPS worker.
     """
     gps_dev = (CFG.gps_port or "").lower()
     for p in list_ports.comports():
         dev = p.device.lower()
         if dev == gps_dev:
-            continue  # jangan ambil port GPS
+            continue  # skip GPS port
         if any(tag in dev for tag in ("ttyusb", "ttyacm", "cu.usbserial", "cu.usbmodem")):
             log.info(f"[FOUND] ESP32 receiver at {p.device}")
             return p.device
@@ -123,7 +142,7 @@ def get_pi_serial() -> str:
     return "UNKNOWN_PI"
 
 def get_raspi_cpu_temp_c() -> Optional[float]:
-    """Ambil suhu CPU RasPi (°C). Prefer vcgencmd; fallback thermal_zone0."""
+    """Get RasPi CPU temp (°C). Prefer vcgencmd; fallback thermal_zone0."""
     try:
         out = subprocess.check_output(["vcgencmd", "measure_temp"], text=True).strip()
         if out.startswith("temp=") and out.endswith("'C"):
@@ -160,7 +179,7 @@ def get_mem_mb() -> Tuple[Optional[int], Optional[int]]:
         return None, None
 
 def build_raspi_sys() -> Dict[str, Any]:
-    """Bangun paket metrik RasPi (informasi lokal)—untuk logging lokal/diagnostik."""
+    """Build RasPi metrics packet (local info)—for local logging/diagnostics."""
     temp_c = get_raspi_cpu_temp_c()
     uptime_s = get_uptime_s()
     l1, l5, l15 = get_loadavg()
@@ -176,7 +195,7 @@ def build_raspi_sys() -> Dict[str, Any]:
 
 # ================== HTTP helpers ==================
 def _http_post(url: str, payload: Dict[str, Any], timeout: Optional[int] = None) -> bool:
-    """POST sederhana dengan retry & STOP-aware backoff."""
+    """Simple POST with retry & STOP-aware backoff."""
     to = timeout if timeout is not None else CFG.request_timeout
     for attempt in range(1, CFG.http_max_retry + 1):
         if STOP.is_set():
@@ -195,7 +214,7 @@ def _http_post(url: str, payload: Dict[str, Any], timeout: Optional[int] = None)
     return False
 
 def post_heartbeat() -> bool:
-    """Kirim heartbeat RasPi ke /api/raspi-heartbeat (online status)."""
+    """Send RasPi heartbeat to /api/raspi-heartbeat (online status)."""
     payload = {
         "raspi_serial_id": PI_SERIAL,
         "temp_c": get_raspi_cpu_temp_c(),
@@ -207,23 +226,127 @@ def post_heartbeat() -> bool:
     return ok
 
 def send_hub_data(payload: Dict[str, Any]) -> bool:
-    """Kirim paket hub (ESP32) ke /api/hub-data."""
+    """Send hub packet (ESP32) to /api/hub-data."""
     return _http_post(CFG.hub_data_url, payload)
 
 def gps_send_api(payload: Dict[str, Any]) -> bool:
-    """Kirim GPS ke /api/gps."""
+    """Send GPS to /api/gps."""
     return _http_post(CFG.gps_api_url, payload)
 
 def queue_put(data: Dict[str, Any]) -> None:
-    """Masukkan data ke antrian tanpa melempar ke caller."""
+    """Put data into queue without throwing to caller."""
     try:
         DATA_QUEUE.put(data, timeout=1)
     except Full:
         log.warning("[QUEUE] Full, dropping payload")
 
+# ================== NEW: Multi-packet buffering ==================
+def get_buffer_key(packet: Dict[str, Any]) -> str:
+    """Generate unique key for packet buffering based on controller ID and timestamp."""
+    controller_id = packet.get("sensor_controller_id", "unknown")
+    ts = packet.get("ts", 0)
+    return f"{controller_id}_{ts}"
+
+def merge_packets(packets: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge multiple packets into a single combined packet.
+    
+    Strategy:
+    1. Use first packet as base (has all metadata)
+    2. Merge all port-* fields from all packets
+    3. Remove seq/tot fields (no longer needed)
+    """
+    if not packets:
+        return {}
+    
+    # Sort by seq to ensure consistent merging
+    sorted_packets = sorted(packets.items(), key=lambda x: x[0])
+    
+    # Start with first packet as base
+    merged = dict(sorted_packets[0][1])
+    
+    # Remove seq/tot from merged result
+    merged.pop("seq", None)
+    merged.pop("tot", None)
+    
+    # Merge port-* fields from all packets
+    for seq, packet in sorted_packets[1:]:
+        for key, value in packet.items():
+            if key.startswith("port-"):
+                merged[key] = value
+    
+    log.info(f"[MERGE] Combined {len(packets)} packets into 1 (controller_id={merged.get('sensor_controller_id')})")
+    return merged
+
+def process_packet(packet: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Process incoming packet. Handle multi-packet buffering if needed.
+    
+    Returns:
+    - Complete packet (single or merged) if ready to send
+    - None if buffering in progress
+    """
+    # Check if this is a multi-packet transmission
+    seq = packet.get("seq")
+    tot = packet.get("tot")
+    
+    # Single packet or heartbeat - pass through immediately
+    if seq is None or tot is None:
+        log.debug("[PACKET] Single packet/heartbeat - pass through")
+        return packet
+    
+    # Multi-packet transmission - buffer and wait for all parts
+    buffer_key = get_buffer_key(packet)
+    
+    with BUFFER_LOCK:
+        # Initialize buffer entry if needed
+        if buffer_key not in PACKET_BUFFER:
+            PACKET_BUFFER[buffer_key] = {
+                "packets": {},
+                "timestamp": time.time(),
+                "total": tot
+            }
+            log.debug(f"[BUFFER] New multi-packet session: {buffer_key} (expecting {tot} packets)")
+        
+        buffer_entry = PACKET_BUFFER[buffer_key]
+        
+        # Store this packet
+        buffer_entry["packets"][seq] = packet
+        received_count = len(buffer_entry["packets"])
+        
+        log.debug(f"[BUFFER] Packet {seq}/{tot} received for {buffer_key} ({received_count}/{tot} collected)")
+        
+        # Check if we have all packets
+        if received_count == tot:
+            log.info(f"[BUFFER] All {tot} packets received for {buffer_key} - merging now")
+            merged = merge_packets(buffer_entry["packets"])
+            
+            # Clean up buffer
+            del PACKET_BUFFER[buffer_key]
+            
+            return merged
+        else:
+            # Still waiting for more packets
+            return None
+
+def cleanup_stale_buffers():
+    """Remove incomplete packet buffers that have timed out."""
+    now = time.time()
+    with BUFFER_LOCK:
+        stale_keys = []
+        for key, entry in PACKET_BUFFER.items():
+            age = now - entry["timestamp"]
+            if age > CFG.packet_buffer_timeout:
+                stale_keys.append(key)
+                received = len(entry["packets"])
+                total = entry["total"]
+                log.warning(f"[BUFFER TIMEOUT] Dropping incomplete transmission {key} "
+                           f"({received}/{total} packets, age={age:.1f}s)")
+        
+        for key in stale_keys:
+            del PACKET_BUFFER[key]
+
 # ================== Workers (IoT/original) ========================
 def worker_http_sender():
-    """Worker HTTP: ambil dari queue → kirim ke /api/hub-data → beri tag ke receiver."""
+    """HTTP Worker: take from queue → send to /api/hub-data → tag to receiver."""
     global SER_HANDLE
     while not STOP.is_set():
         try:
@@ -236,14 +359,14 @@ def worker_http_sender():
             break
 
         try:
-            # normalisasi minimal
+            # minimal normalization
             if not isinstance(data, dict):
                 data = {"_raw": str(data)}
 
             data.setdefault("_pi_serial", PI_SERIAL or "UNKNOWN_PI")
             data.setdefault("_received_ts", int(time.time()))
 
-            # Payload untuk /api/hub-data
+            # Payload for /api/hub-data
             payload = {
                 "raspi_serial_id": str(PI_SERIAL or "UNKNOWN_PI"),
                 "data": [data],
@@ -251,7 +374,7 @@ def worker_http_sender():
 
             ok = send_hub_data(payload)
 
-            # Feedback tag ke ESP (opsional untuk status OLED)
+            # Feedback tag to ESP (optional for OLED status)
             tag = b"[SVROK]\n" if ok else b"[SVRERR]\n"
             with SER_LOCK:
                 if SER_HANDLE and SER_HANDLE.writable():
@@ -267,7 +390,7 @@ def worker_http_sender():
             DATA_QUEUE.task_done()
 
 def worker_heartbeat_to_receiver():
-    """Heartbeat ke receiver agar OLED status server tetap segar (link local RPi→ESP)."""
+    """Heartbeat to receiver so OLED server status stays fresh (local RPi→ESP link)."""
     while not STOP.is_set():
         with SER_LOCK:
             if SER_HANDLE and SER_HANDLE.writable():
@@ -279,7 +402,7 @@ def worker_heartbeat_to_receiver():
         STOP.wait(CFG.heartbeat_to_receiver_sec)
 
 def worker_send_pi_serial():
-    """Kirim serial Raspberry berkala ke receiver (untuk ditampilkan)."""
+    """Send Raspberry serial periodically to receiver (for display)."""
     msg = (PI_SERIAL or "UNKNOWN_PI") + "\n"
     payload = msg.encode("utf-8")
     while not STOP.is_set():
@@ -293,7 +416,7 @@ def worker_send_pi_serial():
         STOP.wait(CFG.send_pi_serial_sec)
 
 def worker_push_sys_metrics():
-    """Kirim heartbeat RasPi ke server berkala (independen ESP/hub)."""
+    """Send RasPi heartbeat to server periodically (independent of ESP/hub)."""
     while not STOP.is_set():
         try:
             post_heartbeat()
@@ -301,18 +424,34 @@ def worker_push_sys_metrics():
             log.warning(f"[HB SEND ERROR] {e}")
         STOP.wait(CFG.push_sys_metrics_sec)
 
+def worker_buffer_cleanup():
+    """Periodically clean up stale incomplete packet buffers."""
+    while not STOP.is_set():
+        try:
+            cleanup_stale_buffers()
+        except Exception as e:
+            log.error(f"[BUFFER CLEANUP ERROR] {e}")
+        STOP.wait(CFG.packet_buffer_timeout / 2)  # Check twice per timeout period
+
 def worker_serial_reader():
-    """Deteksi & buka serial receiver; baca baris [FOR_PI]{...} → queue."""
+    """Detect & open serial receiver; read lines [FOR_PI]{...} → buffer/merge → queue."""
     global SER_HANDLE
     buf = ""
     last_port: Optional[str] = None
 
     while not STOP.is_set():
-        # pastikan ada port (skip GPS port)
-        port = detect_serial_port() or last_port
+        # ensure we have a port (skip GPS port)
+        port = None
+
+        if CFG.receiver_port_hint:
+            port = CFG.receiver_port_hint
+        else:
+            port = detect_serial_port() or last_port
+
         if not port:
-            STOP.wait(CFG.serial_detect_interval)
+            STOP.wait(CFG.serial_detect_interval_sec)
             continue
+
         last_port = port
 
         try:
@@ -320,7 +459,7 @@ def worker_serial_reader():
                 SER_HANDLE = serial.Serial(port, CFG.baud_rate, timeout=1)
             log.info(f"[SERIAL] Connected to {port} @{CFG.baud_rate}")
 
-            # kirim PI serial saat connect
+            # send PI serial on connect
             with SER_LOCK:
                 try:
                     msg = (PI_SERIAL or "UNKNOWN_PI") + "\n"
@@ -339,7 +478,7 @@ def worker_serial_reader():
                             log.debug(f"[SER READ ERROR] {e}")
                             break
 
-                # proses per-baris
+                # process per-line
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
                     line = line.strip("\r").strip()
@@ -359,15 +498,21 @@ def worker_serial_reader():
                                 # ✅ Always include timestamp (client-side)
                                 parsed.setdefault("ts_iso", datetime.utcnow().isoformat() + "Z")
 
-                                queue_put(parsed)
-                                log.debug("[QUEUE] hub JSON queued")
+                                # ✅ NEW: Process packet (buffer/merge if multi-packet)
+                                complete_packet = process_packet(parsed)
+                                
+                                if complete_packet is not None:
+                                    queue_put(complete_packet)
+                                    log.debug("[QUEUE] Complete packet queued")
+                                else:
+                                    log.debug("[BUFFER] Packet buffered, waiting for more parts")
 
                             except json.JSONDecodeError as e:
                                 log.warning(f"[JSON ERROR] {e}: {json_part[:200]}")
                         else:
                             log.debug(f"[DROP] Non-object/malformed JSON: {json_part[:160]}")
                     else:
-                        # baris lain diabaikan
+                        # other lines ignored
                         pass
 
                 time.sleep(0.01)
@@ -381,7 +526,7 @@ def worker_serial_reader():
                 except Exception:
                     pass
                 SER_HANDLE = None
-            STOP.wait(CFG.serial_detect_interval)
+            STOP.wait(CFG.serial_detect_interval_sec)
         except Exception as e:
             log.error(f"[SERIAL ERROR] {e}")
             with SER_LOCK:
@@ -391,9 +536,9 @@ def worker_serial_reader():
                 except Exception:
                     pass
                 SER_HANDLE = None
-            STOP.wait(CFG.serial_detect_interval)
+            STOP.wait(CFG.serial_detect_interval_sec)
 
-# ================== GPS Worker (baru) ==================
+# ================== GPS Worker (original) ==================
 GPS_PATTERN = re.compile(
     r"\+CGPSINFO:\s*([^,]*),([NS]?),(.*?),([EW]?),(.*?),(.*?),(.*?),(.*?),?$"
 )
@@ -428,10 +573,10 @@ def _parse_cgpsinfo(line: str) -> Dict[str, Any]:
 
 def worker_gps_reader():
     """GPS Reader dedicated:
-       - Open CFG.gps_port (bukan SER_HANDLE/shared)
+       - Open CFG.gps_port (not SER_HANDLE/shared)
        - Init AT+CFUN=1; AT+CGPS=1
        - Poll AT+CGPSINFO
-       - POST ke CFG.gps_api_url (lat/lon wajib → skip NO FIX)
+       - POST to CFG.gps_api_url (lat/lon required → skip NO FIX)
     """
     port = CFG.gps_port
     baud = CFG.baud_rate
@@ -509,7 +654,7 @@ def worker_gps_reader():
                         log.warning("[GPS] No fix — waiting for satellites…")
                         last_warn = now
                     last_status = "nofix"
-                    # Jangan POST ke /api/gps karena endpoint butuh lat/lon
+                    # Don't POST to /api/gps because endpoint needs lat/lon
 
                 else:
                     log.debug(f"[GPS RAW] {line.strip()}")
@@ -556,11 +701,12 @@ def start_thread(target, name: str):
 
 def main() -> int:
     global PI_SERIAL
-    log.info("[START] RasPi sender")
+    log.info("[START] RasPi sender (IMPROVED with multi-packet buffering)")
     log.info(f"[CFG] Raspi HB  → {CFG.raspi_hb_url}")
     log.info(f"[CFG] Hub Data  → {CFG.hub_data_url}")
     log.info(f"[CFG] GPS POST  → {CFG.gps_api_url}")
     log.info(f"[CFG] GPS PORT  → {CFG.gps_port}")
+    log.info(f"[CFG] Packet buffer timeout: {CFG.packet_buffer_timeout}s")
     PI_SERIAL = get_pi_serial()
     log.info(f"[PI SERIAL] {PI_SERIAL}")
 
@@ -571,12 +717,13 @@ def main() -> int:
         start_thread(worker_http_sender,           "http-sender"),
         start_thread(worker_heartbeat_to_receiver, "hb-to-rx"),
         start_thread(worker_send_pi_serial,        "send-pi-serial"),
-        start_thread(worker_push_sys_metrics,      "push-sys"),          # NEW: kirim heartbeat RasPi
+        start_thread(worker_push_sys_metrics,      "push-sys"),
         start_thread(worker_serial_reader,         "serial-reader"),
         start_thread(worker_gps_reader,            "gps-reader"),
+        start_thread(worker_buffer_cleanup,        "buffer-cleanup"),  # NEW worker
     ]
 
-    # tunggu stop
+    # wait for stop
     try:
         while not STOP.is_set():
             time.sleep(0.5)

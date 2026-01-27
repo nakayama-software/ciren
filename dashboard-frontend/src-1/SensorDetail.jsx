@@ -23,8 +23,6 @@ function SensorDetail() {
       })
       .then(res => res.json())
       .then(dataList => {
-        console.log("dataList : ", dataList);
-
         const reversed = [...dataList].reverse();
         const selected = reversed
           .map(entry => {

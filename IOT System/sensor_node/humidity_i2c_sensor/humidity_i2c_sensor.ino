@@ -1,7 +1,7 @@
 #include <Wire.h>
 #include <DHT20.h>
 
-const char* DEVICE_ID = "humidity";
+const char* DEVICE_ID = "hum_temp";
 DHT20 dht20;
 
 void setup()

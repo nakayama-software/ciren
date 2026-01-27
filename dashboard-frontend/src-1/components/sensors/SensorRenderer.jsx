@@ -1,6 +1,6 @@
 import React from "react";
 import TemperatureCard from "./TemperatureCard";
-import HumidityAndTemperatureCard from "./HumidityAndTemperatureCard";
+import HumidityCard from "./HumidityCard";
 import PressureCard from "./PressureCard";
 import LightIntensityCard from "./LightIntensityCard";
 import UltrasonicCard from "./UltrasonicCard";
@@ -15,11 +15,8 @@ import GenericCard from "./GenericCard";
 export default function SensorRenderer({ node }) {
   const type = String(node.sensor_type || "").toLowerCase();
 
-  // console.log("1111",node);
-  
-
   if (type === "temperature") return <TemperatureCard node={node} />;
-  if (type === "humidity") return <HumidityAndTemperatureCard node={node} />;
+  if (type === "humidity") return <HumidityCard node={node} />;
   if (type === "pressure") return <PressureCard node={node} />;
   if (type === "light_intensity" || type === "light-intensity" || type === "light") return <LightIntensityCard node={node} />;
   if (type === "ultrasonic") return <UltrasonicCard node={node} />;

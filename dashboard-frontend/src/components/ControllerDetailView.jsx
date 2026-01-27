@@ -3,6 +3,7 @@ import { ArrowLeft, Battery, Wifi, Zap, Cpu } from "lucide-react";
 import SensorRenderer from "./SensorRenderer";
 
 export default function ControllerDetailView({ controller, onBack, t }) {
+    // console.log("controller : ", controller);
 
     return (
         <div className="rounded-2xl border border-black/10 bg-white/80 p-6 dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
@@ -42,14 +43,19 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {controller.sensor_nodes.map((node, i) => (
-                        <SensorRenderer
-                            key={i}
-                            node={node}
-                            hubId={controller.sensor_controller_id}
-                            raspiId={controller.raspi_id}
-                        />
-                    ))}
+                    {controller.sensor_nodes.map((node, i) => {
+                        // console.log("2222",node);
+
+                        return (
+                            <SensorRenderer
+                                key={i}
+                                node={node}
+                                hubId={controller.sensor_controller_id}
+                                raspiId={controller.raspi_id}
+                                t={t}
+                            />
+                        )
+                    })}
                 </div>
             )}
         </div>
