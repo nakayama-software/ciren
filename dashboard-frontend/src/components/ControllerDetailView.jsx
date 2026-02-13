@@ -45,7 +45,6 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {controller.sensor_nodes.map((node, i) => {
                         // console.log("2222",node);
-
                         return (
                             <SensorRenderer
                                 key={i}

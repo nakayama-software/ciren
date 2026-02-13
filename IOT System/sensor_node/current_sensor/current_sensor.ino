@@ -36,5 +36,5 @@ void loop() {
   Serial1.print(";VAL=");
   Serial1.println(abs(current), 2);  // Gunakan abs() untuk nilai absolut
 
-  delay(500);
+  delay(2000);
 }

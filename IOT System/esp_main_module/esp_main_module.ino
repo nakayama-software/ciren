@@ -1,9 +1,3 @@
-// ESP32_Receiver_ESPNOW_Forwarder.ino
-// - Menerima ESPNOW dari HUB
-// - Hanya forward payload JSON-valid (object) ke Serial dengan prefix [FOR_PI]
-// - OLED: tampil Raspberry ID / MAC sendiri / status Server Online / jumlah devices aktif
-// - Timeout peer 6s (sedikit di atas heartbeat 5s agar tidak balapan)
-
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_now.h>
@@ -25,6 +19,7 @@ struct DeviceEntry {
   uint8_t mac[6];
   unsigned long lastSeen;
 };
+
 DeviceEntry knownDevices[MAX_DEVICES];
 int deviceCount = 0;
 
@@ -35,6 +30,9 @@ uint8_t selfMac[6];
 bool serverOnline = false;
 unsigned long serverOnlineUntil = 0;
 const unsigned long SERVER_OK_TTL = 8000;
+
+String lastPayload[8]; 
+bool nodeOnline[8] = { false };  
 
 bool isSameMac(const uint8_t* a, const uint8_t* b) {
   return memcmp(a, b, 6) == 0;
@@ -133,19 +131,72 @@ void onDataReceive(const uint8_t* mac_addr, const uint8_t* data, int len) {
 
   String s = String(jsonBuf);
   s.trim();
-  bool looksJsonObject = s.length() >= 2 && s[0] == '{' && s[s.length() - 1] == '}';
 
-  if (looksJsonObject) {
-    Serial.print("[FOR_PI] ");
-    Serial.println(s);
+  if (s.startsWith("{") && s.endsWith("}")) {
+    // Extract sender_id from JSON string
+    int senderIdStart = s.indexOf("\"sender_id\":") + 12;
+    int senderIdEnd = s.indexOf(",", senderIdStart);
+
+    String senderID = "";
+    if (senderIdStart != -1 && senderIdEnd != -1) {
+      senderID = s.substring(senderIdStart, senderIdEnd);
+      senderID.trim();
+      Serial.print("Received sender_id: ");
+      Serial.println(senderID);
+    } else {
+      Serial.println("[WARN] Failed to extract sender_id");
+      senderID = "UNKNOWN";
+    }
+
+    // Extract sensor data between @sensor_data_start and @sensor_data_end
+    int dataStart = s.indexOf("@sensor_data_start") + 18;
+    int dataEnd = s.indexOf("@sensor_data_end");
+
+    if (dataStart != -1 && dataEnd != -1) {
+      String sensorData = s.substring(dataStart, dataEnd);
+      sensorData.trim();
+
+      // ============================================
+      // TAMBAHAN: KIRIM KE RASPBERRY PI VIA SERIAL
+      // ============================================
+      Serial.print("sensorID:");
+      Serial.println(senderID);
+      Serial.println("@sensor_data_start");
+      Serial.println(sensorData);  // Data sudah dalam format p1-type-value
+      Serial.println("@sensor_data_end");
+      // ============================================
+
+      // Process each port's data (untuk display OLED)
+      for (int i = 0; i < 8; i++) {
+        String portData = "p" + String(i + 1);
+        int portDataStart = sensorData.indexOf(portData);
+        if (portDataStart != -1) {
+          int portDataEnd = sensorData.indexOf("\n", portDataStart);
+          String portPayload = sensorData.substring(portDataStart, portDataEnd);
+          if (portPayload.indexOf("null-null") == -1) {
+            lastPayload[i] = portPayload;
+            nodeOnline[i] = true;
+          } else {
+            lastPayload[i] = "null-null";
+            nodeOnline[i] = false;
+          }
+        } else {
+          lastPayload[i] = "null-null";
+          nodeOnline[i] = false;
+        }
+      }
+      updateDisplay();
+    } else {
+      Serial.println("[WARN] Failed to extract sensor data");
+    }
   } else {
     Serial.println("[WARN] Dropped non-JSON payload");
   }
 
+  // Update device list and display
   addOrUpdateDevice(mac_addr);
   updateDisplay();
 }
-
 
 void getSelfMac() {
   esp_wifi_get_mac(WIFI_IF_STA, selfMac);
@@ -180,7 +231,7 @@ void setup() {
 
   esp_now_register_recv_cb(onDataReceive);
   updateDisplay(true);
-  Serial.println("Receiver ready. Waiting for data...");
+  // Serial.println("Receiver ready. Waiting for data...");
 }
 
 void loop() {

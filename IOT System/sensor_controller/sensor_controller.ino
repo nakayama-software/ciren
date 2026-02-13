@@ -89,14 +89,14 @@ int displayPage = PAGE_MAIN;
 
 // ======= FORWARD DECLARATIONS =======
 void initESPNow();
-void addPeer(uint8_t* peerMac);
-void sendToReceiver(const String& msg);
+void addPeer(uint8_t *peerMac);
+void sendToReceiver(const String &msg);
 char nextHexChar(char c);
-void hexToBytes(char* str, uint8_t* mac);
-void bytesToHex(uint8_t* mac, char* strOut);
-void saveMAC(uint8_t* mac, int id);
-void loadMAC(uint8_t* mac);
-bool isValidMAC(uint8_t* mac);
+void hexToBytes(char *str, uint8_t *mac);
+void bytesToHex(uint8_t *mac, char *strOut);
+void saveMAC(uint8_t *mac, int id);
+void loadMAC(uint8_t *mac);
+bool isValidMAC(uint8_t *mac);
 void resetEEPROM();
 int loadSenderID();
 void saveSenderID(int id);
@@ -104,10 +104,10 @@ void saveSenderID(int id);
 void drawMainScreen();
 void drawNodeStatusPage();
 void showMACEntry();
-void showMessage(const char* line1, const char* line2);
-void printMacFormatted(const char* raw, int cursorIndex);
+void showMessage(const char *line1, const char *line2);
+void printMacFormatted(const char *raw, int cursorIndex);
 
-bool readLine(Stream& s, String& buf, String& out);
+bool readLine(Stream &s, String &buf, String &out);
 void pollSerials();
 void checkNodeTimeouts();
 void recalcOnlineCount();
@@ -116,15 +116,15 @@ void maybeSendJson();
 
 // ======== Port descriptors ========
 struct HWPort {
-  HardwareSerial* port;
-  String* buffer;
-  const char* name;
+  HardwareSerial *port;
+  String *buffer;
+  const char *name;
   uint8_t portId;
 };
 struct SWPort {
-  SoftwareSerial* port;
-  String* buffer;
-  const char* name;
+  SoftwareSerial *port;
+  String *buffer;
+  const char *name;
   uint8_t portId;
 };
 
@@ -147,13 +147,14 @@ const int SW_PORT_COUNT = sizeof(swPorts) / sizeof(swPorts[0]);
 void recalcOnlineCount() {
   int c = 0;
   for (int i = 0; i < 8; ++i) {
-    if (nodeOnline[i]) ++c;
+    if (nodeOnline[i])
+      ++c;
   }
   onlineCount = c;
 }
 
 // Normalize: "sensor type - value" -> "sensor_type-value"
-static String normalizeKV(const String& line) {
+static String normalizeKV(const String &line) {
   String t = line;
   t.trim();
   int dash = t.indexOf('-');
@@ -170,18 +171,15 @@ static String normalizeKV(const String& line) {
   return jenis + "-" + value;
 }
 
-// Simulate battery and RSSI readings (replace with real hardware readings)
 int readBatteryPercent() {
-  // TODO: Replace with actual ADC reading
   return 78;  // dummy
 }
+
 int readLinkRssi() {
-  // ESP-NOW doesn't always provide RSSI; use estimated/constant value
   return -55;  // dummy
 }
 
-// Handle one line from a specific port
-void handleLine(const char* portName, uint8_t portId, const String& line) {
+void handleLine(const char *portName, uint8_t portId, const String &line) {
   String norm = normalizeKV(line);
   Serial.printf("[%s:%d] %s\n", portName, portId, norm.c_str());
   int idx = portId - 1;
@@ -198,11 +196,8 @@ void handleLine(const char* portName, uint8_t portId, const String& line) {
 void setup() {
   Serial.begin(115200);
 
-  // Initialize Hardware UARTs
   U2.begin(9600, SERIAL_8N1, RX_P1, -1);
   U1.begin(9600, SERIAL_8N1, RX_P2, -1);
-
-  // Initialize Software UARTs
   U3.begin(9600, SWSERIAL_8N1, RX_P3, -1, false, 256);
   U4.begin(9600, SWSERIAL_8N1, RX_P4, -1, false, 256);
   U5.begin(9600, SWSERIAL_8N1, RX_P5, -1, false, 256);
@@ -214,11 +209,11 @@ void setup() {
   pinMode(BUTTON_NEXT, INPUT_PULLUP);
   pinMode(BUTTON_INC, INPUT_PULLUP);
 
-  // Initialize OLED
   WireOLED.begin(OLED_SDA, OLED_SCL, 400000);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("OLED failed");
-    while (1);
+    while (1)
+      ;
   }
 
   display.setTextSize(1);
@@ -226,14 +221,13 @@ void setup() {
   display.clearDisplay();
   display.setTextColor(WHITE);
 
-  // Initialize WiFi and ESP-NOW
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW Init failed");
-    while (1);
+    while (1)
+      ;
   }
 
-  // Check for EEPROM reset (both buttons pressed)
   bool resetPressed = (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW);
   if (resetPressed) {
     delay(800);
@@ -244,8 +238,7 @@ void setup() {
       delay(1500);
     }
   }
-  
-  // Check for MAC-only reset (NEXT button only)
+
   if (digitalRead(BUTTON_NEXT) == LOW) {
     delay(800);
     if (digitalRead(BUTTON_NEXT) == LOW) {
@@ -255,7 +248,6 @@ void setup() {
     }
   }
 
-  // Load stored MAC address
   uint8_t storedMac[6];
   loadMAC(storedMac);
 
@@ -273,7 +265,8 @@ void setup() {
     Serial.print("Loaded MAC: ");
     for (int i = 0; i < 6; i++) {
       Serial.printf("%02X", currentMac[i]);
-      if (i < 5) Serial.print(":");
+      if (i < 5)
+        Serial.print(":");
     }
     Serial.println();
     Serial.printf("Loaded senderID = %d\n", senderID);
@@ -287,9 +280,7 @@ void setup() {
 }
 
 void loop() {
-  // Handle MAC entry mode
   if (!inputConfirmed && !macValid) {
-    // Both buttons = confirm
     if (digitalRead(BUTTON_NEXT) == LOW && digitalRead(BUTTON_INC) == LOW) {
       uint8_t mac[6];
       hexToBytes(macStr, mac);
@@ -304,13 +295,11 @@ void loop() {
       return;
     }
 
-    // NEXT button = move cursor
     if (digitalRead(BUTTON_NEXT) == LOW) {
       cursor = (cursor + 1) % 13;
       delay(200);
     }
 
-    // INC button = increment value
     if (digitalRead(BUTTON_INC) == LOW) {
       if (cursor < 12) {
         macStr[cursor] = nextHexChar(macStr[cursor]);
@@ -324,7 +313,6 @@ void loop() {
     return;
   }
 
-  // Handle page switching (short press NEXT button)
   static int prevNext = HIGH;
   static unsigned long nextPressTime = 0;
   int curNext = digitalRead(BUTTON_NEXT);
@@ -345,10 +333,10 @@ void loop() {
   }
   prevNext = curNext;
 
-  // Handle ID change (long press INC button)
   static unsigned long idPressStart = 0;
   if (digitalRead(BUTTON_INC) == LOW) {
-    if (idPressStart == 0) idPressStart = millis();
+    if (idPressStart == 0)
+      idPressStart = millis();
     if (millis() - idPressStart > 1000) {
       senderID = (senderID % maxSenderID) + 1;
       saveSenderID(senderID);
@@ -361,7 +349,6 @@ void loop() {
     idPressStart = 0;
   }
 
-  // Main operations
   pollSerials();
   checkNodeTimeouts();
 
@@ -379,10 +366,11 @@ void loop() {
   delay(0);
 }
 
-bool readLine(Stream& s, String& buf, String& out) {
+bool readLine(Stream &s, String &buf, String &out) {
   while (s.available()) {
     char c = (char)s.read();
-    if (c == '\r') continue;
+    if (c == '\r')
+      continue;
     if (c == '\n') {
       out = buf;
       buf = "";
@@ -390,7 +378,8 @@ bool readLine(Stream& s, String& buf, String& out) {
       return out.length();
     }
     buf += c;
-    if (buf.length() > 200) buf = "";
+    if (buf.length() > 200)
+      buf = "";
   }
   return false;
 }
@@ -398,14 +387,12 @@ bool readLine(Stream& s, String& buf, String& out) {
 void pollSerials() {
   String line;
 
-  // Poll hardware UARTs
   for (int i = 0; i < HW_PORT_COUNT; ++i) {
     if (readLine(*hwPorts[i].port, *hwPorts[i].buffer, line)) {
       handleLine(hwPorts[i].name, hwPorts[i].portId, line);
     }
   }
 
-  // Poll software UARTs
   for (int i = 0; i < SW_PORT_COUNT; ++i) {
     swPorts[i].port->listen();
     if (readLine(*swPorts[i].port, *swPorts[i].buffer, line)) {
@@ -429,11 +416,12 @@ void checkNodeTimeouts() {
 void initESPNow() {
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW Init failed");
-    while (1);
+    while (1)
+      ;
   }
 }
 
-void addPeer(uint8_t* peerMac) {
+void addPeer(uint8_t *peerMac) {
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, peerMac, 6);
   peer.channel = 0;
@@ -443,228 +431,87 @@ void addPeer(uint8_t* peerMac) {
   }
 }
 
-void sendToReceiver(const String& msg) {
-  if (!macValid) return;
+void sendToReceiver(const String &msg) {
+  if (!macValid)
+    return;
 
   if (msg.length() > 240) {
     Serial.printf("JSON too long (%d). Not sent.\n", msg.length());
     return;
   }
 
-  esp_err_t result = esp_now_send(currentMac, (uint8_t*)msg.c_str(), msg.length());
+  esp_err_t result = esp_now_send(currentMac, (uint8_t *)msg.c_str(), msg.length());
   Serial.print("Forwarding JSON -> ");
   Serial.print(msg);
   Serial.print(" => ");
   Serial.printf("len=%d result=%d\n", msg.length(), (int)result);
 }
 
-// Build heartbeat JSON (when no ports are online)
-String buildHeartbeatJson() {
-  int batt = readBatteryPercent();
-  int rssi = readLinkRssi();
-  char buf[200];
-  unsigned long ts = millis() / 1000;
-  snprintf(buf, sizeof(buf),
-           "{\"sensor_controller_id\":%d,"
-           "\"controller_status\":\"online\","
-           "\"battery_level\":%d,"
-           "\"signal_strength\":%d,"
-           "\"ports_connected\":0,"
-           "\"ts\":%lu}",
-           senderID, batt, rssi, ts);
-  return String(buf);
-}
-
-// Build data JSON with all ports (if fits in 240 bytes)
-String buildDataJson() {
-  int batt = readBatteryPercent();
-  int rssi = readLinkRssi();
+String buildSensorDataJson() {
   String s;
-
-  s.reserve(256);
-  s = "{\"sensor_controller_id\":";
-  s += String(senderID);
-  s += ",\"controller_status\":\"online\"";
-  s += ",\"battery_level\":";
-  s += batt;
-  s += ",\"signal_strength\":";
-  s += rssi;
-  s += ",\"ports_connected\":";
-  s += onlineCount;
-  s += ",\"ts\":";
-  s += String(millis() / 1000);
+  s += "@sensor_data_start\n";
+  int senderID = loadSenderID(); 
 
   for (int i = 0; i < 8; ++i) {
-    if (!nodeOnline[i]) continue;
-    if (lastPayload[i].length() == 0) continue;
-    s += ",\"port-";
-    s += String(i + 1);
-    s += "\":\"";
-    String v = lastPayload[i];
-    v.replace("\"", "\\\"");
-    s += v;
-    s += "\"";
-  }
-  s += "}";
-  return s;
-}
-
-// Build partial JSON with specific ports (for splitting)
-String buildDataJsonForPorts(const int* ports, int portCount, int seq, int tot) {
-  int batt = readBatteryPercent();
-  int rssi = readLinkRssi();
-  unsigned long ts = millis() / 1000;
-
-  String s;
-  s.reserve(240);
-
-  s = "{\"sensor_controller_id\":";
-  s += String(senderID);
-  s += ",\"controller_status\":\"online\"";
-  s += ",\"battery_level\":";
-  s += batt;
-  s += ",\"signal_strength\":";
-  s += rssi;
-  s += ",\"ports_connected\":";
-  s += onlineCount;
-  s += ",\"ts\":";
-  s += String(ts);
-  s += ",\"seq\":";
-  s += String(seq);
-  s += ",\"tot\":";
-  s += String(tot);
-
-  for (int k = 0; k < portCount; ++k) {
-    int i = ports[k];
-    if (!nodeOnline[i]) continue;
-    if (lastPayload[i].length() == 0) continue;
-
-    s += ",\"port-";
-    s += String(i + 1);
-    s += "\":\"";
-
-    String v = lastPayload[i];
-    v.replace("\"", "\\\"");
-    s += v;
-
-    s += "\"";
-  }
-
-  s += "}";
-  return s;
-}
-
-// IMPROVED: Auto-split algorithm - tries 4, 3, 2 ports per packet before falling back to 1
-void sendDataJsonAutoSplit() {
-  if (!macValid) return;
-
-  // Collect online ports with data
-  int ports[8];
-  int cnt = 0;
-  for (int i = 0; i < 8; ++i) {
-    if (nodeOnline[i] && lastPayload[i].length() > 0) {
-      ports[cnt++] = i;
-    }
-  }
-
-  // No data? Send heartbeat
-  if (cnt == 0) {
-    sendToReceiver(buildHeartbeatJson());
-    return;
-  }
-
-  // Try sending all ports in one packet first
-  {
-    String one = buildDataJsonForPorts(ports, cnt, 1, 1);
-    if (one.length() <= 240) {
-      sendToReceiver(one);
-      return;
-    }
-  }
-
-  // OPTIMIZED: Try 4, 3, 2, then 1 port per packet
-  for (int portsPerPkt = 4; portsPerPkt >= 1; portsPerPkt--) {
-    int tot = (cnt + portsPerPkt - 1) / portsPerPkt;
-    bool allFit = true;
-    int seq = 1;
-
-    // Check if all packets will fit
-    for (int start = 0; start < cnt; start += portsPerPkt) {
-      int nThis = cnt - start;
-      if (nThis > portsPerPkt) nThis = portsPerPkt;
-
-      String pkt = buildDataJsonForPorts(&ports[start], nThis, seq, tot);
-      if (pkt.length() > 240) {
-        allFit = false;
-        break;
+    if (nodeOnline[i]) {
+      if (lastPayload[i].length() > 0) {
+        s += "p" + String(i + 1) + "-" + lastPayload[i] + "\n";
+      } else {
+        s += "p" + String(i + 1) + "-null-null\n";
       }
-      seq++;
-    }
-
-    // If all packets fit, send them
-    if (allFit) {
-      seq = 1;
-      for (int start = 0; start < cnt; start += portsPerPkt) {
-        int nThis = cnt - start;
-        if (nThis > portsPerPkt) nThis = portsPerPkt;
-
-        String pkt = buildDataJsonForPorts(&ports[start], nThis, seq, tot);
-        sendToReceiver(pkt);
-        seq++;
-        delay(10);  // Small delay between packets
-      }
-      return;
+    } else {
+      s += "p" + String(i + 1) + "-null-null\n";
     }
   }
 
-  // Should never reach here
-  Serial.println("ERROR: Payload too long even with 1 port per packet.");
+  s += "@sensor_data_end\n";
+
+  String jsonPayload = "{\"sender_id\":" + String(senderID) + ", \"data\":\"" + s + "\"}";
+
+  return jsonPayload;  
 }
+
 
 void maybeSendJson() {
   unsigned long now = millis();
   bool timeToSend = (now - lastSendMs >= SEND_INTERVAL_MS);
-  
+
   if (!timeToSend && !payloadDirty) return;
   if (!macValid) return;
 
-  if (onlineCount == 0) {
-    sendToReceiver(buildHeartbeatJson());
-  } else {
-    String json = buildDataJson();
-    if (json.length() <= 240) {
-      sendToReceiver(json);
-    } else {
-      sendDataJsonAutoSplit();
-    }
-  }
+  String jsonData = buildSensorDataJson();
+  sendToReceiver(jsonData);
 
   lastSendMs = now;
   payloadDirty = false;
 }
 
+
 char nextHexChar(char c) {
-  if (c >= '0' && c < '9') return c + 1;
-  if (c == '9') return 'A';
-  if (c >= 'A' && c < 'F') return c + 1;
+  if (c >= '0' && c < '9')
+    return c + 1;
+  if (c == '9')
+    return 'A';
+  if (c >= 'A' && c < 'F')
+    return c + 1;
   return '0';
 }
 
-void hexToBytes(char* str, uint8_t* mac) {
+void hexToBytes(char *str, uint8_t *mac) {
   for (int i = 0; i < 6; i++) {
     char b[3] = { str[i * 2], str[i * 2 + 1], '\0' };
     mac[i] = strtoul(b, NULL, 16);
   }
 }
 
-void bytesToHex(uint8_t* mac, char* out) {
+void bytesToHex(uint8_t *mac, char *out) {
   for (int i = 0; i < 6; i++) {
     sprintf(out + i * 2, "%02X", mac[i]);
   }
   out[12] = '\0';
 }
 
-void saveMAC(uint8_t* mac, int id) {
+void saveMAC(uint8_t *mac, int id) {
   for (int i = 0; i < 6; i++) {
     EEPROM.write(i, mac[i]);
   }
@@ -672,13 +519,13 @@ void saveMAC(uint8_t* mac, int id) {
   EEPROM.commit();
 }
 
-void loadMAC(uint8_t* mac) {
+void loadMAC(uint8_t *mac) {
   for (int i = 0; i < 6; i++) {
     mac[i] = EEPROM.read(i);
   }
 }
 
-bool isValidMAC(uint8_t* mac) {
+bool isValidMAC(uint8_t *mac) {
   bool allFF = true;
   for (int i = 0; i < 6; i++) {
     if (mac[i] != 0xFF) {
@@ -716,7 +563,8 @@ void drawMainScreen() {
 
   for (int i = 0; i < 6; i++) {
     display.printf("%02X", currentMac[i]);
-    if (i < 5) display.print(":");
+    if (i < 5)
+      display.print(":");
   }
 
   display.setCursor(0, 30);
@@ -728,7 +576,8 @@ void drawMainScreen() {
   display.print(onlineCount);
   display.print("/8");
 
-  if (!g_i2cPollBusy) display.display();
+  if (!g_i2cPollBusy)
+    display.display();
 }
 
 void drawNodeStatusPage() {
@@ -761,15 +610,16 @@ void drawNodeStatusPage() {
     display.print(": ");
     display.print(nodeOnline[idx] ? "On " : "Off");
   }
-  
-  if (!g_i2cPollBusy) display.display();
+
+  if (!g_i2cPollBusy)
+    display.display();
 }
 
-void printMacFormatted(const char* raw, int cursorIndex) {
+void printMacFormatted(const char *raw, int cursorIndex) {
   char line1[16], line2[16];
-  snprintf(line1, sizeof(line1), "%c%c:%c%c:%c%c", 
+  snprintf(line1, sizeof(line1), "%c%c:%c%c:%c%c",
            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]);
-  snprintf(line2, sizeof(line2), "%c%c:%c%c:%c%c", 
+  snprintf(line2, sizeof(line2), "%c%c:%c%c:%c%c",
            raw[6], raw[7], raw[8], raw[9], raw[10], raw[11]);
 
   const int x0 = 0, y1 = 14, y2 = y1 + 14, charW = 6, charH = 8;
@@ -799,7 +649,7 @@ void printMacFormatted(const char* raw, int cursorIndex) {
 
   display.setCursor(0, y2 + 14);
   display.print("Sender ID: ");
-  
+
   if (cursorIndex == 12) {
     int xSID = display.getCursorX();
     int ySID = y2 + 14;
@@ -823,14 +673,16 @@ void showMACEntry() {
   printMacFormatted(macStr, cursor);
   display.setCursor(0, 56);
   display.print("NEXT=Move  INC=Edit");
-  if (!g_i2cPollBusy) display.display();
+  if (!g_i2cPollBusy)
+    display.display();
 }
 
-void showMessage(const char* l1, const char* l2) {
+void showMessage(const char *l1, const char *l2) {
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println(l1);
   display.setCursor(0, 20);
   display.println(l2);
-  if (!g_i2cPollBusy) display.display();
+  if (!g_i2cPollBusy)
+    display.display();
 }

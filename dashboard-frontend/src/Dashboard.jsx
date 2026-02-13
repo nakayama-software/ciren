@@ -8,18 +8,23 @@ import { translations } from './utils/translation';
 import { fmtHHMMSS, fmtJaTime, normalizeSensorNode } from './utils/helpers';
 import LeafletMap from './components/LeafletMap';
 import ControllerDetailView from './components/ControllerDetailView';
+import { useParams } from 'react-router-dom';
 
 // Konfigurasi dasar
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const HUB_OFFLINE_MS = 12_000;
 const NODE_OFFLINE_MS = 8_000;
-const RASPI_ALIVE_MS = 15_000;
+const RASPI_ALIVE_MS = 120000; // 2 minutes
 const MAX_HUB_AGE = 10_000;
-const GPS_TIMEOUT_MS = 15000; // 15 detik
+const GPS_TIMEOUT_MS = 120000; // 2 minutes
+const POLL_MS = 100;
+
 
 // ============================ Main Component ============================
 export default function Dashboard() {
-  const usernameProp = "raihan";
+  const { userID } = useParams();
+  const inFlightRef = useRef(false);
+
   const [language, setLanguage] = useState('ja');
   const t = useMemo(() => translations[language], [language]);
 
@@ -57,7 +62,6 @@ export default function Dashboard() {
     }
   }, [gpsData]);
 
-  // --- Timer waktu lokal ---
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -68,104 +72,112 @@ export default function Dashboard() {
   }, [startTime]);
 
   useEffect(() => {
-    let stop = false;
+    let disposed = false;
+    let timerId = null;
     let pollId;
 
-    async function resolveAndLoad() {
+
+
+    async function fetchAndBuild() {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       try {
-        setLoading(true);
         setErr(null);
 
-        // resolve alias → raspi_serial_id
-        const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(usernameProp)}`);
-        if (!r.ok) throw new Error("resolve failed");
-        const jr = await r.json();
-        const raspiId = jr.raspi_serial_id;
+        const res = await fetch(
+          `${import.meta.env.VITE_API_BASE || ''}/api/dashboard?username=${encodeURIComponent(userID)}`,
+          {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
+          }
+        );
 
-        if (stop) return;
+        if (!res.ok) throw new Error('failed /api/dashboard');
+        const hubJson = await res.json();
 
-        console.log(raspiId);
-
-        setRaspiID(raspiId);
-
-        await fetchAndBuild(raspiId);
-        pollId = setInterval(() => fetchAndBuild(raspiId), 1000);
-      } catch (e) {
-        if (!stop) setErr(e.message || String(e));
-      } finally {
-        if (!stop) setLoading(false);
-      }
-    }
-
-    async function fetchAndBuild(raspiId) {
-      try {
-        // ===========================================
-        // ✅ Satu panggilan saja: /api/data/:raspiID
-        // ===========================================
-        const hubRes = await fetch(`${API_BASE}/api/data/${raspiId}`);
-        if (!hubRes.ok) throw new Error("failed /api/data");
-        const hubJson = await hubRes.json();
-      
+        setRaspiID(hubJson.dashboardData?.raspberry_serial_id || null);;
+        // console.log("hubJson : ", hubJson);
 
         // ---- Raspi status dari /api/data
         const rs = hubJson.raspi_status || null;
-        const lastTs = rs?.last_seen ? new Date(rs.last_seen).getTime() : 0;
-        const tempC = typeof rs?.temp_c === 'number' ? rs.temp_c : null;
+        const lastTs = hubJson.dashboardData?.timestamp_raspberry
+          ? new Date(hubJson.dashboardData.timestamp_raspberry).getTime()
+          : 0;
+
+        const tempC = hubJson.dashboardData?.temperature ?? null;
         const uptimeS = typeof rs?.uptime_s === 'number' ? rs.uptime_s : null;
+
         setRaspiStatus({ lastTs, tempC, uptimeS });
 
-        // ---- Hubs (grouped) → flatten kartu controller terbaru saja
-        const hubsRaw = hubJson.hubs || {};
+        const hubsRaw = hubJson.dashboardData || {};
         const now = Date.now();
         const newControllers = [];
 
+        // console.log("hubsRaw :", hubsRaw);
+
         for (const hubId of Object.keys(hubsRaw)) {
           const records = hubsRaw[hubId];
+          // console.log("records :", records);
+
           if (!Array.isArray(records) || records.length === 0) continue;
 
           const latest = records[0];
-          
+          // console.log("latest :", latest);
+
           const ts = new Date(latest.timestamp).getTime();
-          // skip jika last seen > MAX_HUB_AGE
           if (now - ts > MAX_HUB_AGE) continue;
 
+          // console.log("hubJson.dashboardData.raspberry_serial_id :", hubJson.dashboardData.raspberry_serial_id);
+          // console.log("latest :", latest);
+
           newControllers.push({
-            raspi_id: hubJson.raspi_serial_id,
-            sensor_controller_id: hubId,
-            sensor_nodes: (latest.nodes || []).map(normalizeSensorNode),
+            raspi_id: hubJson.dashboardData.raspberry_serial_id || null,
+            sensor_controller_id: hubJson.dashboardData.sensor_controllers[0]?.module_id,
+            sensor_nodes: (latest.sensor_datas || []).map(normalizeSensorNode),
             last_seen: ts,
           });
         }
 
-        newControllers.sort((a, b) => Number(a.sensor_controller_id) - Number(b.sensor_controller_id));
+        newControllers.sort(
+          (a, b) => Number(a.sensor_controller_id) - Number(b.sensor_controller_id)
+        );
         setControllersLatest(newControllers);
 
-        // ---- GPS
-        const gps = hubJson.gps || null;
+        // ---- GPS ---
+        const gps = hubJson.dashboardData.gps_data || null;
         gpsDataSet(gps);
 
-        // Hindari error saat gps null
-        const checkConnection = () => {
-          const ts = gps?.timestamp ? new Date(gps.timestamp).getTime() : 0;
-          const now = Date.now();
-          setGpsDisconnected(!gps || (now - ts > GPS_TIMEOUT_MS));
-        };
-        checkConnection();
+        const ts = gps?.timestamp_gps ? new Date(gps.timestamp_gps).getTime() : 0;
+        setGpsDisconnected(!gps || now - ts > GPS_TIMEOUT_MS);
+
+        setLoading(false);
 
       } catch (e) {
-        setErr(e.message || String(e));
+        if (!disposed) {
+          setErr(e?.message || String(e));
+          setLoading(false);
+        }
+      } finally {
+        inFlightRef.current = false;
       }
     }
+    async function tick() {
+      if (disposed) return;
+      await fetchAndBuild();
+      if (!disposed) timerId = setTimeout(tick, POLL_MS);
+    }
 
-    resolveAndLoad();
+    setLoading(true);
+    tick();
+
     return () => {
-      stop = true;
-      if (pollId) clearInterval(pollId);
+      disposed = true;
+      if (timerId) clearTimeout(timerId);
     };
-  }, [usernameProp]);
+  }, [userID]);
 
 
-  // --- Kondisi tampilan ---
   if (loading && !raspiID) {
     return (
       <div className="h-screen w-screen flex items-center justify-center text-xl font-medium text-gray-600 dark:text-gray-300">
@@ -182,6 +194,7 @@ export default function Dashboard() {
     );
   }
 
+  // console.log("controllersLatest : ",controllersLatest);
 
   const selectedController = controllersLatest.find(c => c.sensor_controller_id === selectedControllerId);
 
@@ -216,7 +229,7 @@ export default function Dashboard() {
               </div>
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">
-                  {usernameProp}{t.dashboard.title}
+                  {userID}{t.dashboard.title}
                 </h1>
                 <p className="text-xs text-gray-600 dark:text-gray-400">
                   {t.dashboard.raspiId} <code className="text-cyan-600 dark:text-cyan-400">{raspiID}</code>

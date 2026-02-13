@@ -77,18 +77,16 @@ function Register() {
     }
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/register-alias`, {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, raspi_serial_id: raspiID }),
+        body: JSON.stringify({ username, raspberry_serial_id: raspiID }),
       });
 
-      // ✅ jika tidak JSON, tangani aman
       let data = {};
       try {
         data = await res.json();
       } catch {
-        // response kosong atau bukan JSON
         data = {};
       }
 

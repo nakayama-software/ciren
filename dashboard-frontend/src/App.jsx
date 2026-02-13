@@ -111,8 +111,7 @@ function App() {
       return;
     }
     setErrorMsg(null);
-    const username = 'raihan';
-    navigate(`/ciren/${username}/dashboard`);
+    navigate(`/ciren/${userInput}/dashboard`);
   };
 
   // --- UI components ---
