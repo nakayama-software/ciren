@@ -1,26 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import * as THREE from "three";
 import { Move3d, Thermometer } from "lucide-react";
+import { socket } from "../../lib/socket";
 
 function extractPayload(raw) {
   if (!raw || typeof raw !== "string") return "";
   const s = raw.trim();
   if (!s) return "";
-
-  // Format lama: ID=Imu;VAL=...
   const idx = s.indexOf("VAL=");
   if (idx >= 0) return s.slice(idx + 4).trim();
-
-  // Format baru: "1-Imu-...."
   const i1 = s.indexOf("-");
   if (i1 >= 0) {
     const i2 = s.indexOf("-", i1 + 1);
     if (i2 >= 0) return s.slice(i2 + 1).trim();
   }
-
-  // payload murni
   return s;
 }
 
@@ -52,7 +46,6 @@ function getReadingValue(node, key) {
 }
 
 function buildIMUFromNode(node) {
-  // 1) Hasil normalizer baru: node.parsed.imu
   const imu = node?.parsed?.imu;
   if (imu?.accel && imu?.gyro) {
     return {
@@ -62,7 +55,6 @@ function buildIMUFromNode(node) {
     };
   }
 
-  // 2) Dari readings ax..gz,temp
   const ax = getReadingValue(node, "ax");
   const ay = getReadingValue(node, "ay");
   const az = getReadingValue(node, "az");
@@ -82,7 +74,6 @@ function buildIMUFromNode(node) {
     };
   }
 
-  // 3) Fallback parse dari sensor_data / value string (format lama)
   const fallbackRaw =
     (typeof node?.sensor_data === "string" && node.sensor_data) ||
     (typeof node?.value === "string" && node.value) ||
@@ -113,10 +104,38 @@ function fmt(n, d = 2) {
   return Number(n).toFixed(d);
 }
 
+function normalizeSensorType(s) {
+  return String(s || "").toLowerCase().trim();
+}
+
+function getPortFromNode(n) {
+  const pn = Number(n?.port_number);
+  if (Number.isFinite(pn) && pn > 0) return pn;
+  const id = String(n?.node_id || "");
+  const m = id.match(/^p(\d+)$/i);
+  return m ? Number(m[1]) : null;
+}
+
+function pickNodeByPort(nodeOrNodes, portId) {
+  const p = Number(portId);
+  if (!Number.isFinite(p)) return null;
+
+  if (Array.isArray(nodeOrNodes)) {
+    return nodeOrNodes.find((n) => getPortFromNode(n) === p) || null;
+  }
+
+  if (nodeOrNodes && typeof nodeOrNodes === "object") {
+    const pn = getPortFromNode(nodeOrNodes);
+    if (pn === p) return nodeOrNodes;
+  }
+
+  return null;
+}
+
 function IMUObject({ imuRef, filterRef }) {
   const meshRef = useRef(null);
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
 
@@ -138,7 +157,6 @@ function IMUObject({ imuRef, filterRef }) {
     if (filter.useComplementary) {
       const { roll: rollAcc, pitch: pitchAcc } = eulerFromAccel(imu.accelerometer);
       const a = clamp(filter.alpha, 0, 1);
-
       filter.roll = a * rollGyro + (1 - a) * rollAcc;
       filter.pitch = a * pitchGyro + (1 - a) * pitchAcc;
       filter.yaw = yawGyro;
@@ -169,10 +187,25 @@ function IMUObject({ imuRef, filterRef }) {
   );
 }
 
-export default function IMU3DModal({ open, onClose, node }) {
-  const parsed = useMemo(() => buildIMUFromNode(node), [node]);
+export default function IMU3DModal({
+  open,
+  onClose,
+  raspiId,
+  hubId,
+  portId,
+  sensorTypeHint,
+  node,
+}) {
+  const raspiKey = useMemo(() => String(raspiId || "").toLowerCase().trim(), [raspiId]);
+  const hubKey = useMemo(() => String(hubId || "").trim(), [hubId]);
+  const portKey = useMemo(() => Number(portId), [portId]);
+  const sensorKey = useMemo(() => normalizeSensorType(sensorTypeHint || "imu"), [sensorTypeHint]);
 
+  const baseNode = useMemo(() => pickNodeByPort(node, portKey), [node, portKey]);
+
+  const [imu, setImu] = useState(() => buildIMUFromNode(baseNode));
   const imuRef = useRef(null);
+
   const filterRef = useRef({
     roll: 0,
     pitch: 0,
@@ -183,6 +216,7 @@ export default function IMU3DModal({ open, onClose, node }) {
 
   const [alphaUi, setAlphaUi] = useState(0.98);
   const [useComp, setUseComp] = useState(true);
+  const [ori, setOri] = useState({ roll: 0, pitch: 0, yaw: 0 });
 
   useEffect(() => {
     filterRef.current.alpha = alphaUi;
@@ -193,21 +227,85 @@ export default function IMU3DModal({ open, onClose, node }) {
   }, [useComp]);
 
   useEffect(() => {
-    imuRef.current = parsed;
-  }, [parsed]);
+    imuRef.current = imu || null;
+  }, [imu]);
+
+  useEffect(() => {
+    if (!open) return;
+    filterRef.current.roll = 0;
+    filterRef.current.pitch = 0;
+    filterRef.current.yaw = 0;
+  }, [open, raspiKey, hubKey, portKey, sensorKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    setImu(buildIMUFromNode(baseNode));
+  }, [open, baseNode]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => {
+      const f = filterRef.current;
+      setOri({ roll: f.roll, pitch: f.pitch, yaw: f.yaw });
+    }, 120);
+    return () => clearInterval(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handler = (p) => {
+      if (!p) return;
+
+      const pRaspi = String(p.raspberry_serial_id || p.raspi_serial_id || "").toLowerCase().trim();
+      const pHub = String(p.module_id || p.hub_id || "").trim();
+      const pPort = Number(p.port_number ?? p.port_id);
+      const pType = normalizeSensorType(p.sensor_type);
+
+      if (raspiKey && pRaspi && pRaspi !== raspiKey) return;
+      if (hubKey && pHub && pHub !== hubKey) return;
+      if (Number.isFinite(portKey) && Number.isFinite(pPort) && pPort !== portKey) return;
+
+      if (sensorKey && pType && pType !== sensorKey) return;
+      if (sensorKey && !pType && sensorKey !== "imu") return;
+
+      const virtualNode = {
+        ...p,
+        parsed: p.parsed,
+        readings: p.readings,
+        sensor_data: p.sensor_data,
+        value: p.value,
+        sensor_type: p.sensor_type || sensorKey,
+      };
+
+      const next = buildIMUFromNode(virtualNode);
+      if (!next) return;
+      setImu(next);
+    };
+
+    socket.on("node-sample", handler);
+    socket.on("sensor-reading", handler);
+
+    return () => {
+      socket.off("node-sample", handler);
+      socket.off("sensor-reading", handler);
+    };
+  }, [open, raspiKey, hubKey, portKey, sensorKey]);
 
   if (!open) return null;
 
-  const acc = parsed?.accelerometer;
-  const gyr = parsed?.gyroscope;
-  const temp = parsed?.temperature ?? null;
+  const acc = imu?.accelerometer || null;
+  const gyr = imu?.gyroscope || null;
+  const temp = imu?.temperature ?? null;
+
+  const headerNodeId = baseNode?.node_id || `P${portKey}`;
+  const headerType = normalizeSensorType(baseNode?.sensor_type || sensorKey || "imu") || "imu";
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
       <div className="relative w-[min(1100px,94vw)] rounded-2xl border border-white/10 bg-slate-950 p-4">
-        {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="rounded-lg bg-indigo-500/10 border border-indigo-400/20 p-2">
@@ -216,7 +314,7 @@ export default function IMU3DModal({ open, onClose, node }) {
             <div className="min-w-0">
               <p className="text-white font-semibold">IMU 3D View</p>
               <p className="text-xs text-gray-400 truncate">
-                {node?.node_id ?? "-"} • {String(node?.sensor_type ?? "imu")}
+                {hubId ?? "-"} • {headerNodeId} • {headerType}
               </p>
             </div>
           </div>
@@ -238,7 +336,6 @@ export default function IMU3DModal({ open, onClose, node }) {
           </div>
         </div>
 
-        {/* Content */}
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 rounded-xl border border-white/10 bg-black/30 overflow-hidden">
             <div className="h-[420px]">
@@ -327,9 +424,6 @@ export default function IMU3DModal({ open, onClose, node }) {
                     className="w-full mt-2"
                     disabled={!useComp}
                   />
-                  <p className="text-[11px] text-gray-500 mt-2">
-                    Higher alpha = more gyro (responsive). Lower alpha = more accel (stable).
-                  </p>
                 </div>
               </div>
 
@@ -337,9 +431,9 @@ export default function IMU3DModal({ open, onClose, node }) {
                 <p className="text-[11px] text-gray-400">Orientation (rad)</p>
                 <div className="mt-2 grid grid-cols-3 gap-2">
                   {[
-                    { k: "Roll", v: filterRef.current.roll },
-                    { k: "Pitch", v: filterRef.current.pitch },
-                    { k: "Yaw", v: filterRef.current.yaw },
+                    { k: "Roll", v: ori.roll },
+                    { k: "Pitch", v: ori.pitch },
+                    { k: "Yaw", v: ori.yaw },
                   ].map((it) => (
                     <div key={it.k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2">
                       <p className="text-[10px] text-gray-400">{it.k}</p>
@@ -349,19 +443,15 @@ export default function IMU3DModal({ open, onClose, node }) {
                 </div>
               </div>
 
-              {!parsed ? (
+              {!imu ? (
                 <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3">
                   <p className="text-xs text-red-200">Invalid IMU payload</p>
-                  <p className="text-[11px] text-red-200/70 mt-1">
-                    Data not valid
-                  </p>
                 </div>
               ) : null}
             </div>
           </div>
         </div>
 
-        {/* Footer */}
         <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-end">
           <button
             onClick={onClose}

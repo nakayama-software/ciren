@@ -62,7 +62,7 @@ function SensorDetail() {
       }
     };
 
-    socket.on('new-data', listener);
+    socket.on('connection', listener);
     return () => socket.off('new-data', listener);
   }, [raspiID, sensorID, limit]);
 

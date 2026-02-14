@@ -1,9 +1,29 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { ArrowLeft, Battery, Wifi, Zap, Cpu } from "lucide-react";
+import LineChartModal from "./charts/LineChartModal";
+import IMU3DModal from "./charts/IMU3DModal";
+import ResetPortModal from "./ResetPortModal";
 import SensorRenderer from "./SensorRenderer";
 
 export default function ControllerDetailView({ controller, onBack, t }) {
-    // console.log("controller : ", controller);
+    const [activeDetail, setActiveDetail] = useState(null);
+
+    const sensor_nodes_filtered = controller.sensor_nodes.filter(node => !node.sensor_data.includes("null"))
+    console.log(sensor_nodes_filtered);
+    
+    const hubId = useMemo(() => {
+        return String(controller?.sensor_controller_id || "").trim();
+    }, [controller]);
+
+    const raspiId = useMemo(() => {
+        return String(controller?.raspberry_serial_id || "").trim();
+    }, [controller]);
+
+    const closeDetail = () => setActiveDetail(null);
+
+    const handleResetSuccess = (result) => {
+        closeDetail();
+    };
 
     return (
         <div className="rounded-2xl border border-black/10 bg-white/80 p-6 dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
@@ -32,31 +52,57 @@ export default function ControllerDetailView({ controller, onBack, t }) {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                 <InfoBox icon={<Battery />} label={t.controllerDetail.battery} value={`${controller.battery_level}%`} />
                 <InfoBox icon={<Wifi />} label={t.controllerDetail.signal} value={`${controller.signal_strength} dBm`} />
-                <InfoBox icon={<Zap />} label={t.controllerDetail.sensorNodes} value={controller.sensor_nodes.length} />
+                <InfoBox icon={<Zap />} label={t.controllerDetail.sensorNodes} value={sensor_nodes_filtered.length} />
             </div>
 
             <h3 className="text-base font-medium mb-4">{t.controllerDetail.history}</h3>
 
-            {controller.sensor_nodes.length === 0 ? (
+            {sensor_nodes_filtered.length === 0 ? (
                 <div className="border bg-yellow-500/10 p-3 text-yellow-800">
                     {t.controllerDetail.noNode}
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {controller.sensor_nodes.map((node, i) => {
-                        // console.log("2222",node);
-                        return (
-                            <SensorRenderer
-                                key={i}
-                                node={node}
-                                hubId={controller.sensor_controller_id}
-                                raspiId={controller.raspi_id}
-                                t={t}
-                            />
-                        )
-                    })}
+                    {sensor_nodes_filtered.map((node) => (
+                        <SensorRenderer
+                            key={`${hubId}-${node.node_id}`}
+                            node={node}
+                            hubId={hubId}
+                            raspiId={raspiId}
+                            onOpenDetail={(payload) => setActiveDetail(payload)}
+                        />
+                    ))}
                 </div>
             )}
+
+            <LineChartModal
+                open={activeDetail?.type === "line"}
+                onClose={closeDetail}
+                raspiId={controller?.raspi_id}
+                hubId={activeDetail?.hubId}
+                portId={activeDetail?.portId}
+                sensorTypeHint={activeDetail?.sensorTypeHint}
+            />
+
+            <IMU3DModal
+                open={activeDetail?.type === "imu3d"}
+                onClose={closeDetail}
+                raspiId={controller?.raspi_id}
+                hubId={activeDetail?.hubId}
+                portId={activeDetail?.portId}
+                sensorTypeHint={activeDetail?.sensorTypeHint}
+                node={sensor_nodes_filtered}
+            />
+
+            <ResetPortModal
+                open={activeDetail?.type === "reset"}
+                onClose={closeDetail}
+                raspiId={activeDetail?.raspiId}
+                hubId={activeDetail?.hubId}
+                portId={activeDetail?.portId}
+                sensorType={activeDetail?.sensorTypeHint}
+                onSuccess={handleResetSuccess}
+            />
         </div>
     );
 }

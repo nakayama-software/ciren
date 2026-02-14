@@ -302,7 +302,7 @@ app.post('/api/sensor-data', async (req, res) => {
       });
     }
 
-    await SensorReading.insertMany(readings, { ordered: true });
+    const inserted = await SensorReading.insertMany(readings, { ordered: true });
 
     let sensorController = await SensorController.findOne({
       module_id: moduleId,
@@ -326,9 +326,23 @@ app.post('/api/sensor-data', async (req, res) => {
 
     await sensorController.save();
 
+    for (const doc of inserted) {
+      io.emit('node-sample', {
+        _id: String(doc._id),
+        raspberry_serial_id: doc.raspberry_serial_id,
+        module_id: doc.module_id,
+        port_number: doc.port_number,
+        sensor_type: doc.sensor_type,
+        value: doc.value,
+        unit: doc.unit ?? null,
+        timestamp_device: doc.timestamp_device ?? null,
+        timestamp_server: doc.timestamp_server ?? now,
+      });
+    }
+
     return res.json({
       success: true,
-      inserted_count: readings.length,
+      inserted_count: inserted.length,
       skipped_count: skipped.length,
       skipped,
       sensorController,
@@ -342,6 +356,8 @@ app.post('/api/sensor-data', async (req, res) => {
 
 app.get('/api/sensor-readings', async (req, res) => {
   try {
+    console.log("1111");
+    
     const {
       raspberry_serial_id,
       module_id,
@@ -425,9 +441,6 @@ app.delete('/api/sensor-readings', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
-
-
 
 io.on('connection', (socket) => {
   // console.log('Client connected:', socket.id);
