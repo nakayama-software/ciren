@@ -6,6 +6,8 @@ import HumidityAndTemperatureCard from "./sensors/HumidityAndTemperatureCard";
 import ImuCard from "./sensors/IMUCard";
 import IMU3DModal from "./charts/IMU3DModal";
 import { normalizeSensorType } from "../utils/helpers";
+import UltrasonicCard from "./sensors/UltrasonicCard";
+import RotaryCard from "./sensors/RotaryCard";
 
 const SENSOR_REGISTRY = {
   hum_temp: {
@@ -36,6 +38,20 @@ const SENSOR_REGISTRY = {
     Card: null,
     detail: { type: "linearChart" },
   },
+  us: {
+    label: "us",
+    Icon: Droplets,
+    colors: { icon: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
+    Card: (props) => <UltrasonicCard {...props} variant="embedded" />,
+    detail: { type: "linearChart" },
+  },
+  rotary_sensor: {
+    label: "rotary_sensor",
+    Icon: Droplets,
+    colors: { icon: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
+    Card: (props) => <RotaryCard {...props} variant="embedded" />,
+    detail: { type: "rotary_sensor" },
+  },
 };
 
 const DEFAULT_META = {
@@ -55,6 +71,8 @@ export default function SensorRenderer({ node, hubId, raspiId, onReset, onOpenDe
 
   const portId = Number(String(node?.node_id || "").replace(/^P/i, "")) || null;
   const sensorType = normalizeSensorType(node?.sensor_type);
+  // console.log("sensorType : ", sensorType);
+
 
   const meta = useMemo(() => {
     return SENSOR_REGISTRY[sensorType] || {
@@ -65,94 +83,8 @@ export default function SensorRenderer({ node, hubId, raspiId, onReset, onOpenDe
 
   const { Icon, colors, Card, detail } = meta;
 
-  const getReading = (key) => {
-    const readings = Array.isArray(node?.readings) ? node.readings : [];
-    return readings.find((r) => r?.key === key) || null;
-  };
-
-
-  const renderFallbackValue = () => {
-    const readings = Array.isArray(node?.readings) ? node.readings : [];
-    const val = node?.value;
-
-
-    // console.log("node : ", node);
-    //     {
-    //     "port_number": 1,
-    //     "sensor_data": "1-Imu-3.92,1.56,9.15|0.00,-0.01,-0.00|29.28", //port_number-sensor_type-value
-    //     "_id": "698e7ad25ae63472f16e7789",
-    //     "sensor_type": "unknown",
-    //     "readings": [],
-    //     "unit": ""
-    // }
-
-    if (readings.length > 0) {
-      const primary = readings[0];
-      const secondary = readings[1];
-
-      return (
-        <div className="space-y-2">
-          {primary && (
-            <div>
-              <div className="text-2xl font-bold text-slate-900 dark:text-white">
-                {typeof primary.value === "number" ? primary.value.toFixed(2) : primary.value}
-                {primary.unit ? (
-                  <span className="text-base ml-1 text-gray-600 dark:text-gray-400">{primary.unit}</span>
-                ) : null}
-              </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">{primary.label}</div>
-            </div>
-          )}
-
-          {secondary && (
-            <div className="pt-2 border-t border-black/10 dark:border-white/10">
-              <span className="text-sm font-medium text-slate-900 dark:text-white">
-                {typeof secondary.value === "number" ? secondary.value.toFixed(2) : secondary.value}
-              </span>
-              <span className="text-xs text-gray-600 dark:text-gray-400 ml-2">
-                {secondary.unit} {secondary.label}
-              </span>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (typeof val === "number") {
-      return (
-        <>
-          {val.toFixed(2)}
-          {node?.unit ? <span className="text-base ml-1 text-gray-600 dark:text-gray-400">{node.unit}</span> : null}
-        </>
-      );
-    }
-
-    return (
-      <>
-        {String(val ?? "--")}
-        {node?.unit ? <span className="text-base ml-1 text-gray-600 dark:text-gray-400">{node.unit}</span> : null}
-      </>
-    );
-  };
-
   const renderCardBody = () => {
     if (Card) return <Card node={node} />;
-
-    if (sensorType === "rotary_encoder" || sensorType === "rotary_sensor" || sensorType === "encoder") {
-      const dirReading = getReading("direction");
-      const stepsReading = getReading("steps");
-
-      return (
-        <div className="space-y-1">
-          {dirReading ? <div className="text-2xl font-bold">{dirReading.value}</div> : null}
-          {stepsReading ? (
-            <div className="text-sm text-gray-600 dark:text-gray-400">Count: {stepsReading.value}</div>
-          ) : null}
-        </div>
-      );
-    }
-
-    return renderFallbackValue();
   };
 
   const openDetail = () => {
@@ -160,6 +92,17 @@ export default function SensorRenderer({ node, hubId, raspiId, onReset, onOpenDe
     if (detail?.type === "imu3d") {
       onOpenDetail?.({
         type: "imu3d",
+        raspiId,
+        hubId,
+        portId,
+        sensorTypeHint: node?.sensor_type,
+      });
+      return;
+    }
+
+    if (detail?.type === "rotary_sensor") {
+      onOpenDetail?.({
+        type: "rotary_sensor",
         raspiId,
         hubId,
         portId,

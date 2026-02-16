@@ -1,11 +1,3 @@
-// ESP32_8port_UART_Hub_Optimized.ino
-// Improvements:
-// - Removed all code duplications
-// - Optimized JSON splitting algorithm (more ports per packet)
-// - Fixed all bugs
-// - Cleaner code structure
-// - Better packet management (2-4 ports per packet instead of 1)
-
 #include <HardwareSerial.h>
 #include <SoftwareSerial.h>
 #include <WiFi.h>
@@ -44,8 +36,12 @@ String bufP1, bufP2, bufP3, bufP4, bufP5, bufP6, bufP7, bufP8;
 int senderID = 1;  // Hub identity (1..9 stored in EEPROM)
 const int maxSenderID = 9;
 
-const unsigned long OFFLINE_TIMEOUT_MS = 10000UL;  // Node marked OFFLINE after 10s
-const unsigned long SEND_INTERVAL_MS = 2000UL;     // Send JSON every 2s (data/heartbeat)
+// ===== Round-robin TX state =====
+uint8_t rrPort = 1;          // 1..8
+uint16_t cycleId = 0;  
+
+const unsigned long OFFLINE_TIMEOUT_MS = 10000UL; 
+const unsigned long SEND_INTERVAL_MS = 200UL;   
 unsigned long lastSendMs = 0;
 
 #define EEPROM_SIZE 7
@@ -447,30 +443,48 @@ void sendToReceiver(const String &msg) {
   Serial.printf("len=%d result=%d\n", msg.length(), (int)result);
 }
 
-String buildSensorDataJson() {
-  String s;
-  s += "@sensor_data_start\n";
-  int senderID = loadSenderID(); 
 
-  for (int i = 0; i < 8; ++i) {
-    if (nodeOnline[i]) {
-      if (lastPayload[i].length() > 0) {
-        s += "p" + String(i + 1) + "-" + lastPayload[i] + "\n";
-      } else {
-        s += "p" + String(i + 1) + "-null-null\n";
-      }
-    } else {
-      s += "p" + String(i + 1) + "-null-null\n";
-    }
+String buildSinglePortJson(uint8_t portId) {
+  const uint8_t idx = portId - 1;
+
+  if (portId == 1) {
+    cycleId++;
+    if (cycleId == 0) cycleId = 1;
   }
 
-  s += "@sensor_data_end\n";
+  String s;
+  s.reserve(160);
 
-  String jsonPayload = "{\"sender_id\":" + String(senderID) + ", \"data\":\"" + s + "\"}";
+  if (portId == 1) {
+    s += "@sensor_data_start\n";
+  }
 
-  return jsonPayload;  
+  if (nodeOnline[idx] && lastPayload[idx].length() > 0) {
+    s += "p" + String(portId) + "-" + lastPayload[idx] + "\n";
+  } else {
+    s += "p" + String(portId) + "-null-null\n";
+  }
+
+  if (portId == 8) {
+    s += "@sensor_data_end\n";
+  }
+
+  int sid = loadSenderID();
+
+  String json;
+  json.reserve(220);
+  json = "{\"sender_id\":";
+  json += sid;
+  json += ",\"cycle\":";
+  json += cycleId;
+  json += ",\"port\":";
+  json += portId;
+  json += ",\"data\":\"";
+  json += s;
+  json += "\"}";
+
+  return json;
 }
-
 
 void maybeSendJson() {
   unsigned long now = millis();
@@ -479,12 +493,21 @@ void maybeSendJson() {
   if (!timeToSend && !payloadDirty) return;
   if (!macValid) return;
 
-  String jsonData = buildSensorDataJson();
-  sendToReceiver(jsonData);
+  String msg = buildSinglePortJson(rrPort);
+
+  if (msg.length() > 240) {
+    Serial.printf("JSON too long (%d). Not sent.\n", msg.length());
+  } else {
+    sendToReceiver(msg);
+  }
+
+  rrPort++;
+  if (rrPort > 8) rrPort = 1;
 
   lastSendMs = now;
   payloadDirty = false;
 }
+
 
 
 char nextHexChar(char c) {

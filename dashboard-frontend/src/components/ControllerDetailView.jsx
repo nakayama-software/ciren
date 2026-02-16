@@ -4,13 +4,16 @@ import LineChartModal from "./charts/LineChartModal";
 import IMU3DModal from "./charts/IMU3DModal";
 import ResetPortModal from "./ResetPortModal";
 import SensorRenderer from "./SensorRenderer";
+import RotaryChartModal from "./charts/RotaryChartModal";
 
 export default function ControllerDetailView({ controller, onBack, t }) {
     const [activeDetail, setActiveDetail] = useState(null);
 
+    // console.log("controller : ",controller);
+
     const sensor_nodes_filtered = controller.sensor_nodes.filter(node => !node.sensor_data.includes("null"))
-    console.log(sensor_nodes_filtered);
-    
+    // console.log("sensor_nodes_filtered : ",sensor_nodes_filtered);
+
     const hubId = useMemo(() => {
         return String(controller?.sensor_controller_id || "").trim();
     }, [controller]);
@@ -94,10 +97,20 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 node={sensor_nodes_filtered}
             />
 
+            <RotaryChartModal
+                open={activeDetail?.type === "rotary_sensor"}
+                onClose={closeDetail}
+                raspiId={controller?.raspi_id}
+                hubId={activeDetail?.hubId}
+                portId={activeDetail?.portId}
+                sensorTypeHint={activeDetail?.sensorTypeHint}
+                node={sensor_nodes_filtered}
+            />
+
             <ResetPortModal
                 open={activeDetail?.type === "reset"}
                 onClose={closeDetail}
-                raspiId={activeDetail?.raspiId}
+                raspiId={controller?.raspi_id}
                 hubId={activeDetail?.hubId}
                 portId={activeDetail?.portId}
                 sensorType={activeDetail?.sensorTypeHint}

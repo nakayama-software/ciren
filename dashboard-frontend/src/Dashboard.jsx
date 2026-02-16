@@ -41,11 +41,14 @@ export default function Dashboard() {
     html.style.colorScheme = theme;
   }, [theme]);
 
-  // --- State utama ---
+  // --- Main State ---
   const [raspiID, setRaspiID] = useState(null);
   const [controllersLatest, setControllersLatest] = useState([]);
   const [selectedControllerId, setSelectedControllerId] = useState(null);
-  const [err, setErr] = useState(null);
+
+  const [fetchError, setFetchError] = useState(null);
+  const [lastOkAt, setLastOkAt] = useState(0);
+
   const [loading, setLoading] = useState(true);
 
   const [raspiStatus, setRaspiStatus] = useState({ lastTs: 0, tempC: null, uptimeS: null });
@@ -53,6 +56,7 @@ export default function Dashboard() {
   const [startTime] = useState(new Date());
   const [runningTime, setRunningTime] = useState('00:00:00');
   const [gpsDisconnected, setGpsDisconnected] = useState(false);
+  const [activeNode, activeNodeSet] = useState(0);
 
   const [gpsData, gpsDataSet] = useState()
 
@@ -74,16 +78,12 @@ export default function Dashboard() {
   useEffect(() => {
     let disposed = false;
     let timerId = null;
-    let pollId;
-
-
 
     async function fetchAndBuild() {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
-      try {
-        setErr(null);
 
+      try {
         const res = await fetch(
           `${import.meta.env.VITE_API_BASE || ''}/api/dashboard?username=${encodeURIComponent(userID)}`,
           {
@@ -93,13 +93,20 @@ export default function Dashboard() {
           }
         );
 
-        if (!res.ok) throw new Error('failed /api/dashboard');
+        if (!res.ok) {
+          throw new Error(`failed /api/dashboard (HTTP ${res.status})`);
+        }
+
         const hubJson = await res.json();
 
-        setRaspiID(hubJson.dashboardData?.raspberry_serial_id || null);;
-        // console.log("hubJson : ", hubJson);
+        setFetchError(null);
+        setLastOkAt(Date.now());
 
-        // ---- Raspi status dari /api/data
+        // console.log(hubJson);
+        
+
+        setRaspiID(hubJson.dashboardData?.raspberry_serial_id || null);
+
         const rs = hubJson.raspi_status || null;
         const lastTs = hubJson.dashboardData?.timestamp_raspberry
           ? new Date(hubJson.dashboardData.timestamp_raspberry).getTime()
@@ -114,22 +121,13 @@ export default function Dashboard() {
         const now = Date.now();
         const newControllers = [];
 
-        // console.log("hubsRaw :", hubsRaw);
-
         for (const hubId of Object.keys(hubsRaw)) {
           const records = hubsRaw[hubId];
-          // console.log("records :", records);
-
           if (!Array.isArray(records) || records.length === 0) continue;
 
           const latest = records[0];
-          // console.log("latest :", latest);
-
           const ts = new Date(latest.timestamp).getTime();
           if (now - ts > MAX_HUB_AGE) continue;
-
-          // console.log("hubJson.dashboardData.raspberry_serial_id :", hubJson.dashboardData.raspberry_serial_id);
-          // console.log("latest :", latest);
 
           newControllers.push({
             raspi_id: hubJson.dashboardData.raspberry_serial_id || null,
@@ -142,26 +140,30 @@ export default function Dashboard() {
         newControllers.sort(
           (a, b) => Number(a.sensor_controller_id) - Number(b.sensor_controller_id)
         );
-        setControllersLatest(newControllers);
+        // console.log("newControllers : ", newControllers);
+        const sensor_nodes_filtered = newControllers[0].sensor_nodes.filter(node => !node.sensor_data.includes("null"))
+        // console.log("sensor_nodes_filtered : ", newControllers[0].sensor_nodes.filter(node => !node.sensor_data.includes("null")));
 
-        // ---- GPS ---
+        setControllersLatest(newControllers);
+        activeNodeSet(sensor_nodes_filtered.length)
+
         const gps = hubJson.dashboardData.gps_data || null;
         gpsDataSet(gps);
 
-        const ts = gps?.timestamp_gps ? new Date(gps.timestamp_gps).getTime() : 0;
-        setGpsDisconnected(!gps || now - ts > GPS_TIMEOUT_MS);
+        const gpsTs = gps?.timestamp_gps ? new Date(gps.timestamp_gps).getTime() : 0;
+        setGpsDisconnected(!gps || now - gpsTs > GPS_TIMEOUT_MS);
 
         setLoading(false);
-
       } catch (e) {
         if (!disposed) {
-          setErr(e?.message || String(e));
+          setFetchError(e?.message || String(e));
           setLoading(false);
         }
       } finally {
         inFlightRef.current = false;
       }
     }
+
     async function tick() {
       if (disposed) return;
       await fetchAndBuild();
@@ -178,18 +180,12 @@ export default function Dashboard() {
   }, [userID]);
 
 
-  if (loading && !raspiID) {
+  const hasEverLoaded = lastOkAt > 0 || raspiID != null || controllersLatest.length > 0;
+
+  if (loading && !hasEverLoaded) {
     return (
       <div className="h-screen w-screen flex items-center justify-center text-xl font-medium text-gray-600 dark:text-gray-300">
         {t.dashboard.initializing}
-      </div>
-    );
-  }
-
-  if (err) {
-    return (
-      <div className="p-6 text-center text-red-500 dark:text-red-400">
-        Error: {err}
       </div>
     );
   }
@@ -204,7 +200,7 @@ export default function Dashboard() {
   const uptimeStr = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
   const tempStr = raspiStatus.tempC != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
 
-  // --- UI utama ---
+  // --- MAIN UI ---
   return (
     <div
       lang={t.locale}
@@ -255,6 +251,35 @@ export default function Dashboard() {
               </button>
             </div>
           </header>
+
+          {fetchError && (
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-200">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">Fetch error</div>
+                  <div className="text-xs opacity-80 break-words">{fetchError}</div>
+                  {lastOkAt > 0 && (
+                    <div className="mt-1 text-[11px] opacity-70">
+                      Last success: {fmtJaTime(new Date(lastOkAt), t.locale)}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      setLoading(true);
+                      window.location.reload();
+                    })();
+                  }}
+                  className="shrink-0 rounded-lg bg-red-600 px-3 py-2 text-xs font-medium text-white hover:bg-red-700"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="mb-6 text-right text-[11px] font-mono text-gray-600 dark:text-gray-400">
             {fmtJaTime(currentTime, t.locale)}
@@ -356,7 +381,7 @@ export default function Dashboard() {
                             </div>
                             <div className="text-xs text-gray-600 dark:text-gray-400">
                               {hasNodes
-                                ? `${controller.sensor_nodes.length} ${t.dashboard.nodesActive}`
+                                ? `${activeNode} ${t.dashboard.nodesActive}`
                                 : <span className="text-yellow-700 dark:text-yellow-300">{t.dashboard.noNode}</span>
                               }
                             </div>

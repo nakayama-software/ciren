@@ -13,6 +13,12 @@ export default function ResetPortModal({
   sensorType,
   onSuccess,
 }) {
+  // console.log("raspiId : ",raspiId);
+  // console.log("hubId : ",hubId);
+  // console.log("portId : ",portId);
+  // console.log("sensorType : ",sensorType);
+  
+
   const [loading, setLoading] = useState(true);
   const [info, setInfo] = useState(null);
   const [resetting, setResetting] = useState(false);
@@ -33,10 +39,10 @@ export default function ResetPortModal({
       const portNumber = Number(portId);
       const st = String(sensorType || "").toLowerCase().trim();
 
-      console.log("raspiId : ",raspiId);
-      console.log("moduleId : ",moduleId);
-      console.log("portNumber : ",portNumber);
-      console.log("st : ",st);
+      // console.log("raspiId : ",raspiId);
+      // console.log("moduleId : ",moduleId);
+      // console.log("portNumber : ",portNumber);
+      // console.log("st : ",st);
       
 
       if (!raspiSerial || !moduleId || !portNumber || !st) {

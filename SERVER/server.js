@@ -60,6 +60,7 @@ const SensorControllerSchema = new mongoose.Schema({
   module_id: { type: String, required: true, trim: true },
   raspberry_serial_id: { type: mongoose.Schema.Types.ObjectId, ref: 'RaspberryPi', required: true },
   sensor_datas: [SensorDataSchema],
+  last_seen: { type: Date, default: Date.now },
 });
 
 const SensorController = mongoose.model('SensorController', SensorControllerSchema);
@@ -235,6 +236,8 @@ app.post('/api/sensor-data', async (req, res) => {
   try {
     const { sensor_controller_id, raspberry_serial_id, datas } = req.body;
 
+    // console.log("datas : ", datas);
+
     if (!sensor_controller_id || !raspberry_serial_id || !Array.isArray(datas)) {
       return res.status(400).json({ error: 'Missing sensor_controller_id, raspberry_serial_id, or invalid datas' });
     }
@@ -246,6 +249,8 @@ app.post('/api/sensor-data', async (req, res) => {
     if (!raspberryPi) return res.status(404).json({ error: 'Raspberry Pi not found' });
 
     const now = new Date();
+
+    const controllerUpdates = [];
 
     const readings = [];
     const skipped = [];
@@ -262,15 +267,18 @@ app.post('/api/sensor-data', async (req, res) => {
       const sensor_type =
         sensor_type_raw === null || sensor_type_raw === undefined
           ? null
-          : String(sensor_type_raw).trim().toLowerCase() || null;
+          : (String(sensor_type_raw).trim().toLowerCase() || null);
 
       const value_raw = d?.value;
       const value =
         value_raw === null || value_raw === undefined
           ? null
-          : (typeof value_raw === 'string' && value_raw.trim() === '')
-            ? null
-            : value_raw;
+          : (typeof value_raw === 'string' && value_raw.trim() === '' ? null : value_raw);
+
+      const unit = d?.unit ?? null;
+      const timestamp_device = d?.timestamp_device ? new Date(d.timestamp_device) : null;
+
+      controllerUpdates.push({ port_number, sensor_type, value, unit, timestamp_device });
 
       if (!sensor_type || value === null) {
         skipped.push({
@@ -286,27 +294,19 @@ app.post('/api/sensor-data', async (req, res) => {
         port_number,
         sensor_type,
         value,
-        unit: d?.unit ?? null,
-        timestamp_device: d?.timestamp_device ? new Date(d.timestamp_device) : null,
+        unit,
+        timestamp_device,
         timestamp_server: now,
       });
     }
 
-    if (readings.length === 0) {
-      return res.status(200).json({
-        success: true,
-        inserted_count: 0,
-        skipped_count: skipped.length,
-        skipped,
-        message: 'No valid sensor readings to insert (all readings missing sensor_type/value or invalid port).',
-      });
-    }
-
-    const inserted = await SensorReading.insertMany(readings, { ordered: true });
+    const inserted = readings.length
+      ? await SensorReading.insertMany(readings, { ordered: true })
+      : [];
 
     let sensorController = await SensorController.findOne({
       module_id: moduleId,
-      raspberry_serial_id: raspberryPi._id
+      raspberry_serial_id: raspberryPi._id,
     });
 
     if (!sensorController) {
@@ -317,13 +317,23 @@ app.post('/api/sensor-data', async (req, res) => {
       });
     }
 
-    for (const r of readings) {
-      const sensorDataStr = `${r.port_number}-${r.sensor_type}-${r.value}`;
-      const existing = sensorController.sensor_datas.find(x => x.port_number === r.port_number);
-      if (existing) existing.sensor_data = sensorDataStr;
-      else sensorController.sensor_datas.push({ port_number: r.port_number, sensor_data: sensorDataStr });
+    for (const u of controllerUpdates) {
+      const sensorTypePart = u.sensor_type ?? 'null';
+      const valuePart = u.value === null ? 'null' : String(u.value);
+      const sensorDataStr = `${u.port_number}-${sensorTypePart}-${valuePart}`;
+
+      const existing = sensorController.sensor_datas.find(
+        x => Number(x.port_number) === Number(u.port_number)
+      );
+
+      if (existing) {
+        existing.sensor_data = sensorDataStr;
+      } else {
+        sensorController.sensor_datas.push({ port_number: u.port_number, sensor_data: sensorDataStr });
+      }
     }
 
+    sensorController.markModified('sensor_datas');
     await sensorController.save();
 
     for (const doc of inserted) {
@@ -354,10 +364,11 @@ app.post('/api/sensor-data', async (req, res) => {
 });
 
 
+
 app.get('/api/sensor-readings', async (req, res) => {
   try {
-    console.log("1111");
-    
+    // console.log("1111");
+
     const {
       raspberry_serial_id,
       module_id,
