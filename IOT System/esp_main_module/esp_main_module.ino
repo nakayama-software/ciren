@@ -49,6 +49,12 @@ bool frameExpired(const FrameAsm &fa);
 
 FrameAsm asmBySender[MAX_SENDER_ID + 1];
 
+String serialRxBuf = "";
+bool raspberrySerialReceived = false;
+unsigned long lastReadySentAt = 0;
+const unsigned long READY_RESEND_MS = 2000;
+
+
 bool isSameMac(const uint8_t *a, const uint8_t *b)
 {
   return memcmp(a, b, 6) == 0;
@@ -206,6 +212,7 @@ void handleSerialLine(String line)
       id.toUpperCase();
       strncpy(raspberrySerialStr, id.c_str(), sizeof(raspberrySerialStr) - 1);
       raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
+      raspberrySerialReceived = true;
       Serial.println("[ACK_PI_SERIAL]");
     }
     else
@@ -220,7 +227,7 @@ void handleSerialLine(String line)
     Serial.println(line);
   }
 
-  updateDisplay();
+  updateDisplay(true);
 }
 
 // RASPI SERIAL SECTION -- ENDS HERE
@@ -420,7 +427,6 @@ void getSelfMac()
 {
   esp_wifi_get_mac(WIFI_IF_STA, selfMac);
 }
-
 void setup()
 {
   Serial.begin(115200);
@@ -432,9 +438,7 @@ void setup()
   if (!display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS))
   {
     Serial.println("OLED failed");
-    while (1)
-    {
-    }
+    while (1) {}
   }
 
   display.clearDisplay();
@@ -449,16 +453,14 @@ void setup()
     display.clearDisplay();
     display.println("ESP-NOW Init Failed");
     display.display();
-    while (1)
-    {
-    }
+    while (1) {}
   }
 
   esp_now_register_recv_cb(onDataReceive);
   updateDisplay(true);
 
   delay(500);
-  Serial.println("[READY]");
+  lastReadySentAt = 0;
 }
 
 void loop()
@@ -474,8 +476,7 @@ void loop()
       for (int j = 0; j < 6; j++)
       {
         Serial.printf("%02X", knownDevices[i].mac[j]);
-        if (j < 5)
-          Serial.print(":");
+        if (j < 5) Serial.print(":");
       }
       Serial.println();
       removeDevice(i);
@@ -491,8 +492,7 @@ void loop()
   {
     char c = (char)Serial.read();
 
-    if (c == '\r')
-      continue;
+    if (c == '\r') continue;
 
     if (c == '\n')
     {
@@ -502,7 +502,7 @@ void loop()
     }
 
     if (c >= 32 && c <= 126)
-    { // hanya karakter printable
+    {
       if (serialRxBuf.length() < 80)
       {
         serialRxBuf += c;
@@ -510,7 +510,12 @@ void loop()
     }
   }
 
-  if (changed)
-    updateDisplay();
+  if (!raspberrySerialReceived && millis() - lastReadySentAt >= READY_RESEND_MS)
+  {
+    Serial.println("[READY]");
+    lastReadySentAt = millis();
+  }
+
+  if (changed) updateDisplay();
   delay(100);
 }

@@ -40,6 +40,35 @@ let espBuf = '';
 let espLineBuf = '';
 let espReady = false;
 
+let espAcked = false;
+let espHelloTimer = null;
+
+// ------------------ Helper Functions ---------------------
+
+function sendPiSerialToEsp32() {
+    const serialToSend = String(piSerial).trim().toUpperCase();
+    sendToEsp32(`PI_SERIAL:${serialToSend}\n`);
+}
+
+function startPiSerialRetry() {
+    if (espHelloTimer) clearInterval(espHelloTimer);
+
+    espHelloTimer = setInterval(() => {
+        if (!esp32PortInstance || !esp32PortInstance.writable) return;
+        if (espAcked) return;
+
+        console.log('[ESP32] retry sending Raspberry Pi serial');
+        sendPiSerialToEsp32();
+    }, 2000);
+}
+
+function stopPiSerialRetry() {
+    if (espHelloTimer) {
+        clearInterval(espHelloTimer);
+        espHelloTimer = null;
+    }
+}
+
 // ------------------ Port Handling ---------------------
 function findPortById(keywords = []) {
     const base = '/dev/serial/by-id';
@@ -299,17 +328,16 @@ function handleEsp32Line(line) {
     if (!clean) return;
 
     if (clean === '[READY]') {
-        if (!espReady) {
-            espReady = true;
-            const serialToSend = String(piSerial).trim().toUpperCase();
-            console.log('[ESP32] READY received, sending Raspberry Pi serial');
-            sendToEsp32(`${PI_SERIAL_PREFIX}${serialToSend}\n`);
-        }
+        console.log('[ESP32] READY received');
+        espReady = true;
+        sendPiSerialToEsp32();
         return;
     }
 
     if (clean === '[ACK_PI_SERIAL]') {
         console.log('[ESP32] ACK_PI_SERIAL received');
+        espAcked = true;
+        stopPiSerialRetry();
         return;
     }
 
@@ -353,6 +381,14 @@ async function startEsp32Serial() {
         espBuf = '';
         espLineBuf = '';
         espReady = false;
+        espAcked = false;
+
+        stopPiSerialRetry();
+
+        setTimeout(() => {
+            sendPiSerialToEsp32();
+            startPiSerialRetry();
+        }, 1200);
     });
 
     esp32PortInstance.on('data', (chunk) => {
@@ -384,6 +420,8 @@ async function startEsp32Serial() {
         espBuf = '';
         espLineBuf = '';
         espReady = false;
+        espAcked = false;
+        stopPiSerialRetry();
         setTimeout(startEsp32Serial, 1500);
     });
 }
