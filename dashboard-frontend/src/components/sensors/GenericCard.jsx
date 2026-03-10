@@ -2,7 +2,7 @@ import React from "react";
 import { Zap } from "lucide-react";
 
 export default function GenericCard({ node }) {
-  console.log("222",node);
+  // console.log("222",node);
   
   return (
     <div className="bg-white/5 rounded-lg p-4 space-y-1 hover:bg-white/10">

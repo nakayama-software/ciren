@@ -95,8 +95,8 @@ export function parseTemplateSensorValue(rawValue) {
     const hNum = toNumberMaybe(hRaw);
     const readings = [];
 
-    console.log("helper 11",payload);
-    
+    console.log("payload : ", payload);
+
     if (tNum != null)
       readings.push({ key: "temperature", label: "Temperature", value: tNum, unit: inferUnit("temperature"), raw: tRaw });
     if (hNum != null)
