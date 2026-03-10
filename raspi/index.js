@@ -328,7 +328,12 @@ async function startEsp32Serial() {
 
     esp32PortInstance.on('open', () => {
         console.log(`[ESP32] Connected on ${portPath}`);
-        sendToEsp32(`${piSerial}\n`);
+
+        espBuf = '';
+
+        setTimeout(() => {
+            sendToEsp32(`PI_SERIAL:${String(piSerial).trim()}\n`);
+        }, 2500);
     });
 
     esp32PortInstance.on('data', (chunk) => {
