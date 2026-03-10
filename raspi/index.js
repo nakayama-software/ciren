@@ -4,13 +4,12 @@ const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 const fs = require('fs');
 const { parseNmeaForFix, fetchWithTimeout, getPiSerial, getRaspiCpuTempC, safeJson } = require('./helper');
+const path = require('path');
 
 
-const gpsPort = '/dev/ttyUSB2';
 const gpsBaudRate = 9600;
 
 const ESP32_BAUD = 115200;
-const ESP32_PORT_HINT = process.env.ESP32_PORT || null;
 
 const RASPI_DATA_URL = 'http://192.168.103.174:3000/api/raspi-data';
 const RASPI_PUSH_INTERVAL_MS = 2 * 60 * 1000;
@@ -33,7 +32,94 @@ let espBuf = '';
 
 let pushing = false;
 
+// ------------------ PORT Handling ---------------------
+function findPortById(keywords = []) {
+    const base = '/dev/serial/by-id';
+    if (!fs.existsSync(base)) return null;
+
+    const entries = fs.readdirSync(base);
+    const found = entries.find((name) => {
+        const s = name.toLowerCase();
+        return keywords.every((k) => s.includes(k.toLowerCase()));
+    });
+
+    return found ? path.join(base, found) : null;
+}
+
+function resolveRealPathSafe(devPath) {
+    try {
+        return fs.realpathSync(devPath);
+    } catch {
+        return devPath;
+    }
+}
+
+function findGpsPortPath() {
+    return (
+        process.env.GPS_PORT ||
+        findPortById(['qualcomm', 'if02']) ||
+        '/dev/ttyUSB2'
+    );
+}
+
 // ------------------ GPS Handling ---------------------
+function findGpsPortPath() {
+    return (
+        process.env.GPS_PORT ||
+        findPortById(['qualcomm', 'if02']) ||
+        '/dev/ttyUSB2'
+    );
+}
+
+function startGpsAuto() {
+    const portPath = findGpsPortPath();
+
+    if (!portPath) {
+        console.error('[GPS] port not found, retrying...');
+        setTimeout(startGpsAuto, 1500);
+        return;
+    }
+
+    const gpsPortInstance = new SerialPort({
+        path: portPath,
+        baudRate: gpsBaudRate,
+        autoOpen: false,
+    });
+
+    const parser = gpsPortInstance.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+
+    gpsPortInstance.open((err) => {
+        if (err) {
+            console.error('[GPS] open error:', err.message || err);
+            setTimeout(startGpsAuto, 1500);
+            return;
+        }
+    });
+
+    gpsPortInstance.on('open', () => {
+        console.log(`[GPS] connected on ${portPath}`);
+        initializeGps(gpsPortInstance);
+    });
+
+    parser.on('data', (data) => {
+        const fix = parseNmeaForFix(data);
+        if (fix.status === 'fix') {
+            latitude = fix.lat;
+            longitude = fix.lon;
+            altitude = fix.alt_m;
+        }
+    });
+
+    gpsPortInstance.on('error', (err) => {
+        console.error('[GPS] error:', err.message || err);
+    });
+
+    gpsPortInstance.on('close', () => {
+        console.warn('[GPS] disconnected, reconnecting...');
+        setTimeout(startGpsAuto, 1500);
+    });
+}
+
 function sendATCommand(command, gpsPortInstance) {
     gpsPortInstance.write(`${command}\r\n`, (err) => {
         if (err) console.error('Error sending AT command:', err);
@@ -46,35 +132,16 @@ function initializeGps(gpsPortInstance) {
     setTimeout(() => sendATCommand('AT+CGPS=1', gpsPortInstance), 2000);
 }
 
-function startGps(gpsPortPath, baudRate) {
-    const gpsPortInstance = new SerialPort({ path: gpsPortPath, baudRate });
-    const parser = gpsPortInstance.pipe(new ReadlineParser({ delimiter: '\r\n' }));
-
-    gpsPortInstance.on('open', () => {
-        console.log(`Connected to GPS device on ${gpsPortPath}`);
-        initializeGps(gpsPortInstance);
-    });
-
-    parser.on('data', (data) => {
-        const fix = parseNmeaForFix(data);
-
-        if (fix.status === 'fix') {
-            latitude = fix.lat;
-            longitude = fix.lon;
-            altitude = fix.alt_m;
-        }
-    });
-
-    gpsPortInstance.on('error', (err) => {
-        console.error('Error with GPS serial port:', err);
-    });
-
-    return gpsPortInstance;
-}
 
 // ------------------ ESP32 Serial Handling ---------------------
 async function findEsp32PortPath() {
-    if (ESP32_PORT_HINT) return ESP32_PORT_HINT;
+    if (process.env.ESP32_PORT) return process.env.ESP32_PORT;
+
+    const byId = findPortById(['silicon', 'labs']);
+    if (byId) return byId;
+
+    const gpsPath = findGpsPortPath();
+    const gpsRealPath = resolveRealPathSafe(gpsPath);
 
     const ports = await SerialPort.list();
 
@@ -83,17 +150,23 @@ async function findEsp32PortPath() {
             String(p.vendorId || '').toLowerCase() === '10c4' &&
             String(p.productId || '').toLowerCase() === 'ea60'
     );
-    if (byVidPid?.path) return byVidPid.path;
+    if (byVidPid?.path && resolveRealPathSafe(byVidPid.path) !== gpsRealPath) {
+        return byVidPid.path;
+    }
 
     const fallback = ports.find((p) => {
-        const dev = String(p.path || '').toLowerCase();
+        const dev = String(p.path || '');
         if (!dev) return false;
-        if (dev === String(gpsPort).toLowerCase()) return false;
+
+        const realDev = resolveRealPathSafe(dev);
+        if (realDev === gpsRealPath) return false;
+
+        const devLower = dev.toLowerCase();
         return (
-            dev.includes('ttyusb') ||
-            dev.includes('ttyacm') ||
-            dev.includes('cu.usbserial') ||
-            dev.includes('cu.usbmodem')
+            devLower.includes('ttyusb') ||
+            devLower.includes('ttyacm') ||
+            devLower.includes('cu.usbserial') ||
+            devLower.includes('cu.usbmodem')
         );
     });
 
@@ -427,7 +500,7 @@ function startSensorPostScheduler() {
 
 // ------------------ Main ---------------------
 console.log('Raspberry Pi Serial Number:', piSerial);
-startGps(gpsPort, gpsBaudRate);
+startGpsAuto();
 startEsp32Serial();
 startRaspiDataScheduler();
 startSensorPostScheduler();
