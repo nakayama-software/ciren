@@ -358,9 +358,23 @@ void loop() {
     } else if (line.indexOf("[SVRERR]") >= 0) {
       serverOnline = false;
     } else {
-      if (line.length() >= 8) {
+      // Validate: Pi serial ID should be 8-16 hex characters (e.g. "0000000012345678")
+      bool looksLikeSerial = (line.length() >= 8 && line.length() <= 16);
+      if (looksLikeSerial) {
+        for (int ci = 0; ci < (int)line.length(); ci++) {
+          char c = line.charAt(ci);
+          bool isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+          if (!isHex) { looksLikeSerial = false; break; }
+        }
+      }
+
+      if (looksLikeSerial) {
         strncpy(raspberrySerialStr, line.c_str(), sizeof(raspberrySerialStr) - 1);
         raspberrySerialStr[sizeof(raspberrySerialStr) - 1] = '\0';
+        Serial.println("[PIID_ACK]"); // Acknowledge to Pi so it stops retryingQ
+        updateDisplay(true);
+      } else {
+        Serial.printf("[WARN] Rejected invalid serial ID: '%s'\n", line.c_str());
       }
     }
 

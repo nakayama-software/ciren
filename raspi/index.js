@@ -36,6 +36,12 @@ let espBuf = '';
 
 let pushing = false;
 
+// Serial ID handshake state
+let piSerialAcked = false;
+let piSerialRetryTimer = null;
+const PI_SERIAL_RETRY_INTERVAL_MS = 3000;
+const PI_SERIAL_SEND_DELAY_MS = 1500; // wait for USB enumeration noise to settle
+
 // ------------------ PORT Handling ---------------------
 function findPortById(keywords = []) {
     const base = '/dev/serial/by-id';
@@ -300,6 +306,36 @@ function sendToEsp32(data) {
     });
 }
 
+function sendPiSerialId() {
+    sendToEsp32(`${piSerial}\n`);
+    console.log(`[ESP32] Sent Pi Serial ID: ${piSerial}`);
+}
+
+function startPiSerialRetry() {
+    stopPiSerialRetry();
+    // Delay first send to let USB enumeration noise settle
+    piSerialRetryTimer = setTimeout(() => {
+        sendPiSerialId();
+        // Retry periodically until ESP32 acknowledges
+        piSerialRetryTimer = setInterval(() => {
+            if (piSerialAcked) {
+                stopPiSerialRetry();
+                return;
+            }
+            console.log('[ESP32] No ACK yet, resending Pi Serial ID...');
+            sendPiSerialId();
+        }, PI_SERIAL_RETRY_INTERVAL_MS);
+    }, PI_SERIAL_SEND_DELAY_MS);
+}
+
+function stopPiSerialRetry() {
+    if (piSerialRetryTimer !== null) {
+        clearTimeout(piSerialRetryTimer);
+        clearInterval(piSerialRetryTimer);
+        piSerialRetryTimer = null;
+    }
+}
+
 async function startEsp32Serial() {
     const portPath = await findEsp32PortPath();
     if (!portPath) {
@@ -324,13 +360,22 @@ async function startEsp32Serial() {
 
     esp32PortInstance.on('open', () => {
         console.log(`[ESP32] Connected on ${portPath}`);
-        sendToEsp32(`${piSerial}\n`);
+        piSerialAcked = false;
+        startPiSerialRetry();
     });
 
     esp32PortInstance.on('data', (chunk) => {
         const s = chunk.toString('utf8');
         if (!s) return;
         espBuf += s;
+
+        // Handle Pi Serial ID acknowledgement from ESP32
+        if (!piSerialAcked && espBuf.includes('[PIID_ACK]')) {
+            piSerialAcked = true;
+            stopPiSerialRetry();
+            console.log('[ESP32] Pi Serial ID acknowledged by ESP32');
+            espBuf = espBuf.replace(/\[PIID_ACK\]/g, '');
+        }
 
         if (espBuf.length > 200000) {
             espBuf = espBuf.slice(-100000);
@@ -343,6 +388,8 @@ async function startEsp32Serial() {
 
     esp32PortInstance.on('close', () => {
         console.warn('[ESP32] disconnected, reconnecting...');
+        stopPiSerialRetry();
+        piSerialAcked = false;
         esp32PortInstance = null;
         espBuf = '';
         setTimeout(startEsp32Serial, 1500);
