@@ -1,35 +1,50 @@
 import React, { useMemo, useState } from "react";
-import { ArrowLeft, Battery, Wifi, Zap, Cpu } from "lucide-react";
+import { ArrowLeft, Battery, Wifi, Zap, Cpu, Download } from "lucide-react";
 import LineChartModal from "./charts/LineChartModal";
 import IMU3DModal from "./charts/IMU3DModal";
 import ResetPortModal from "./ResetPortModal";
 import SensorRenderer from "./SensorRenderer";
 import RotaryChartModal from "./charts/RotaryChartModal";
+import LabelManager from "./LabelManager";
+import MultiSensorView from "./MultiSensorView";
+import ExportModal from "./ExportModal";
 
 export default function ControllerDetailView({ controller, onBack, t }) {
     const [activeDetail, setActiveDetail] = useState(null);
+    const [activeLabel, setActiveLabel] = useState(null);
+    const [showExport, setShowExport] = useState(false);
 
-    // console.log("controller : ",controller);
+    const sensor_nodes_filtered = controller.sensor_nodes.filter(
+        (node) => !node.sensor_data.includes("null")
+    );
 
-    const sensor_nodes_filtered = controller.sensor_nodes.filter(node => !node.sensor_data.includes("null"))
-    // console.log("sensor_nodes_filtered : ",sensor_nodes_filtered);
-
-    const hubId = useMemo(() => {
-        return String(controller?.sensor_controller_id || "").trim();
-    }, [controller]);
-
-    const raspiId = useMemo(() => {
-        return String(controller?.raspberry_serial_id || "").trim();
-    }, [controller]);
+    const hubId = useMemo(
+        () => String(controller?.sensor_controller_id || "").trim(),
+        [controller]
+    );
+    const raspiId = useMemo(
+        () => String(controller?.raspi_id || "").trim(),
+        [controller]
+    );
 
     const closeDetail = () => setActiveDetail(null);
+    const handleResetSuccess = () => closeDetail();
 
-    const handleResetSuccess = (result) => {
-        closeDetail();
+    const handlePopOut = (sensor) => {
+        setActiveLabel(null);
+        const { port, sensor_type } = sensor;
+        if (sensor_type === "imu") {
+            setActiveDetail({ type: "imu3d", raspiId, hubId, portId: port, sensorTypeHint: sensor_type });
+        } else if (sensor_type === "rotary_sensor") {
+            setActiveDetail({ type: "rotary_sensor", raspiId, hubId, portId: port, sensorTypeHint: sensor_type });
+        } else {
+            setActiveDetail({ type: "line", raspiId, hubId, portId: port, sensorTypeHint: sensor_type });
+        }
     };
 
     return (
         <div className="rounded-2xl border border-black/10 bg-white/80 p-6 dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
+            {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                     <div className="h-12 w-12 flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500">
@@ -37,33 +52,42 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                     </div>
                     <div>
                         <h2 className="text-xl font-semibold">{controller.sensor_controller_id}</h2>
-                        <p className="text-sm text-green-600 capitalize">
-                            {controller.controller_status}
-                        </p>
+                        <p className="text-sm text-green-600 capitalize">{controller.controller_status}</p>
                     </div>
                 </div>
 
-                <button
-                    onClick={onBack}
-                    className="inline-flex items-center gap-2 border px-4 py-2 rounded-lg"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>{t.controllerDetail.back}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                    {/* Export button */}
+                    <button
+                        onClick={() => setShowExport(true)}
+                        className="inline-flex items-center gap-2 border border-black/10 dark:border-white/10 px-3 py-2 rounded-lg text-sm text-slate-700 dark:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+                    >
+                        <Download className="h-4 w-4" />
+                        <span className="hidden sm:inline">Export</span>
+                    </button>
+                    {/* Back button */}
+                    <button
+                        onClick={onBack}
+                        className="inline-flex items-center gap-2 border border-black/10 dark:border-white/10 px-4 py-2 rounded-lg text-sm"
+                    >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span>{t.controllerDetail.back}</span>
+                    </button>
+                </div>
             </div>
 
+            {/* Info boxes */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                 <InfoBox icon={<Battery />} label={t.controllerDetail.battery} value={`${controller.battery_level}%`} />
                 <InfoBox icon={<Wifi />} label={t.controllerDetail.signal} value={`${controller.signal_strength} dBm`} />
                 <InfoBox icon={<Zap />} label={t.controllerDetail.sensorNodes} value={sensor_nodes_filtered.length} />
             </div>
 
+            {/* Sensor grid */}
             <h3 className="text-base font-medium mb-4">{t.controllerDetail.history}</h3>
 
             {sensor_nodes_filtered.length === 0 ? (
-                <div className="border bg-yellow-500/10 p-3 text-yellow-800">
-                    {t.controllerDetail.noNode}
-                </div>
+                <div className="border bg-yellow-500/10 p-3 text-yellow-800">{t.controllerDetail.noNode}</div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {sensor_nodes_filtered.map((node) => (
@@ -78,6 +102,32 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 </div>
             )}
 
+            {/* Analysis Labels */}
+            <LabelManager
+                raspiId={raspiId}
+                hubId={hubId}
+                sensor_nodes_filtered={sensor_nodes_filtered}
+                onOpenLabel={(label) => setActiveLabel(label)}
+            />
+
+            {/* Modals */}
+            <MultiSensorView
+                open={!!activeLabel}
+                onClose={() => setActiveLabel(null)}
+                label={activeLabel}
+                raspiId={raspiId}
+                hubId={hubId}
+                onPopOut={handlePopOut}
+            />
+
+            <ExportModal
+                open={showExport}
+                onClose={() => setShowExport(false)}
+                raspiId={raspiId}
+                hubId={hubId}
+                sensor_nodes_filtered={sensor_nodes_filtered}
+            />
+
             <LineChartModal
                 open={activeDetail?.type === "line"}
                 onClose={closeDetail}
@@ -86,7 +136,6 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 portId={activeDetail?.portId}
                 sensorTypeHint={activeDetail?.sensorTypeHint}
             />
-
             <IMU3DModal
                 open={activeDetail?.type === "imu3d"}
                 onClose={closeDetail}
@@ -96,7 +145,6 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 sensorTypeHint={activeDetail?.sensorTypeHint}
                 node={sensor_nodes_filtered}
             />
-
             <RotaryChartModal
                 open={activeDetail?.type === "rotary_sensor"}
                 onClose={closeDetail}
@@ -106,7 +154,6 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 sensorTypeHint={activeDetail?.sensorTypeHint}
                 node={sensor_nodes_filtered}
             />
-
             <ResetPortModal
                 open={activeDetail?.type === "reset"}
                 onClose={closeDetail}
