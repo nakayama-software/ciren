@@ -153,28 +153,40 @@ app.post('/api/login', async (req, res) => {
 
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const { username } = req.query;  // Use query instead of params
+    const { username } = req.query;
 
     if (!username) {
       return res.status(400).json({ error: 'Missing username' });
     }
 
-    const raspberryPi = await RaspberryPi.findOne({ username: username.toLowerCase() }).lean();
-    if (!raspberryPi) return res.status(404).json({ error: 'Raspberry Pi not found' });
+    // Find ALL raspberry pis for this username (multi-raspi support)
+    const raspberryPis = await RaspberryPi.find({ username: username.toLowerCase() }).lean();
+    if (!raspberryPis || raspberryPis.length === 0) {
+      return res.status(404).json({ error: 'Raspberry Pi not found' });
+    }
 
-    const sensorControllers = await SensorController.find({ raspberry_serial_id: raspberryPi._id }).lean();
+    const raspis = [];
+    for (const raspberryPi of raspberryPis) {
+      const sensorControllers = await SensorController.find({ raspberry_serial_id: raspberryPi._id }).lean();
 
-    // Prepare dashboard data response
-    const dashboardData = {
-      raspberry_serial_id: raspberryPi.raspberry_serial_id,
-      username: raspberryPi.username,
-      temperature: raspberryPi.temperature,
-      gps_data: raspberryPi.gps_data,
-      sensor_controllers: sensorControllers,
-      timestamp_raspberry: raspberryPi.timestamp_raspberry,
-    };
+      raspis.push({
+        raspberry_serial_id: raspberryPi.raspberry_serial_id,
+        username: raspberryPi.username,
+        temperature: raspberryPi.temperature,
+        gps_data: raspberryPi.gps_data,
+        sensor_controllers: sensorControllers.map((ctrl) => ({
+          module_id: ctrl.module_id,
+          timestamp: ctrl.last_seen,   // renamed to match mock-server / Dashboard.jsx expectation
+          sensor_datas: ctrl.sensor_datas,
+        })),
+        timestamp_raspberry: raspberryPi.timestamp_raspberry,
+        raspi_status: {
+          uptime_s: null,
+        },
+      });
+    }
 
-    return res.json({ success: true, dashboardData });
+    return res.json({ raspis });
   } catch (err) {
     console.error('Dashboard error:', err);
     return res.status(500).json({ error: err.message });

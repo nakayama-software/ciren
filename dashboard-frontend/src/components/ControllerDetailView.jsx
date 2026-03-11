@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ArrowLeft, Battery, Wifi, Zap, Cpu, Download } from "lucide-react";
+import { ArrowLeft, Zap, Cpu, Download } from "lucide-react";
 import LineChartModal from "./charts/LineChartModal";
 import IMU3DModal from "./charts/IMU3DModal";
 import ResetPortModal from "./ResetPortModal";
@@ -8,6 +8,7 @@ import RotaryChartModal from "./charts/RotaryChartModal";
 import LabelManager from "./LabelManager";
 import MultiSensorView from "./MultiSensorView";
 import ExportModal from "./ExportModal";
+import AliasInlineEdit from "./AliasInlineEdit";
 
 export default function ControllerDetailView({ controller, onBack, t }) {
     const [activeDetail, setActiveDetail] = useState(null);
@@ -51,7 +52,14 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                         <Cpu className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                        <h2 className="text-xl font-semibold">{controller.sensor_controller_id}</h2>
+                        <h2 className="text-xl font-semibold">
+                            <AliasInlineEdit
+                                raspiId={raspiId}
+                                controllerId={hubId}
+                                originalName={hubId}
+                                textClass="text-xl font-semibold"
+                            />
+                        </h2>
                         <p className="text-sm text-green-600 capitalize">{controller.controller_status}</p>
                     </div>
                 </div>
@@ -77,9 +85,7 @@ export default function ControllerDetailView({ controller, onBack, t }) {
             </div>
 
             {/* Info boxes */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                <InfoBox icon={<Battery />} label={t.controllerDetail.battery} value={`${controller.battery_level}%`} />
-                <InfoBox icon={<Wifi />} label={t.controllerDetail.signal} value={`${controller.signal_strength} dBm`} />
+            <div className="grid grid-cols-1 sm:grid-cols-1 gap-4 mb-6">
                 <InfoBox icon={<Zap />} label={t.controllerDetail.sensorNodes} value={sensor_nodes_filtered.length} />
             </div>
 

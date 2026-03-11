@@ -8,6 +8,7 @@ import { translations } from './utils/translation';
 import { fmtHHMMSS, fmtJaTime, normalizeSensorNode } from './utils/helpers';
 import LeafletMap from './components/LeafletMap';
 import ControllerDetailView from './components/ControllerDetailView';
+import AliasInlineEdit from './components/AliasInlineEdit';
 import { useParams } from 'react-router-dom';
 
 const API_BASE       = import.meta.env.VITE_API_BASE || '';
@@ -343,7 +344,12 @@ export default function Dashboard() {
                         }`}
                       >
                         <span className={`inline-flex h-2 w-2 rounded-full ${isSelected ? 'bg-cyan-500' : 'bg-gray-300 dark:bg-gray-500'}`} />
-                        <span className="font-mono">{raspi.raspberry_serial_id}</span>
+                        <AliasInlineEdit
+                          raspiId={raspi.raspberry_serial_id}
+                          controllerId={null}
+                          originalName={raspi.raspberry_serial_id}
+                          textClass="font-mono"
+                        />
                         <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
                           isSelected
                             ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300'
@@ -379,7 +385,12 @@ export default function Dashboard() {
                           </div>
                           <div className="text-right">
                             <div className="font-semibold text-slate-900 dark:text-white tracking-tight">
-                              {controller.sensor_controller_id}
+                              <AliasInlineEdit
+                                raspiId={controller.raspi_id}
+                                controllerId={controller.sensor_controller_id}
+                                originalName={controller.sensor_controller_id}
+                                textClass="font-semibold"
+                              />
                             </div>
                             <div className="text-xs text-gray-600 dark:text-gray-400">
                               {hasNodes
