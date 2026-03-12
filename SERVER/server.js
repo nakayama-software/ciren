@@ -11,6 +11,7 @@ const { Server } = require('socket.io');
 
 normalizeHubObject = require('./helper').normalizeHubObject;
 
+const HOST = process.env.HOST || '0.0.0.0';
 const PORT      = process.env.PORT       || 3000;
 const MONGO_URI = process.env.MONGO_URI  || 'mongodb://localhost:27017/iot-monitoring';
 const JWT_SECRET = process.env.JWT_SECRET || 'ciren-secret-key';
@@ -583,4 +584,6 @@ io.on('connection', (socket) => {
 // START
 // =============================================================================
 
-server.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+server.listen(PORT, HOST, () => {
+  console.log(`Server running at http://${HOST}:${PORT}`);
+});
