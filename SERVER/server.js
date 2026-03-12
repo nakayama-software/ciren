@@ -13,7 +13,8 @@ normalizeHubObject = require('./helper').normalizeHubObject;
 
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT      = process.env.PORT       || 3000;
-const MONGO_URI = process.env.MONGO_URI  || 'mongodb://localhost:27017/iot-monitoring';
+// const MONGO_URI = process.env.MONGO_URI  || 'mongodb://localhost:27017/iot-monitoring';
+const MONGO_URI = process.env.MONGO_URI  || 'mongodb://mongodb.nakayamairon.com:27017/iot-monitoring';
 const JWT_SECRET = process.env.JWT_SECRET || 'ciren-secret-key';
 
 const app    = express();
@@ -323,6 +324,9 @@ app.get('/api/dashboard', authenticateToken, async (req, res) => {
 app.post('/api/raspi-data', async (req, res) => {
   try {
     const { raspberry_serial_id, datas } = req.body;
+
+    console.log("datas : ",datas);
+    
 
     if (!raspberry_serial_id || !datas || !Array.isArray(datas))
       return res.status(400).json({ error: 'Missing raspberry_serial_id or invalid datas' });

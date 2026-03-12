@@ -13,12 +13,13 @@ import { socket } from './lib/socket';
 
 const API_POLL_MS    = 5000;
 const HUB_OFFLINE_MS = 12_000;
-const RASPI_ALIVE_MS = 15_000;
-const GPS_TIMEOUT_MS = 15_000;
+const RASPI_ALIVE_MS = 60_000;
+const GPS_TIMEOUT_MS = 60_000;
+const NODE_STALE_MS  = 10_000;
 
 function parseSensorData(str) {
   if (!str || typeof str !== 'string') return null;
-  const first  = str.indexOf('-');
+  const first = str.indexOf('-');
   if (first === -1) return null;
   const second = str.indexOf('-', first + 1);
   if (second === -1) return null;
@@ -43,13 +44,16 @@ function buildControllers(raspi) {
       .map(sd => {
         const parsed = parseSensorData(sd.sensor_data);
         if (!parsed) return null;
-        return normalizeSensorNode({
-          node_id:     `P${parsed.port_number}`,
-          port_number: parsed.port_number,
-          sensor_type: parsed.sensor_type,
-          value:       parsed.value,
-          unit:        null,
-        });
+        return {
+          ...normalizeSensorNode({
+            node_id:     `P${parsed.port_number}`,
+            port_number: parsed.port_number,
+            sensor_type: parsed.sensor_type,
+            value:       parsed.value,
+            unit:        null,
+          }),
+          last_seen: ts, // ← last_seen per node dari timestamp controller
+        };
       })
       .filter(Boolean);
 
@@ -58,7 +62,7 @@ function buildControllers(raspi) {
       module_id:            ctrl.module_id,
       sensor_controller_id: ctrl.module_id,
       sensor_nodes,
-      last_seen:            ts,
+      last_seen: ts,
     };
   });
 }
@@ -93,24 +97,28 @@ export default function Dashboard() {
   const [loading,    setLoading]    = useState(true);
   const [err,        setErr]        = useState(null);
 
-  const [controllersLatest, setControllersLatest] = useState([]);
+  const [controllersLatest,    setControllersLatest]    = useState([]);
   const [selectedControllerId, setSelectedControllerId] = useState(null);
 
-  const [raspiStatus, setRaspiStatus]   = useState({ lastTs: 0, tempC: null, uptimeS: null });
-  const [gpsData,     setGpsData]       = useState(null);
+  const [raspiStatus,     setRaspiStatus]     = useState({ lastTs: 0, tempC: null, uptimeS: null });
+  const [gpsData,         setGpsData]         = useState(null);
   const [gpsDisconnected, setGpsDisconnected] = useState(false);
 
+  // now dipakai sebagai acuan waktu untuk semua pengecekan stale/expired
+  const [now,         setNow]         = useState(Date.now());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [startTime]   = useState(new Date());
   const [runningTime, setRunningTime] = useState('00:00:00');
 
   const username = getUsername();
 
+  // Satu timer untuk semua keperluan waktu
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentTime(new Date());
-      const diff = Math.floor((new Date() - startTime) / 1000);
-      setRunningTime(fmtHHMMSS(diff));
+      const n = Date.now();
+      setNow(n);
+      setCurrentTime(new Date(n));
+      setRunningTime(fmtHHMMSS(Math.floor((n - startTime) / 1000)));
     }, 1000);
     return () => clearInterval(timer);
   }, [startTime]);
@@ -182,23 +190,28 @@ export default function Dashboard() {
       if (!activeRaspi) return;
       if (doc.raspberry_serial_id !== activeRaspi.raspberry_serial_id) return;
 
+      const nodeLastSeen = Date.now();
+
       setControllersLatest(prev => {
         const next = prev.map(ctrl => {
           if (ctrl.module_id !== doc.module_id) return ctrl;
 
-          const newNode = normalizeSensorNode({
-            node_id:     `P${doc.port_number}`,
-            port_number: doc.port_number,
-            sensor_type: doc.sensor_type,
-            value:       doc.value,
-            unit:        doc.unit ?? null,
-          });
+          const newNode = {
+            ...normalizeSensorNode({
+              node_id:     `P${doc.port_number}`,
+              port_number: doc.port_number,
+              sensor_type: doc.sensor_type,
+              value:       doc.value,
+              unit:        doc.unit ?? null,
+            }),
+            last_seen: nodeLastSeen, // ← last_seen per node dari socket
+          };
 
           const updatedNodes = ctrl.sensor_nodes.some(n => n.port_number === doc.port_number)
             ? ctrl.sensor_nodes.map(n => n.port_number === doc.port_number ? newNode : n)
             : [...ctrl.sensor_nodes, newNode];
 
-          return { ...ctrl, sensor_nodes: updatedNodes, last_seen: Date.now() };
+          return { ...ctrl, sensor_nodes: updatedNodes, last_seen: nodeLastSeen };
         });
 
         const exists = next.some(c => c.module_id === doc.module_id);
@@ -207,14 +220,17 @@ export default function Dashboard() {
             raspi_id:             doc.raspberry_serial_id,
             module_id:            doc.module_id,
             sensor_controller_id: doc.module_id,
-            sensor_nodes: [normalizeSensorNode({
-              node_id:     `P${doc.port_number}`,
-              port_number: doc.port_number,
-              sensor_type: doc.sensor_type,
-              value:       doc.value,
-              unit:        doc.unit ?? null,
-            })],
-            last_seen: Date.now(),
+            sensor_nodes: [{
+              ...normalizeSensorNode({
+                node_id:     `P${doc.port_number}`,
+                port_number: doc.port_number,
+                sensor_type: doc.sensor_type,
+                value:       doc.value,
+                unit:        doc.unit ?? null,
+              }),
+              last_seen: nodeLastSeen,
+            }],
+            last_seen: nodeLastSeen,
           });
         }
         return next;
@@ -226,10 +242,23 @@ export default function Dashboard() {
   }, []);
 
   const activeRaspi   = allRaspis[activeIdx] || null;
-  const raspiIsOnline = raspiStatus.lastTs && (Date.now() - raspiStatus.lastTs <= RASPI_ALIVE_MS);
+  const raspiIsOnline = raspiStatus.lastTs && (now - raspiStatus.lastTs <= RASPI_ALIVE_MS);
   const uptimeStr     = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
   const tempStr       = raspiStatus.tempC   != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
-  const selectedController = controllersLatest.find(c => c.sensor_controller_id === selectedControllerId);
+
+  // Gunakan now (bukan Date.now()) agar re-render tiap detik mengupdate filter
+  const activeControllers = controllersLatest.filter(
+    c => c.last_seen && (now - c.last_seen <= NODE_STALE_MS)
+  );
+
+  const selectedController = activeControllers.find(c => c.sensor_controller_id === selectedControllerId);
+
+  // Kalau controller yang sedang dibuka sudah expired, kembali ke list
+  useEffect(() => {
+    if (selectedControllerId && !selectedController) {
+      setSelectedControllerId(null);
+    }
+  }, [selectedControllerId, selectedController]);
 
   function handleLogout() {
     logout();
@@ -336,6 +365,7 @@ export default function Dashboard() {
           {selectedController ? (
             <ControllerDetailView
               controller={selectedController}
+              now={now}
               onBack={() => setSelectedControllerId(null)}
               t={t}
             />
@@ -349,7 +379,14 @@ export default function Dashboard() {
                     <span>{t.dashboard.controllerPositions}</span>
                   </h2>
                   <div className="w-full h-[calc(100%-2.5rem)]">
-                    <LeafletMap gpsData={gpsData} />
+                    <LeafletMap
+                      raspis={allRaspis}
+                      selectedRaspiId={activeRaspi?.raspberry_serial_id}
+                      onSelectRaspi={(id) => {
+                        const idx = allRaspis.findIndex(r => r.raspberry_serial_id === id);
+                        if (idx !== -1) setActiveIdx(idx);
+                      }}
+                    />
                   </div>
                   {gpsDisconnected && (
                     <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse z-[100]">
@@ -401,9 +438,9 @@ export default function Dashboard() {
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {controllersLatest.map((controller, idx) => {
-                    const isOnline  = Date.now() - controller.last_seen <= HUB_OFFLINE_MS;
-                    const hasNodes  = controller.sensor_nodes.length > 0;
+                  {activeControllers.map((controller, idx) => {
+                    const isOnline = now - controller.last_seen <= HUB_OFFLINE_MS;
+                    const hasNodes = controller.sensor_nodes.length > 0;
                     return (
                       <div key={idx}
                         className="rounded-xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm
@@ -447,7 +484,7 @@ export default function Dashboard() {
                     );
                   })}
 
-                  {controllersLatest.length === 0 && (
+                  {activeControllers.length === 0 && (
                     <div className="col-span-full rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-800 dark:text-yellow-200">
                       {t.dashboard.noHubDetected} <b>{activeRaspi?.raspberry_serial_id || '—'}</b>.
                     </div>

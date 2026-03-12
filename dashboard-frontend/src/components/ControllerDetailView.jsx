@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { ArrowLeft, Zap, Cpu, Download } from "lucide-react";
 import LineChartModal from "./charts/LineChartModal";
 import IMU3DModal from "./charts/IMU3DModal";
@@ -9,18 +9,15 @@ import LabelManager from "./LabelManager";
 import MultiSensorView from "./MultiSensorView";
 import ExportModal from "./ExportModal";
 import AliasInlineEdit from "./AliasInlineEdit";
+import { useState } from "react";
 
-export default function ControllerDetailView({ controller, onBack, t }) {
+const NODE_STALE_MS = 10_000;
+
+// now dipass dari Dashboard agar sumber waktu konsisten dan tidak perlu timer sendiri
+export default function ControllerDetailView({ controller, now, onBack, t }) {
     const [activeDetail, setActiveDetail] = useState(null);
-    const [activeLabel, setActiveLabel] = useState(null);
-    const [showExport, setShowExport] = useState(false);
-
-    console.log("controller.sensor_nodes", controller.sensor_nodes);
-
-    const sensor_nodes_filtered = controller.sensor_nodes.filter(
-        (node) => node.sensor_type && node.sensor_type !== 'null'
-            && node.value != null && node.value !== 'null'
-    );
+    const [activeLabel,  setActiveLabel]  = useState(null);
+    const [showExport,   setShowExport]   = useState(false);
 
     const hubId = useMemo(
         () => String(controller?.sensor_controller_id || "").trim(),
@@ -31,7 +28,15 @@ export default function ControllerDetailView({ controller, onBack, t }) {
         [controller]
     );
 
-    const closeDetail = () => setActiveDetail(null);
+    // Filter node: hanya tampilkan yang punya data valid dan last_seen < 30 detik
+    const sensor_nodes_filtered = controller.sensor_nodes.filter(
+        (node) =>
+            node.sensor_type && node.sensor_type !== 'null' &&
+            node.value != null && node.value !== 'null' &&
+            node.last_seen && (now - node.last_seen <= NODE_STALE_MS)
+    );
+
+    const closeDetail       = () => setActiveDetail(null);
     const handleResetSuccess = () => closeDetail();
 
     const handlePopOut = (sensor) => {
@@ -68,7 +73,6 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {/* Export button */}
                     <button
                         onClick={() => setShowExport(true)}
                         className="inline-flex items-center gap-2 border border-black/10 dark:border-white/10 px-3 py-2 rounded-lg text-sm text-slate-700 dark:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
@@ -76,7 +80,6 @@ export default function ControllerDetailView({ controller, onBack, t }) {
                         <Download className="h-4 w-4" />
                         <span className="hidden sm:inline">Export</span>
                     </button>
-                    {/* Back button */}
                     <button
                         onClick={onBack}
                         className="inline-flex items-center gap-2 border border-black/10 dark:border-white/10 px-4 py-2 rounded-lg text-sm"

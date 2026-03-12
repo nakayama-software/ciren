@@ -52,16 +52,30 @@ const translations = {
   },
 };
 
+const PasswordInput = ({ id, value, onChange, placeholder, show, onToggle, onEnter }) => ( // ✅
+  <div className="relative">
+    <input id={id} type={show ? 'text' : 'password'} value={value} onChange={onChange}
+      placeholder={placeholder} onKeyDown={e => e.key === 'Enter' && onEnter?.()}
+      className="w-full rounded-lg border border-black/10 bg-white/80 px-3 py-2 pr-10 text-sm text-slate-900
+                 placeholder-gray-500 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30
+                 dark:border-white/10 dark:bg-slate-900/70 dark:text-white dark:placeholder-gray-400" />
+    <button type="button" onClick={onToggle}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+      {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+    </button>
+  </div>
+);
+
 function Register() {
   const navigate = useNavigate();
-  const [username, setUsername]         = useState('');
-  const [password, setPassword]         = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm]   = useState(false);
-  const [language, setLanguage]         = useState('ja');
-  const [errorMsg, setErrorMsg]         = useState(null);
-  const [loading, setLoading]           = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [language, setLanguage] = useState('ja');
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const [theme, setTheme] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('ciren-theme') : null;
@@ -134,19 +148,7 @@ function Register() {
     </button>
   );
 
-  const PasswordInput = ({ id, value, onChange, placeholder, show, onToggle }) => (
-    <div className="relative">
-      <input id={id} type={show ? 'text' : 'password'} value={value} onChange={onChange}
-        placeholder={placeholder} onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-        className="w-full rounded-lg border border-black/10 bg-white/80 px-3 py-2 pr-10 text-sm text-slate-900
-                   placeholder-gray-500 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30
-                   dark:border-white/10 dark:bg-slate-900/70 dark:text-white dark:placeholder-gray-400" />
-      <button type="button" onClick={onToggle}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-      </button>
-    </div>
-  );
+
 
   return (
     <div lang={t.locale}
@@ -209,7 +211,8 @@ function Register() {
                   <PasswordInput id="reg-password" value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder={t.passwordPlaceholder}
-                    show={showPassword} onToggle={() => setShowPassword(!showPassword)} />
+                    show={showPassword} onToggle={() => setShowPassword(!showPassword)}
+                    onEnter={handleSubmit} />
                 </div>
 
                 {/* Confirm Password */}
@@ -220,7 +223,8 @@ function Register() {
                   <PasswordInput id="reg-confirm" value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
                     placeholder={t.confirmPasswordPlaceholder}
-                    show={showConfirm} onToggle={() => setShowConfirm(!showConfirm)} />
+                    show={showConfirm} onToggle={() => setShowConfirm(!showConfirm)}
+                    onEnter={handleSubmit} />
                 </div>
 
                 {errorMsg && (

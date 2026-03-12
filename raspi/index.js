@@ -6,20 +6,19 @@ const fs = require('fs');
 const { parseNmeaForFix, fetchWithTimeout, getPiSerial, getRaspiCpuTempC, safeJson } = require('./helper');
 const path = require('path');
 
-
-const gpsBaudRate = 9600;
+const gpsBaudRate = 115200;
 
 const ESP32_BAUD = 115200;
-const ESP32_PORT_HINT =
-    process.env.ESP32_PORT ||
-    findPortById(['silicon', 'labs']) ||
-    null;
 
-const RASPI_DATA_URL = 'http://192.168.103.174:3000/api/raspi-data';
-const RASPI_PUSH_INTERVAL_MS = 2 * 60 * 1000;
+// const RASPI_DATA_URL = 'http://192.168.10.5:3000/api/raspi-data';
+const RASPI_DATA_URL = 'http://118.22.31.249:3000/api/raspi-data';
+const RASPI_PUSH_INTERVAL_MS = 1 * 30 * 1000;
 
-const SENSOR_DATA_URL = 'http://192.168.103.174:3000/api/sensor-data';
+// const SENSOR_DATA_URL = 'http://192.168.10.5:3000/api/sensor-data';
+const SENSOR_DATA_URL = 'http://118.22.31.249:3000/api/sensor-data';
 const SENSOR_POST_INTERVAL_MS = 100;
+
+const GPS_POLL_INTERVAL_MS = 5000; // polling AT+CGPSINFO tiap 5 detik
 
 let sensorPosting = false;
 
@@ -40,7 +39,7 @@ let pushing = false;
 let piSerialAcked = false;
 let piSerialRetryTimer = null;
 const PI_SERIAL_RETRY_INTERVAL_MS = 3000;
-const PI_SERIAL_SEND_DELAY_MS = 1500; // wait for USB enumeration noise to settle
+const PI_SERIAL_SEND_DELAY_MS = 5000; // wait for USB enumeration noise to settle
 
 // ------------------ PORT Handling ---------------------
 function findPortById(keywords = []) {
@@ -69,8 +68,53 @@ function findGpsPortPath() {
     return (
         process.env.GPS_PORT ||
         findPortById(['qualcomm', 'if02']) ||
-        '/dev/ttyUSB2'
+        '/dev/ttyUSB3'
     );
+}
+
+/**
+ * Parse +CGPSINFO AT response dari modem (SIM7600/EC25/dll)
+ * Format: +CGPSINFO: lat,N/S,lon,E/W,date,time,alt,speed,course
+ * Contoh: +CGPSINFO: 3312.697511,N,13002.783355,E,120326,133349.0,39.7,0.0,
+ *
+ * Koordinat dalam format DDMM.MMMMMM, perlu dikonversi ke decimal degrees.
+ */
+function parseCgpsInfo(line) {
+    // Tangani juga response kosong: "+CGPSINFO: ,,,,,,,,,"
+    const m = line.match(
+        /\+CGPSINFO:\s*([\d.]+),(N|S),([\d.]+),(E|W),([\d]*),([\d.]*),([\d.-]*),([\d.-]*)/i
+    );
+    if (!m) return null;
+
+    const rawLat = parseFloat(m[1]);
+    const rawLon = parseFloat(m[3]);
+
+    if (isNaN(rawLat) || isNaN(rawLon)) return null;
+
+    // Konversi DDMM.MMMM → decimal degrees
+    const latDeg = Math.floor(rawLat / 100);
+    let lat = latDeg + (rawLat - latDeg * 100) / 60;
+    if (m[2].toUpperCase() === 'S') lat = -lat;
+
+    const lonDeg = Math.floor(rawLon / 100);
+    let lon = lonDeg + (rawLon - lonDeg * 100) / 60;
+    if (m[4].toUpperCase() === 'W') lon = -lon;
+
+    const alt = parseFloat(m[7]);
+
+    return {
+        lat,
+        lon,
+        alt_m: isNaN(alt) ? null : alt,
+    };
+}
+
+function startGpsPolling(gpsPortInstance) {
+    setInterval(() => {
+        gpsPortInstance.write('AT+CGPSINFO\r\n', (err) => {
+            if (err) console.error('[GPS] polling write error:', err.message || err);
+        });
+    }, GPS_POLL_INTERVAL_MS);
 }
 
 function startGpsAuto() {
@@ -104,11 +148,30 @@ function startGpsAuto() {
     });
 
     parser.on('data', (data) => {
-        const fix = parseNmeaForFix(data);
-        if (fix.status === 'fix') {
+        const line = data.trim();
+        if (!line) return;
+
+        // Coba parse NMEA standar terlebih dahulu ($GPGGA, $GPRMC, dll)
+        const fix = parseNmeaForFix(line);
+        if (fix && fix.status === 'fix') {
             latitude = fix.lat;
             longitude = fix.lon;
             altitude = fix.alt_m;
+            console.log(`[GPS] NMEA fix: lat=${latitude}, lon=${longitude}, alt=${altitude}`);
+            return;
+        }
+
+        // Fallback: parse +CGPSINFO dari AT polling
+        if (line.includes('+CGPSINFO:')) {
+            const cgps = parseCgpsInfo(line);
+            if (cgps) {
+                latitude = cgps.lat;
+                longitude = cgps.lon;
+                altitude = cgps.alt_m;
+                console.log(`[GPS] CGPSINFO fix: lat=${latitude}, lon=${longitude}, alt=${altitude}`);
+            } else {
+                console.log('[GPS] CGPSINFO: no fix yet');
+            }
         }
     });
 
@@ -132,6 +195,8 @@ function initializeGps(gpsPortInstance) {
     sendATCommand('AT', gpsPortInstance);
     setTimeout(() => sendATCommand('ATE0', gpsPortInstance), 1000);
     setTimeout(() => sendATCommand('AT+CGPS=1', gpsPortInstance), 2000);
+    // Mulai polling AT+CGPSINFO setelah modem siap
+    setTimeout(() => startGpsPolling(gpsPortInstance), 3000);
 }
 
 
@@ -188,12 +253,12 @@ async function findEsp32PortPath() {
 //       "port_number": 2,
 //       "sensor_type": "hum_temp",
 //       "value": "24.20,56.00"
-//     }
+//     },
 //     {
 //       "port_number": 3,
 //       "sensor_type": null,
 //       "value": null
-//     }
+//     },
 //     ...
 //     {
 //       "port_number": 8,
@@ -221,23 +286,23 @@ function parseEsp32SensorBlock(sensorID, sensorDataBlock) {
         const portNumber = Number(m[1]);
         if (!Number.isFinite(portNumber) || portNumber < 1 || portNumber > 8) continue;
 
-        const rest = (m[2] || "").trim();
+        const rest = (m[2] || '').trim();
         if (!rest) continue;
 
-        if (rest === "null-null") {
+        if (rest === 'null-null') {
             byPort.set(portNumber, { port_number: portNumber, sensor_type: null, value: null });
             continue;
         }
 
         const idVal = rest.match(/^ID=([^;]+);VAL=(.*)$/);
         if (idVal) {
-            const sensorType = (idVal[1] || "").trim() || null;
-            const value = (idVal[2] || "").trim() || null;
+            const sensorType = (idVal[1] || '').trim() || null;
+            const value = (idVal[2] || '').trim() || null;
             byPort.set(portNumber, { port_number: portNumber, sensor_type: sensorType, value });
             continue;
         }
 
-        const idx = rest.indexOf("-");
+        const idx = rest.indexOf('-');
         if (idx !== -1) {
             const sensorType = rest.slice(0, idx).trim() || null;
             const value = rest.slice(idx + 1).trim() || null;
@@ -248,7 +313,7 @@ function parseEsp32SensorBlock(sensorID, sensorDataBlock) {
         byPort.set(portNumber, { port_number: portNumber, sensor_type: null, value: null });
     }
 
-    console.log("piSerial:", piSerial, "sensorID:", sensorID);
+    console.log('piSerial:', piSerial, 'sensorID:', sensorID);
 
     return {
         sensor_controller_id: String(sensorID),
@@ -397,8 +462,6 @@ async function startEsp32Serial() {
 }
 
 // ------------------ RasPi Data Push ---------------------
-// 
-
 
 async function postRaspiData() {
     // Example payload:
@@ -463,7 +526,6 @@ async function postRaspiData() {
 }
 
 
-
 async function postSensorData(payload) {
     // Example payload to send:
     // {
@@ -472,11 +534,11 @@ async function postSensorData(payload) {
     //   "datas": [
     //     { "port_number": 1, "sensor_type": "dht22", "value": 28.4 },
     //     { "port_number": 2, "sensor_type": "soil", "value": 640 },
-    //     { "port_number": 3, "sensor_type": "ldr", "value": 123 }
-    //     { "port_number": 4, "sensor_type": null, "value": null }
-    //     { "port_number": 5, "sensor_type": null, "value": null }
-    //     { "port_number": 6, "sensor_type": null, "value": null }
-    //     { "port_number": 7, "sensor_type": null, "value": null }
+    //     { "port_number": 3, "sensor_type": "ldr", "value": 123 },
+    //     { "port_number": 4, "sensor_type": null, "value": null },
+    //     { "port_number": 5, "sensor_type": null, "value": null },
+    //     { "port_number": 6, "sensor_type": null, "value": null },
+    //     { "port_number": 7, "sensor_type": null, "value": null },
     //     { "port_number": 8, "sensor_type": null, "value": null }
     //   ]
     // }

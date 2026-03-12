@@ -322,6 +322,7 @@ void setup() {
 
   esp_now_register_recv_cb(onDataReceive);
   updateDisplay(true);
+  Serial.setTimeout(100);
 }
 
 void loop() {
