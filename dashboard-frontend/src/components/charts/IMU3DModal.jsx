@@ -4,39 +4,38 @@ import { OrbitControls } from "@react-three/drei";
 import { Move3d, Thermometer } from "lucide-react";
 import { socket } from "../../lib/socket";
 
-function extractPayload(raw) {
-  if (!raw || typeof raw !== "string") return "";
-  const s = raw.trim();
-  if (!s) return "";
-  const idx = s.indexOf("VAL=");
-  if (idx >= 0) return s.slice(idx + 4).trim();
-  const i1 = s.indexOf("-");
-  if (i1 >= 0) {
-    const i2 = s.indexOf("-", i1 + 1);
-    if (i2 >= 0) return s.slice(i2 + 1).trim();
-  }
-  return s;
-}
-
-function parseIMUPayload(raw) {
-  const payload = extractPayload(raw);
-  const parts = payload.split("|").map((x) => x.trim()).filter(Boolean);
-  if (parts.length < 3) return null;
-
+function parseIMUValue(valueStr) {
+  if (!valueStr || typeof valueStr !== "string") return null;
+  const parts = valueStr.split("|").map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
   const [accStr, gyrStr, tempStr] = parts;
-
-  const acc = accStr.split(",").map((n) => Number(String(n).trim()));
-  const gyr = gyrStr.split(",").map((n) => Number(String(n).trim()));
-  const temp = Number(String(tempStr).trim());
-
+  const acc = accStr.split(",").map((n) => Number(n.trim()));
+  const gyr = gyrStr.split(",").map((n) => Number(n.trim()));
+  const temp = tempStr != null ? Number(tempStr.trim()) : null;
   if (acc.length !== 3 || gyr.length !== 3) return null;
   if (acc.some((v) => Number.isNaN(v)) || gyr.some((v) => Number.isNaN(v))) return null;
-
   return {
     accelerometer: { x: acc[0], y: acc[1], z: acc[2] },
-    gyroscope: { x: gyr[0], y: gyr[1], z: gyr[2] },
-    temperature: Number.isNaN(temp) ? null : temp,
+    gyroscope:     { x: gyr[0], y: gyr[1], z: gyr[2] },
+    temperature:   temp !== null && !Number.isNaN(temp) ? temp : null,
   };
+}
+
+function parseIMUPayloadLegacy(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const s = raw.trim();
+  const idx = s.indexOf("VAL=");
+  let payload = s;
+  if (idx >= 0) {
+    payload = s.slice(idx + 4).trim();
+  } else if (/^\d/.test(s)) {
+    const i1 = s.indexOf("-");
+    if (i1 >= 0) {
+      const i2 = s.indexOf("-", i1 + 1);
+      if (i2 >= 0) payload = s.slice(i2 + 1).trim();
+    }
+  }
+  return parseIMUValue(payload);
 }
 
 function getReadingValue(node, key) {
@@ -50,36 +49,27 @@ function buildIMUFromNode(node) {
   if (imu?.accel && imu?.gyro) {
     return {
       accelerometer: imu.accel,
-      gyroscope: imu.gyro,
-      temperature: typeof imu.tempC === "number" ? imu.tempC : null,
+      gyroscope:     imu.gyro,
+      temperature:   typeof imu.tempC === "number" ? imu.tempC : null,
     };
   }
 
-  const ax = getReadingValue(node, "ax");
-  const ay = getReadingValue(node, "ay");
-  const az = getReadingValue(node, "az");
-  const gx = getReadingValue(node, "gx");
-  const gy = getReadingValue(node, "gy");
-  const gz = getReadingValue(node, "gz");
+  const ax = getReadingValue(node, "ax"), ay = getReadingValue(node, "ay"), az = getReadingValue(node, "az");
+  const gx = getReadingValue(node, "gx"), gy = getReadingValue(node, "gy"), gz = getReadingValue(node, "gz");
   const temp = getReadingValue(node, "temp");
-
-  const hasAcc = ax != null && ay != null && az != null;
-  const hasGyr = gx != null && gy != null && gz != null;
-
-  if (hasAcc && hasGyr) {
-    return {
-      accelerometer: { x: ax, y: ay, z: az },
-      gyroscope: { x: gx, y: gy, z: gz },
-      temperature: temp,
-    };
+  if (ax != null && ay != null && az != null && gx != null && gy != null && gz != null) {
+    return { accelerometer: { x: ax, y: ay, z: az }, gyroscope: { x: gx, y: gy, z: gz }, temperature: temp };
   }
 
-  const fallbackRaw =
-    (typeof node?.sensor_data === "string" && node.sensor_data) ||
-    (typeof node?.value === "string" && node.value) ||
-    "";
+  if (typeof node?.value === "string" && node.value) {
+    return parseIMUValue(node.value);
+  }
 
-  return parseIMUPayload(fallbackRaw);
+  if (typeof node?.sensor_data === "string" && node.sensor_data) {
+    return parseIMUPayloadLegacy(node.sensor_data);
+  }
+
+  return null;
 }
 
 function clamp(v, min, max) {
@@ -94,7 +84,7 @@ function normalizeVec3(x, y, z) {
 
 function eulerFromAccel(acc) {
   const g = normalizeVec3(acc.x, acc.y, acc.z);
-  const roll = Math.atan2(g.y, g.z);
+  const roll  = Math.atan2(g.y, g.z);
   const pitch = Math.atan2(-g.x, Math.sqrt(g.y * g.y + g.z * g.z));
   return { roll, pitch };
 }
@@ -119,16 +109,13 @@ function getPortFromNode(n) {
 function pickNodeByPort(nodeOrNodes, portId) {
   const p = Number(portId);
   if (!Number.isFinite(p)) return null;
-
   if (Array.isArray(nodeOrNodes)) {
     return nodeOrNodes.find((n) => getPortFromNode(n) === p) || null;
   }
-
   if (nodeOrNodes && typeof nodeOrNodes === "object") {
     const pn = getPortFromNode(nodeOrNodes);
     if (pn === p) return nodeOrNodes;
   }
-
   return null;
 }
 
@@ -138,32 +125,29 @@ function IMUObject({ imuRef, filterRef }) {
   useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
-
     const imu = imuRef.current;
     if (!imu) return;
 
     const dt = clamp(delta, 0, 0.05);
-
     const gx = imu.gyroscope?.x ?? 0;
     const gy = imu.gyroscope?.y ?? 0;
     const gz = imu.gyroscope?.z ?? 0;
 
     const filter = filterRef.current;
-
-    const rollGyro = filter.roll + gx * dt;
+    const rollGyro  = filter.roll  + gx * dt;
     const pitchGyro = filter.pitch + gy * dt;
-    const yawGyro = filter.yaw + gz * dt;
+    const yawGyro   = filter.yaw   + gz * dt;
 
     if (filter.useComplementary) {
       const { roll: rollAcc, pitch: pitchAcc } = eulerFromAccel(imu.accelerometer);
       const a = clamp(filter.alpha, 0, 1);
-      filter.roll = a * rollGyro + (1 - a) * rollAcc;
+      filter.roll  = a * rollGyro  + (1 - a) * rollAcc;
       filter.pitch = a * pitchGyro + (1 - a) * pitchAcc;
-      filter.yaw = yawGyro;
+      filter.yaw   = yawGyro;
     } else {
-      filter.roll = rollGyro;
+      filter.roll  = rollGyro;
       filter.pitch = pitchGyro;
-      filter.yaw = yawGyro;
+      filter.yaw   = yawGyro;
     }
 
     mesh.rotation.set(filter.roll, filter.pitch, filter.yaw, "XYZ");
@@ -175,12 +159,10 @@ function IMUObject({ imuRef, filterRef }) {
         <boxGeometry args={[1.4, 0.2, 0.9]} />
         <meshStandardMaterial roughness={0.35} metalness={0.2} />
       </mesh>
-
       <mesh position={[0, 0.14, 0]} castShadow receiveShadow>
         <boxGeometry args={[0.15, 0.06, 0.12]} />
         <meshStandardMaterial roughness={0.4} metalness={0.1} />
       </mesh>
-
       <gridHelper args={[10, 10]} />
       <axesHelper args={[2]} />
     </group>
@@ -188,17 +170,12 @@ function IMUObject({ imuRef, filterRef }) {
 }
 
 export default function IMU3DModal({
-  open,
-  onClose,
-  raspiId,
-  hubId,
-  portId,
-  sensorTypeHint,
-  node,
+  open, onClose,
+  raspiId, hubId, portId, sensorTypeHint, node,
 }) {
-  const raspiKey = useMemo(() => String(raspiId || "").toLowerCase().trim(), [raspiId]);
-  const hubKey = useMemo(() => String(hubId || "").trim(), [hubId]);
-  const portKey = useMemo(() => Number(portId), [portId]);
+  const raspiKey  = useMemo(() => String(raspiId || "").toLowerCase().trim(), [raspiId]);
+  const hubKey    = useMemo(() => String(hubId || "").trim(), [hubId]);
+  const portKey   = useMemo(() => Number(portId), [portId]);
   const sensorKey = useMemo(() => normalizeSensorType(sensorTypeHint || "imu"), [sensorTypeHint]);
 
   const baseNode = useMemo(() => pickNodeByPort(node, portKey), [node, portKey]);
@@ -207,9 +184,7 @@ export default function IMU3DModal({
   const imuRef = useRef(null);
 
   const filterRef = useRef({
-    roll: 0,
-    pitch: 0,
-    yaw: 0,
+    roll: 0, pitch: 0, yaw: 0,
     alpha: 0.98,
     useComplementary: true,
   });
@@ -218,17 +193,9 @@ export default function IMU3DModal({
   const [useComp, setUseComp] = useState(true);
   const [ori, setOri] = useState({ roll: 0, pitch: 0, yaw: 0 });
 
-  useEffect(() => {
-    filterRef.current.alpha = alphaUi;
-  }, [alphaUi]);
-
-  useEffect(() => {
-    filterRef.current.useComplementary = useComp;
-  }, [useComp]);
-
-  useEffect(() => {
-    imuRef.current = imu || null;
-  }, [imu]);
+  useEffect(() => { filterRef.current.alpha = alphaUi; }, [alphaUi]);
+  useEffect(() => { filterRef.current.useComplementary = useComp; }, [useComp]);
+  useEffect(() => { imuRef.current = imu || null; }, [imu]);
 
   useEffect(() => {
     if (!open) return;
@@ -256,25 +223,23 @@ export default function IMU3DModal({
 
     const handler = (p) => {
       if (!p) return;
-
       const pRaspi = String(p.raspberry_serial_id || p.raspi_serial_id || "").toLowerCase().trim();
-      const pHub = String(p.module_id || p.hub_id || "").trim();
-      const pPort = Number(p.port_number ?? p.port_id);
-      const pType = normalizeSensorType(p.sensor_type);
+      const pHub   = String(p.module_id || p.hub_id || "").trim();
+      const pPort  = Number(p.port_number ?? p.port_id);
+      const pType  = normalizeSensorType(p.sensor_type);
 
       if (raspiKey && pRaspi && pRaspi !== raspiKey) return;
-      if (hubKey && pHub && pHub !== hubKey) return;
+      if (hubKey   && pHub   && pHub   !== hubKey)   return;
       if (Number.isFinite(portKey) && Number.isFinite(pPort) && pPort !== portKey) return;
-
       if (sensorKey && pType && pType !== sensorKey) return;
       if (sensorKey && !pType && sensorKey !== "imu") return;
 
       const virtualNode = {
         ...p,
-        parsed: p.parsed,
-        readings: p.readings,
+        parsed:      p.parsed,
+        readings:    p.readings,
         sensor_data: p.sensor_data,
-        value: p.value,
+        value:       p.value,
         sensor_type: p.sensor_type || sensorKey,
       };
 
@@ -283,23 +248,22 @@ export default function IMU3DModal({
       setImu(next);
     };
 
-    socket.on("node-sample", handler);
+    socket.on("node-sample",    handler);
     socket.on("sensor-reading", handler);
-
     return () => {
-      socket.off("node-sample", handler);
+      socket.off("node-sample",    handler);
       socket.off("sensor-reading", handler);
     };
   }, [open, raspiKey, hubKey, portKey, sensorKey]);
 
   if (!open) return null;
 
-  const acc = imu?.accelerometer || null;
-  const gyr = imu?.gyroscope || null;
-  const temp = imu?.temperature ?? null;
+  const acc  = imu?.accelerometer || null;
+  const gyr  = imu?.gyroscope     || null;
+  const temp = imu?.temperature   ?? null;
 
   const headerNodeId = baseNode?.node_id || `P${portKey}`;
-  const headerType = normalizeSensorType(baseNode?.sensor_type || sensorKey || "imu") || "imu";
+  const headerType   = normalizeSensorType(baseNode?.sensor_type || sensorKey || "imu") || "imu";
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
@@ -326,11 +290,8 @@ export default function IMU3DModal({
                 {temp == null ? "--" : `${fmt(temp, 2)} °C`}
               </span>
             </div>
-
-            <button
-              onClick={onClose}
-              className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200"
-            >
+            <button onClick={onClose}
+              className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200">
               Close
             </button>
           </div>
@@ -385,45 +346,31 @@ export default function IMU3DModal({
 
               <div className="rounded-xl bg-black/20 border border-white/10 p-3">
                 <p className="text-[11px] text-gray-400">Stabilization</p>
-
                 <div className="mt-2 flex items-center justify-between gap-3">
                   <label className="text-xs text-gray-300 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={useComp}
+                    <input type="checkbox" checked={useComp}
                       onChange={(e) => setUseComp(e.target.checked)}
-                      className="accent-indigo-400"
-                    />
+                      className="accent-indigo-400" />
                     Complementary filter
                   </label>
-
                   <button
                     onClick={() => {
                       filterRef.current.roll = 0;
                       filterRef.current.pitch = 0;
                       filterRef.current.yaw = 0;
                     }}
-                    className="text-xs rounded-md border px-2.5 py-1.5 hover:bg-white/5 border-white/10 text-gray-200"
-                  >
+                    className="text-xs rounded-md border px-2.5 py-1.5 hover:bg-white/5 border-white/10 text-gray-200">
                     Recenter
                   </button>
                 </div>
-
                 <div className="mt-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-gray-400">Alpha</span>
                     <span className="text-[11px] text-gray-300 font-mono tabular-nums">{fmt(alphaUi, 2)}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0.85"
-                    max="0.995"
-                    step="0.001"
-                    value={alphaUi}
-                    onChange={(e) => setAlphaUi(Number(e.target.value))}
-                    className="w-full mt-2"
-                    disabled={!useComp}
-                  />
+                  <input type="range" min="0.85" max="0.995" step="0.001"
+                    value={alphaUi} onChange={(e) => setAlphaUi(Number(e.target.value))}
+                    className="w-full mt-2" disabled={!useComp} />
                 </div>
               </div>
 
@@ -431,9 +378,9 @@ export default function IMU3DModal({
                 <p className="text-[11px] text-gray-400">Orientation (rad)</p>
                 <div className="mt-2 grid grid-cols-3 gap-2">
                   {[
-                    { k: "Roll", v: ori.roll },
+                    { k: "Roll",  v: ori.roll  },
                     { k: "Pitch", v: ori.pitch },
-                    { k: "Yaw", v: ori.yaw },
+                    { k: "Yaw",   v: ori.yaw   },
                   ].map((it) => (
                     <div key={it.k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2">
                       <p className="text-[10px] text-gray-400">{it.k}</p>
@@ -443,20 +390,18 @@ export default function IMU3DModal({
                 </div>
               </div>
 
-              {!imu ? (
+              {!imu && (
                 <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3">
                   <p className="text-xs text-red-200">Invalid IMU payload</p>
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
         </div>
 
         <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-end">
-          <button
-            onClick={onClose}
-            className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200"
-          >
+          <button onClick={onClose}
+            className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200">
             Close
           </button>
         </div>

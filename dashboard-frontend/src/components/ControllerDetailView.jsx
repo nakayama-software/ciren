@@ -15,8 +15,11 @@ export default function ControllerDetailView({ controller, onBack, t }) {
     const [activeLabel, setActiveLabel] = useState(null);
     const [showExport, setShowExport] = useState(false);
 
+    console.log("controller.sensor_nodes", controller.sensor_nodes);
+
     const sensor_nodes_filtered = controller.sensor_nodes.filter(
-        (node) => !node.sensor_data.includes("null")
+        (node) => node.sensor_type && node.sensor_type !== 'null'
+            && node.value != null && node.value !== 'null'
     );
 
     const hubId = useMemo(

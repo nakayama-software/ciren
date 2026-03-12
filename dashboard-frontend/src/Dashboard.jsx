@@ -1,4 +1,3 @@
-// src/Dashboard.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Activity, Thermometer, Gauge, MapPin, Clock, Cpu, Wifi, Eye,
@@ -12,19 +11,11 @@ import ControllerDetailView from './components/ControllerDetailView';
 import { getDashboard, logout, getUsername, isLoggedIn } from './lib/api';
 import { socket } from './lib/socket';
 
-const API_POLL_MS    = 5000;   // raspi status / GPS poll interval
+const API_POLL_MS    = 5000;
 const HUB_OFFLINE_MS = 12_000;
 const RASPI_ALIVE_MS = 15_000;
 const GPS_TIMEOUT_MS = 15_000;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Parse sensor_data string: "${port}-${sensor_type}-${value}"
- * Value may contain dashes (negative numbers), so we only split on first two.
- */
 function parseSensorData(str) {
   if (!str || typeof str !== 'string') return null;
   const first  = str.indexOf('-');
@@ -42,10 +33,6 @@ function parseSensorData(str) {
   return { port_number, sensor_type, value };
 }
 
-/**
- * Transform one raspi object from /api/dashboard into the shape
- * that the existing UI components expect.
- */
 function buildControllers(raspi) {
   if (!raspi?.sensor_controllers) return [];
 
@@ -76,10 +63,6 @@ function buildControllers(raspi) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Component
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function Dashboard() {
   const navigate = useNavigate();
 
@@ -105,9 +88,8 @@ export default function Dashboard() {
     localStorage.setItem('ciren-theme', theme);
   }, [theme]);
 
-  // ── data state ─────────────────────────────────────────────────────────────
-  const [allRaspis,  setAllRaspis]  = useState([]);   // full raspi list from /api/dashboard
-  const [activeIdx,  setActiveIdx]  = useState(0);    // selected raspi tab index
+  const [allRaspis,  setAllRaspis]  = useState([]);
+  const [activeIdx,  setActiveIdx]  = useState(0);
   const [loading,    setLoading]    = useState(true);
   const [err,        setErr]        = useState(null);
 
@@ -124,7 +106,6 @@ export default function Dashboard() {
 
   const username = getUsername();
 
-  // ── clock ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -134,26 +115,32 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [startTime]);
 
-  // ── apply raspi data to UI state ───────────────────────────────────────────
-  const applyRaspi = useCallback((raspi) => {
+  const applyRaspiMeta = useCallback((raspi) => {
     if (!raspi) return;
-
     const ts = raspi.timestamp_raspberry ? new Date(raspi.timestamp_raspberry).getTime() : 0;
     setRaspiStatus({
       lastTs:  ts,
       tempC:   typeof raspi.temperature === 'number' ? raspi.temperature : null,
       uptimeS: raspi.raspi_status?.uptime_s ?? null,
     });
-
     const gps = raspi.gps_data || null;
     setGpsData(gps);
     const gpsTsMs = gps?.timestamp_gps ? new Date(gps.timestamp_gps).getTime() : 0;
     setGpsDisconnected(!gps || (Date.now() - gpsTsMs > GPS_TIMEOUT_MS));
-
-    setControllersLatest(buildControllers(raspi));
   }, []);
 
-  // ── fetch dashboard ────────────────────────────────────────────────────────
+  const applyRaspi = useCallback((raspi) => {
+    if (!raspi) return;
+    applyRaspiMeta(raspi);
+    setControllersLatest(buildControllers(raspi));
+  }, [applyRaspiMeta]);
+
+  const activeIdxRef = useRef(activeIdx);
+  useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
+
+  const allRaspisRef = useRef(allRaspis);
+  useEffect(() => { allRaspisRef.current = allRaspis; }, [allRaspis]);
+
   const fetchDashboard = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
     setErr(null);
@@ -161,34 +148,37 @@ export default function Dashboard() {
       const data   = await getDashboard();
       const raspis = data.raspis || [];
       setAllRaspis(raspis);
-      if (raspis.length > 0) applyRaspi(raspis[activeIdx] || raspis[0]);
+      if (raspis.length > 0) {
+        const raspi = raspis[activeIdxRef.current] || raspis[0];
+        if (showLoader) {
+          applyRaspi(raspi);
+        } else {
+          applyRaspiMeta(raspi);
+        }
+      }
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
       if (showLoader) setLoading(false);
     }
-  }, [activeIdx, applyRaspi]);
+  }, [applyRaspi, applyRaspiMeta]);
 
-  // ── initial load + polling ─────────────────────────────────────────────────
   useEffect(() => {
     fetchDashboard(true);
     const pollId = setInterval(() => fetchDashboard(false), API_POLL_MS);
     return () => clearInterval(pollId);
   }, [fetchDashboard]);
 
-  // ── switch active raspi tab ────────────────────────────────────────────────
   useEffect(() => {
     if (allRaspis.length > 0) {
       applyRaspi(allRaspis[activeIdx] || allRaspis[0]);
       setSelectedControllerId(null);
     }
-  }, [activeIdx, allRaspis, applyRaspi]);
+  }, [activeIdx]);
 
-  // ── Socket.IO — live sensor updates ───────────────────────────────────────
   useEffect(() => {
     function onNodeSample(doc) {
-      // Only update if the event belongs to the currently viewed raspi
-      const activeRaspi = allRaspis[activeIdx];
+      const activeRaspi = allRaspisRef.current[activeIdxRef.current];
       if (!activeRaspi) return;
       if (doc.raspberry_serial_id !== activeRaspi.raspberry_serial_id) return;
 
@@ -211,7 +201,6 @@ export default function Dashboard() {
           return { ...ctrl, sensor_nodes: updatedNodes, last_seen: Date.now() };
         });
 
-        // If controller not in list yet, add it
         const exists = next.some(c => c.module_id === doc.module_id);
         if (!exists) {
           next.push({
@@ -234,13 +223,12 @@ export default function Dashboard() {
 
     socket.on('node-sample', onNodeSample);
     return () => socket.off('node-sample', onNodeSample);
-  }, [allRaspis, activeIdx]);
+  }, []);
 
-  // ── derived values ─────────────────────────────────────────────────────────
-  const activeRaspi  = allRaspis[activeIdx] || null;
+  const activeRaspi   = allRaspis[activeIdx] || null;
   const raspiIsOnline = raspiStatus.lastTs && (Date.now() - raspiStatus.lastTs <= RASPI_ALIVE_MS);
-  const uptimeStr    = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
-  const tempStr      = raspiStatus.tempC  != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
+  const uptimeStr     = raspiStatus.uptimeS != null ? fmtHHMMSS(raspiStatus.uptimeS) : runningTime;
+  const tempStr       = raspiStatus.tempC   != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
   const selectedController = controllersLatest.find(c => c.sensor_controller_id === selectedControllerId);
 
   function handleLogout() {
@@ -248,7 +236,6 @@ export default function Dashboard() {
     navigate('/ciren');
   }
 
-  // ── loading / error ────────────────────────────────────────────────────────
   if (loading && allRaspis.length === 0) {
     return (
       <div className="h-screen w-screen flex items-center justify-center text-xl font-medium text-gray-600 dark:text-gray-300 dark:bg-slate-950">
@@ -269,7 +256,6 @@ export default function Dashboard() {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div lang={t.locale}
       className="min-h-screen font-['Noto_Sans_JP','Hiragino Kaku Gothic ProN','Yu Gothic UI',system-ui,sans-serif]
@@ -284,7 +270,6 @@ export default function Dashboard() {
       <div className="relative z-10">
         <div className="mx-auto max-w-7xl px-5 py-5">
 
-          {/* ── Header ── */}
           <header className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 dark:bg-white/10">
@@ -328,12 +313,10 @@ export default function Dashboard() {
             </div>
           </header>
 
-          {/* ── Time ── */}
           <div className="mb-4 text-right text-[11px] font-mono text-gray-600 dark:text-gray-400">
             {fmtJaTime(currentTime, t.locale)}
           </div>
 
-          {/* ── Raspi Tabs (only if multiple) ── */}
           {allRaspis.length > 1 && (
             <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
               {allRaspis.map((raspi, idx) => (
@@ -350,7 +333,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ── Controller detail or main view ── */}
           {selectedController ? (
             <ControllerDetailView
               controller={selectedController}
@@ -359,9 +341,7 @@ export default function Dashboard() {
             />
           ) : (
             <div className="space-y-6">
-              {/* Map + Status */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Map */}
                 <div className="lg:col-span-2 rounded-2xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm
                                 dark:border-white/10 dark:bg-slate-800/60 shadow-sm h-[26rem] relative">
                   <h2 className="text-base font-medium tracking-tight text-slate-900 dark:text-white flex items-center gap-2 mb-3">
@@ -378,7 +358,6 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* Status card */}
                 <div className="rounded-2xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm
                                 dark:border-white/10 dark:bg-slate-800/60 shadow-sm flex flex-col">
                   <h2 className="text-base font-medium tracking-tight text-slate-900 dark:text-white flex items-center gap-2 mb-4">
@@ -415,7 +394,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Controllers list */}
               <div>
                 <h2 className="text-base font-medium tracking-tight text-slate-900 dark:text-white flex items-center gap-2 mb-4">
                   <Settings className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
@@ -447,7 +425,6 @@ export default function Dashboard() {
                           </div>
                         </div>
 
-                        {/* Online badge */}
                         <div className="mb-4 flex justify-end">
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
                             ${isOnline
