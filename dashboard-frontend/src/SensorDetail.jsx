@@ -1,8 +1,7 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-
-const socket = io('http://localhost:3000', { transports: ['websocket'] });
+import { API_BASE } from './lib/api';      // ← import API_BASE
+import { socket } from './lib/socket';   
 
 function SensorDetail() {
   const { username, sensorID } = useParams();
@@ -15,16 +14,14 @@ function SensorDetail() {
   const [limit, setLimit] = useState(10);
 
   useEffect(() => {
-    fetch(`http://localhost:3000/api/resolve/${username}`)
+    fetch(`${API_BASE}/api/resolve/${username}`)      // ← pakai API_BASE
       .then(res => res.json())
       .then(({ raspi_serial_id }) => {
         setRaspiID(raspi_serial_id);
-        return fetch(`http://localhost:3000/api/data/${raspi_serial_id}`);
+        return fetch(`${API_BASE}/api/data/${raspi_serial_id}`);  // ← pakai API_BASE
       })
       .then(res => res.json())
       .then(dataList => {
-        // console.log("dataList : ", dataList);
-
         const reversed = [...dataList].reverse();
         const selected = reversed
           .map(entry => {
@@ -62,7 +59,7 @@ function SensorDetail() {
       }
     };
 
-    socket.on('connection', listener);
+    socket.on('new-data', listener);              // ← fix: konsisten dengan cleanup
     return () => socket.off('new-data', listener);
   }, [raspiID, sensorID, limit]);
 
