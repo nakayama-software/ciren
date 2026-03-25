@@ -6,14 +6,12 @@ const char *DEVICE_ID = "Imu";
 
 Adafruit_MPU6050 mpu;
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   Serial1.begin(9600);
   Wire.begin();
 
-  if (!mpu.begin(0x68))
-  { // try 0x69 if you changed AD0
+  if (!mpu.begin(0x68)) {  // try 0x69 if you changed AD0
     Serial.println("MPU6050 not found. Check wiring/power/I2C address.");
     while (1)
       delay(10);
@@ -25,12 +23,11 @@ void setup()
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 
   Serial.println("MPU6050 ready!");
-  
+
   delay(50);
 }
 
-void loop()
-{
+void loop() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 

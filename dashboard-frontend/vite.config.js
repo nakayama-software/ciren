@@ -2,14 +2,21 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // server: {
-  //   host: '192.168.100.10', // <-- your desired IP,
-  //   allowedHosts: ['cireniot.nakayamairon.com', 'localhost'],
-  //   port: 5173,             // optional, defaults to 5173
-  //   strictPort: true        // optional, prevents Vite from picking another port if 5173 is busy
-  // }
+  server: {
+    proxy: {
+      // Forward semua /api/* dan /socket.io/* ke backend
+      // Sehingga relative URL di LineChartModal dll tetap bekerja
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        ws: true, // aktifkan WebSocket proxy
+      },
+    },
+  },
 })
-

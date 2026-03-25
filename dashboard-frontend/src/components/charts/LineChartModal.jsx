@@ -256,6 +256,8 @@ export default function LineChartModal({
         .map((r) => ({ x: r.ts, y: typeof r.hum === "number" ? r.hum : null }))
         .filter((p) => p.y !== null);
 
+      // console.log(tempData);
+
       return {
         datasets: [
           {

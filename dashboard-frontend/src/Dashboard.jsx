@@ -12,10 +12,10 @@ import { getDashboard, logout, getUsername, isLoggedIn } from './lib/api';
 import { socket } from './lib/socket';
 
 const API_POLL_MS    = 5000;
-const HUB_OFFLINE_MS = 12_000;
-const RASPI_ALIVE_MS = 60_000;
-const GPS_TIMEOUT_MS = 60_000;
-const NODE_STALE_MS  = 10_000;
+const HUB_OFFLINE_MS = 30_000;  // controller dianggap offline setelah 30 detik
+const RASPI_ALIVE_MS = 120_000; // raspi dianggap offline setelah 2 menit
+const GPS_TIMEOUT_MS = 120_000; // GPS timeout 2 menit
+const NODE_STALE_MS  = 30_000;  // node stale setelah 30 detik (dipakai di ControllerDetailView)
 
 function parseSensorData(str) {
   if (!str || typeof str !== 'string') return null;
@@ -34,25 +34,54 @@ function parseSensorData(str) {
   return { port_number, sensor_type, value };
 }
 
+// Normalise sensor_datas — handles both old array format and new object format
+// Old: [{ port_number, sensor_data: "1-imu-..." }]
+// New: { "1": { port_number, sensor_type, value, last_seen }, "2": {...} }
+function normalizeSensorDatas(sensor_datas) {
+  if (!sensor_datas) return [];
+  // New object format
+  if (!Array.isArray(sensor_datas)) {
+    return Object.values(sensor_datas).filter(Boolean);
+  }
+  // Old array format — convert to same shape as new format
+  return sensor_datas.map(sd => {
+    const parsed = parseSensorData(sd?.sensor_data);
+    if (!parsed) return null;
+    return {
+      port_number: parsed.port_number,
+      sensor_type: parsed.sensor_type,
+      value:       parsed.value,
+      unit:        null,
+      last_seen:   null,
+    };
+  }).filter(Boolean);
+}
+
 function buildControllers(raspi) {
   if (!raspi?.sensor_controllers) return [];
 
   return raspi.sensor_controllers.map(ctrl => {
     const ts = ctrl.timestamp ? new Date(ctrl.timestamp).getTime() : 0;
+    const entries = normalizeSensorDatas(ctrl.sensor_datas);
 
-    const sensor_nodes = (ctrl.sensor_datas || [])
+    const sensor_nodes = entries
       .map(sd => {
-        const parsed = parseSensorData(sd.sensor_data);
-        if (!parsed) return null;
+        const sensor_type = sd.sensor_type;
+        const value       = sd.value;
+        const port_number = sd.port_number;
+        if (!sensor_type || sensor_type === 'null' || value == null || value === 'null') return null;
+        // Gunakan timestamp controller (ts) sebagai last_seen
+        // last_seen dari DB tidak reliable karena bisa sudah lama
+        const nodeSeen = ts || Date.now();
         return {
           ...normalizeSensorNode({
-            node_id:     `P${parsed.port_number}`,
-            port_number: parsed.port_number,
-            sensor_type: parsed.sensor_type,
-            value:       parsed.value,
-            unit:        null,
+            node_id:     `P${port_number}`,
+            port_number: port_number,
+            sensor_type: sensor_type,
+            value:       String(value),
+            unit:        sd.unit ?? null,
           }),
-          last_seen: ts, // ← last_seen per node dari timestamp controller
+          last_seen: nodeSeen,
         };
       })
       .filter(Boolean);
@@ -247,9 +276,9 @@ export default function Dashboard() {
   const tempStr       = raspiStatus.tempC   != null ? `${raspiStatus.tempC.toFixed(1)}°C` : '—';
 
   // Gunakan now (bukan Date.now()) agar re-render tiap detik mengupdate filter
-  const activeControllers = controllersLatest.filter(
-    c => c.last_seen && (now - c.last_seen <= NODE_STALE_MS)
-  );
+  // Tampilkan semua controller yang pernah ada data
+  // Stale check dilakukan di dalam card (isOnline) dan di ControllerDetailView (node level)
+  const activeControllers = controllersLatest;
 
   const selectedController = activeControllers.find(c => c.sensor_controller_id === selectedControllerId);
 

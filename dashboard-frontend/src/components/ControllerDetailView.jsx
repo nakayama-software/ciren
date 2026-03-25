@@ -11,13 +11,16 @@ import ExportModal from "./ExportModal";
 import AliasInlineEdit from "./AliasInlineEdit";
 import { useState } from "react";
 
-const NODE_STALE_MS = 10_000;
+const NODE_STALE_MS = 30_000; // sesuai dengan Dashboard
 
 // now dipass dari Dashboard agar sumber waktu konsisten dan tidak perlu timer sendiri
 export default function ControllerDetailView({ controller, now, onBack, t }) {
     const [activeDetail, setActiveDetail] = useState(null);
     const [activeLabel,  setActiveLabel]  = useState(null);
     const [showExport,   setShowExport]   = useState(false);
+
+    // console.log("datas t: ",t);
+    
 
     const hubId = useMemo(
         () => String(controller?.sensor_controller_id || "").trim(),
@@ -50,6 +53,8 @@ export default function ControllerDetailView({ controller, now, onBack, t }) {
             setActiveDetail({ type: "line", raspiId, hubId, portId: port, sensorTypeHint: sensor_type });
         }
     };
+
+    // console.log("sensor_nodes_filtered : ",sensor_nodes_filtered);
 
     return (
         <div className="rounded-2xl border border-black/10 bg-white/80 p-6 dark:border-white/10 dark:bg-slate-800/60 shadow-sm">

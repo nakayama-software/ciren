@@ -173,6 +173,8 @@ export default function IMU3DModal({
   open, onClose,
   raspiId, hubId, portId, sensorTypeHint, node,
 }) {
+  // console.log("IMU3DModal props: ", { open, raspiId, hubId, portId, sensorTypeHint, node });
+
   const raspiKey  = useMemo(() => String(raspiId || "").toLowerCase().trim(), [raspiId]);
   const hubKey    = useMemo(() => String(hubId || "").trim(), [hubId]);
   const portKey   = useMemo(() => Number(portId), [portId]);
@@ -222,6 +224,8 @@ export default function IMU3DModal({
     if (!open) return;
 
     const handler = (p) => {
+      // console.log("2222");
+      
       if (!p) return;
       const pRaspi = String(p.raspberry_serial_id || p.raspi_serial_id || "").toLowerCase().trim();
       const pHub   = String(p.module_id || p.hub_id || "").trim();
@@ -264,6 +268,9 @@ export default function IMU3DModal({
 
   const headerNodeId = baseNode?.node_id || `P${portKey}`;
   const headerType   = normalizeSensorType(baseNode?.sensor_type || sensorKey || "imu") || "imu";
+
+  // console.log("acc gyr temp ", acc,gyr,temp);
+  
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">

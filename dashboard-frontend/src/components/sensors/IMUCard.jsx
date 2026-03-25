@@ -13,8 +13,8 @@ function parseIMUValue(valueStr) {
   if (acc.some((v) => Number.isNaN(v)) || gyr.some((v) => Number.isNaN(v))) return null;
   return {
     accelerometer: { x: acc[0], y: acc[1], z: acc[2] },
-    gyroscope:     { x: gyr[0], y: gyr[1], z: gyr[2] },
-    temperature:   temp !== null && !Number.isNaN(temp) ? temp : null,
+    gyroscope: { x: gyr[0], y: gyr[1], z: gyr[2] },
+    temperature: temp !== null && !Number.isNaN(temp) ? temp : null,
   };
 }
 
@@ -46,8 +46,8 @@ function buildIMUFromNode(node) {
   if (imu?.accel && imu?.gyro) {
     return {
       accelerometer: imu.accel,
-      gyroscope:     imu.gyro,
-      temperature:   typeof imu.tempC === "number" ? imu.tempC : null,
+      gyroscope: imu.gyro,
+      temperature: typeof imu.tempC === "number" ? imu.tempC : null,
     };
   }
 
@@ -92,6 +92,8 @@ function AxisGrid({ title, subtitle, x, y, z }) {
 export default function IMUCard({ node }) {
   const parsed = useMemo(() => buildIMUFromNode(node), [node]);
   const fmtTemp = (v) => (typeof v === "number" && !Number.isNaN(v) ? v.toFixed(2) : "--");
+
+  // console.log("IMU node data : ", node);
 
   if (!parsed) {
     return (
