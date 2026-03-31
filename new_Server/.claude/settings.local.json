@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npm show:*)",
+      "Bash(node -e \"const v=JSON.parse\\(require\\(''''fs''''\\).readFileSync\\(''''/dev/stdin'''',''''utf8''''\\)\\); console.log\\(v.filter\\(x=>x.startsWith\\(''''9.''''\\)\\).slice\\(-5\\)\\)\")",
+      "Bash(xargs grep:*)",
+      "Bash(find 'D:\\\\Raihan Rafif\\\\Projects\\\\CIREN\\\\code\\\\ciren\\\\new_Server\\\\src' -type f -name *protocol* -o -name *frame*)",
+      "Bash(find 'D:\\\\Raihan Rafif\\\\Projects\\\\CIREN\\\\code\\\\ciren\\\\new_Server\\\\src' -type f -name *.js)",
+      "Bash(find 'D:\\\\Raihan Rafif\\\\Projects\\\\CIREN\\\\code\\\\ciren\\\\dashboard-frontend' -not -path */node_modules/* -not -path */.vite/* -type f)",
+      "Bash(find /d/Raihan Rafif/Projects/CIREN/code/ciren/new_Server -type d ! -path */node_modules*)"
+    ]
+  }
+}

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIREN IMU Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  #canvas-container {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  #hud {
+    position: absolute;
+    top: 20px; left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .hud-title {
+    font-size: 13px;
+    color: #888;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .angle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .angle-label {
+    font-size: 11px;
+    color: #666;
+    width: 36px;
+  }
+
+  .angle-bar-bg {
+    width: 120px;
+    height: 4px;
+    background: #1a1a2e;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .angle-bar {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.05s linear;
+  }
+
+  .angle-value {
+    font-size: 13px;
+    font-weight: bold;
+    min-width: 60px;
+    text-align: right;
+  }
+
+  #status-panel {
+    position: absolute;
+    top: 20px; right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #333;
+  }
+  .status-dot.connected { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+  .status-dot.error     { background: #ff4444; }
+
+  #hz-display {
+    position: absolute;
+    bottom: 20px; right: 20px;
+    font-size: 11px;
+    color: #444;
+  }
+
+  #connect-panel {
+    position: absolute;
+    bottom: 20px; left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .connect-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  input[type="text"] {
+    background: #111;
+    border: 1px solid #333;
+    color: #e0e0e0;
+    padding: 6px 10px;
+    font-family: monospace;
+    font-size: 12px;
+    border-radius: 4px;
+    width: 180px;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: #555; }
+
+  button {
+    background: #1a1a2e;
+    border: 1px solid #333;
+    color: #e0e0e0;
+    padding: 6px 14px;
+    font-family: monospace;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  button:hover { background: #2a2a4e; border-color: #555; }
+  button.active { border-color: #00ff88; color: #00ff88; }
+
+  .label-small {
+    font-size: 10px;
+    color: #555;
+  }
+
+  #axes-info {
+    position: absolute;
+    bottom: 60px; left: 20px;
+    font-size: 10px;
+    color: #333;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<!-- HUD angles -->
+<div id="hud">
+  <div class="hud-title">CIREN IMU</div>
+  <div class="angle-row">
+    <span class="angle-label">PITCH</span>
+    <div class="angle-bar-bg">
+      <div class="angle-bar" id="bar-pitch" style="background:#ff6b6b;width:50%"></div>
+    </div>
+    <span class="angle-value" id="val-pitch" style="color:#ff6b6b">0.0°</span>
+  </div>
+  <div class="angle-row">
+    <span class="angle-label">ROLL</span>
+    <div class="angle-bar-bg">
+      <div class="angle-bar" id="bar-roll" style="background:#4ecdc4;width:50%"></div>
+    </div>
+    <span class="angle-value" id="val-roll" style="color:#4ecdc4">0.0°</span>
+  </div>
+  <div class="angle-row">
+    <span class="angle-label">YAW</span>
+    <div class="angle-bar-bg">
+      <div class="angle-bar" id="bar-yaw" style="background:#ffe66d;width:50%"></div>
+    </div>
+    <span class="angle-value" id="val-yaw" style="color:#ffe66d">0.0°</span>
+  </div>
+</div>
+
+<!-- Status -->
+<div id="status-panel">
+  <div class="status-row">
+    <span style="color:#555">MQTT</span>
+    <div class="status-dot" id="dot-mqtt"></div>
+  </div>
+  <div class="status-row">
+    <span style="color:#555">DATA</span>
+    <div class="status-dot" id="dot-data"></div>
+  </div>
+</div>
+
+<!-- Hz counter -->
+<div id="hz-display">-- Hz</div>
+
+<!-- Axes info -->
+<div id="axes-info">X: pitch  Y: roll  Z: yaw</div>
+
+<!-- Connection -->
+<div id="connect-panel">
+  <div class="label-small">MQTT WEBSOCKET</div>
+  <div class="connect-row">
+    <input type="text" id="broker-url" value="ws://localhost:9001" placeholder="ws://host:port">
+    <button id="btn-connect">CONNECT</button>
+  </div>
+  <div class="connect-row">
+    <input type="text" id="topic" value="ciren/data/#" placeholder="topic">
+    <button id="btn-reset-yaw" onclick="resetYaw()">RESET YAW</button>
+  </div>
+  <div class="label-small" id="conn-status">disconnected</div>
+</div>
+
+<!-- Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- MQTT.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+
+<script>
+// ─── Three.js setup ──────────────────────────────
+const scene    = new THREE.Scene();
+const camera   = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x0a0a0f, 1);
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+camera.position.set(0, 1.5, 4);
+camera.lookAt(0, 0, 0);
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+scene.add(ambientLight);
+const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight1.position.set(5, 5, 5);
+scene.add(dirLight1);
+const dirLight2 = new THREE.DirectionalLight(0x4466ff, 0.3);
+dirLight2.position.set(-5, -2, -3);
+scene.add(dirLight2);
+
+// IMU board geometry — representasi PCB
+const boardGroup = new THREE.Group();
+
+// PCB board
+const boardGeo  = new THREE.BoxGeometry(2.4, 0.08, 1.6);
+const boardMat  = new THREE.MeshPhongMaterial({
+  color: 0x1a3a1a, specular: 0x224422, shininess: 40
+});
+const board = new THREE.Mesh(boardGeo, boardMat);
+boardGroup.add(board);
+
+// Chip di tengah (MPU6050)
+const chipGeo = new THREE.BoxGeometry(0.4, 0.1, 0.4);
+const chipMat = new THREE.MeshPhongMaterial({ color: 0x111111, specular: 0x333333 });
+const chip    = new THREE.Mesh(chipGeo, chipMat);
+chip.position.set(0, 0.09, 0);
+boardGroup.add(chip);
+
+// Header pins (kiri)
+for (let i = 0; i < 7; i++) {
+  const pinGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6);
+  const pinMat = new THREE.MeshPhongMaterial({ color: 0xccaa55 });
+  const pin    = new THREE.Mesh(pinGeo, pinMat);
+  pin.position.set(-1.05, 0.1, -0.48 + i * 0.16);
+  boardGroup.add(pin);
+}
+
+// Axis arrows
+const makeArrow = (dir, color, label) => {
+  const arrowGroup = new THREE.Group();
+  const arrowLen   = 0.8;
+  const geo = new THREE.CylinderGeometry(0.015, 0.015, arrowLen, 8);
+  const mat = new THREE.MeshBasicMaterial({ color });
+  const shaft = new THREE.Mesh(geo, mat);
+  shaft.rotation.z = dir === 'x' ? Math.PI / 2 : 0;
+  shaft.rotation.x = dir === 'z' ? Math.PI / 2 : 0;
+
+  const tipGeo = new THREE.ConeGeometry(0.04, 0.15, 8);
+  const tip    = new THREE.Mesh(tipGeo, mat);
+  if (dir === 'x') { shaft.position.x = arrowLen/2; tip.rotation.z = -Math.PI/2; tip.position.x = arrowLen+0.07; }
+  if (dir === 'y') { shaft.position.y = arrowLen/2; tip.position.y = arrowLen+0.07; }
+  if (dir === 'z') { shaft.position.z = arrowLen/2; tip.rotation.x = Math.PI/2; tip.position.z = arrowLen+0.07; }
+
+  arrowGroup.add(shaft, tip);
+  return arrowGroup;
+};
+
+const axisX = makeArrow('x', 0xff4444);
+const axisY = makeArrow('y', 0x44ff88);
+const axisZ = makeArrow('z', 0x4488ff);
+boardGroup.add(axisX, axisY, axisZ);
+
+// Grid floor
+const gridHelper = new THREE.GridHelper(10, 20, 0x1a1a3a, 0x111128);
+gridHelper.position.y = -1.5;
+scene.add(gridHelper);
+
+scene.add(boardGroup);
+
+// ─── Orientation state ───────────────────────────
+let targetPitch = 0, targetRoll = 0, targetYaw = 0;
+let currentPitch = 0, currentRoll = 0, currentYaw = 0;
+let yawOffset = 0;
+
+// Lerp factor — turunkan untuk lebih smooth, naikkan untuk lebih responsive
+const LERP = 0.25;
+
+function resetYaw() {
+  yawOffset = targetYaw;
+}
+
+// ─── HUD update ──────────────────────────────────
+function updateHUD(p, r, y) {
+  document.getElementById('val-pitch').textContent = p.toFixed(1) + '°';
+  document.getElementById('val-roll').textContent  = r.toFixed(1) + '°';
+  document.getElementById('val-yaw').textContent   = y.toFixed(1) + '°';
+
+  // Bar: -180..180 mapped ke 0..100%
+  const toBar = v => Math.min(100, Math.max(0, ((v + 180) / 360) * 100));
+  document.getElementById('bar-pitch').style.width = toBar(p) + '%';
+  document.getElementById('bar-roll').style.width  = toBar(r) + '%';
+  document.getElementById('bar-yaw').style.width   = toBar(y) + '%';
+}
+
+// ─── Hz counter ──────────────────────────────────
+let frameCount = 0, lastHzCheck = Date.now();
+function updateHz() {
+  frameCount++;
+  const now = Date.now();
+  if (now - lastHzCheck >= 1000) {
+    document.getElementById('hz-display').textContent = frameCount + ' Hz';
+    frameCount = 0;
+    lastHzCheck = now;
+  }
+}
+
+// ─── Render loop ─────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Smooth lerp ke target angles
+  currentPitch += (targetPitch - currentPitch) * LERP;
+  currentRoll  += (targetRoll  - currentRoll)  * LERP;
+  currentYaw   += (targetYaw - yawOffset - currentYaw) * LERP;
+
+  // Apply ke board — urutan Euler: YXZ
+  boardGroup.rotation.set(
+    currentPitch * Math.PI / 180,
+    currentYaw   * Math.PI / 180,
+    currentRoll  * Math.PI / 180,
+    'YXZ'
+  );
+
+  // Slow ambient rotation saat tidak ada data
+  if (!mqttConnected) {
+    boardGroup.rotation.y += 0.003;
+  }
+
+  updateHUD(currentPitch, currentRoll, currentYaw);
+  renderer.render(scene, camera);
+}
+animate();
+
+// ─── MQTT connection ─────────────────────────────
+let mqttClient    = null;
+let mqttConnected = false;
+let lastDataMs    = 0;
+
+// Data dot blink
+setInterval(() => {
+  const dot = document.getElementById('dot-data');
+  if (Date.now() - lastDataMs < 500) {
+    dot.classList.add('connected');
+    dot.classList.remove('error');
+  } else {
+    dot.classList.remove('connected');
+  }
+}, 100);
+
+function connectMQTT() {
+  const url   = document.getElementById('broker-url').value.trim();
+  const topic = document.getElementById('topic').value.trim();
+  const btn   = document.getElementById('btn-connect');
+
+  if (mqttClient) {
+    mqttClient.end();
+    mqttConnected = false;
+    btn.textContent = 'CONNECT';
+    btn.classList.remove('active');
+    document.getElementById('dot-mqtt').classList.remove('connected');
+    document.getElementById('conn-status').textContent = 'disconnected';
+    mqttClient = null;
+    return;
+  }
+
+  document.getElementById('conn-status').textContent = 'connecting...';
+
+  mqttClient = mqtt.connect(url, {
+    reconnectPeriod: 3000,
+    connectTimeout: 5000,
+    clientId: 'ciren_imu_' + Math.random().toString(16).substr(2, 8)
+  });
+
+  mqttClient.on('connect', () => {
+    mqttConnected = true;
+    btn.textContent = 'DISCONNECT';
+    btn.classList.add('active');
+    document.getElementById('dot-mqtt').classList.add('connected');
+    document.getElementById('conn-status').textContent = 'connected to ' + url;
+    mqttClient.subscribe(topic);
+  });
+
+  mqttClient.on('error', (err) => {
+    document.getElementById('conn-status').textContent = 'error: ' + err.message;
+    document.getElementById('dot-mqtt').classList.remove('connected');
+    document.getElementById('dot-mqtt').classList.add('error');
+  });
+
+  mqttClient.on('close', () => {
+    mqttConnected = false;
+    document.getElementById('dot-mqtt').classList.remove('connected');
+    document.getElementById('conn-status').textContent = 'disconnected';
+  });
+
+  mqttClient.on('message', (topic, message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      handleImuData(data);
+    } catch(e) {}
+  });
+}
+
+// ─── Handle data dari MQTT ────────────────────────
+// Format payload CIREN:
+// { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype }
+// sensor_type: 0x10=pitch, 0x11=roll, 0x12=yaw
+function handleImuData(data) {
+  if (!data || data.ftype === 0xFF) return;  // skip error frame
+
+  lastDataMs = Date.now();
+  updateHz();
+
+  const stype = data.sensor_type;
+  const value = data.value;
+
+  if (stype === 0x10) targetPitch = value;  // STYPE_PITCH
+  if (stype === 0x11) targetRoll  = value;  // STYPE_ROLL
+  if (stype === 0x12) targetYaw   = value;  // STYPE_YAW
+}
+
+// ─── Demo mode (tanpa MQTT) ───────────────────────
+// Simulasi data buat test tanpa hardware
+let demoMode = false;
+let demoT    = 0;
+
+function toggleDemo() {
+  demoMode = !demoMode;
+  const btn = document.getElementById('btn-demo');
+  if (btn) btn.textContent = demoMode ? 'STOP DEMO' : 'DEMO';
+}
+
+function runDemo() {
+  if (!demoMode) { requestAnimationFrame(runDemo); return; }
+  demoT += 0.02;
+  targetPitch = Math.sin(demoT * 0.7) * 45;
+  targetRoll  = Math.cos(demoT * 0.5) * 30;
+  targetYaw   = demoT * 20 % 360 - 180;
+  requestAnimationFrame(runDemo);
+}
+runDemo();
+
+// ─── Event listeners ─────────────────────────────
+document.getElementById('btn-connect').addEventListener('click', connectMQTT);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Tambah demo button
+const demoBtn = document.createElement('button');
+demoBtn.id = 'btn-demo';
+demoBtn.textContent = 'DEMO';
+demoBtn.onclick = toggleDemo;
+document.getElementById('connect-panel').querySelector('.connect-row').appendChild(demoBtn);
+</script>
+</body>
+</html>

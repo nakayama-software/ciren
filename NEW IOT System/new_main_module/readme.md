@@ -1,0 +1,1 @@
+Directory purpose for NEW main module system

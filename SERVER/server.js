@@ -31,9 +31,11 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
+console.log('Connecting to MongoDB...', MONGO_URI);
+
 mongoose
   .connect(MONGO_URI)
-  .then(() => console.log('[DB] MongoDB Connected'))
+  .then(() => console.log('[DB] MongoDB Connected', MONGO_URI))
   .catch((err) => { console.error('[DB] Connection error:', err.message); process.exit(1); });
 
 // =============================================================================

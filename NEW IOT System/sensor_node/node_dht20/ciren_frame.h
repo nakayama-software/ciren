@@ -36,6 +36,7 @@
 #define FTYPE_DATA_TYPED  0x04  // multi-value, includes stype
 #define FTYPE_HB_TYPED    0x05  // heartbeat multi-value
 #define FTYPE_ERROR       0xFF  // value = (float)error_code
+#define FTYPE_STALE       0xFE  // node offline — dikirim controller ke main module
 
 // ─── Sensor type IDs ──────────────────────────────
 #define STYPE_TEMPERATURE  0x01  // degC    (DHT20)
@@ -48,6 +49,9 @@
 #define STYPE_GYRO_Z       0x08  // rad/s   (MPU6050)
 #define STYPE_DISTANCE     0x09  // cm      (HC-SR04)
 #define STYPE_TEMP_1WIRE   0x0A  // degC    (DS18B20)
+#define STYPE_PITCH        0x10  // deg     (MPU6050 euler)
+#define STYPE_ROLL         0x11  // deg     (MPU6050 euler)
+#define STYPE_YAW          0x12  // deg     (MPU6050 euler)
 
 // ─── Error codes ──────────────────────────────────
 #define ERR_SENSOR_FAIL    0x01

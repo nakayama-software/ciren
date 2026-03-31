@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude_ai_Notion__notion-fetch",
+      "Bash(grep -E \"^react$|^vite$|^recharts$|^tailwind|^chart\")",
+      "Bash(find 'D:\\\\Raihan Rafif\\\\Projects\\\\CIREN\\\\code\\\\ciren\\\\dashboard-frontend\\\\src' -type f -name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx -o -name *.json -o -name *.css -o -name *.scss)",
+      "Bash(node -e \"const l = require\\(''D:/Raihan Rafif/Projects/CIREN/code/ciren/new dashboard-frontend/node_modules/lucide-react''\\); console.log\\(''Move3d'' in l, ''RadioTower'' in l, ''RotateCw'' in l, ''Activity'' in l\\)\")",
+      "Bash(npm install:*)"
+    ]
+  }
+}

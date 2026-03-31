@@ -1,0 +1,1 @@
+Directory purpose for backend server of new system
