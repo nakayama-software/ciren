@@ -95,44 +95,182 @@ static String html_esc(const String &s)
   return o;
 }
 
+// Konversi RSSI ke jumlah bar (0–4) dan label kualitas
+static const char* _rssi_label(int rssi) {
+  if (rssi >= -50) return "Excellent";
+  if (rssi >= -65) return "Good";
+  if (rssi >= -75) return "Fair";
+  return "Weak";
+}
+static int _rssi_bars(int rssi) {
+  if (rssi >= -50) return 4;
+  if (rssi >= -65) return 3;
+  if (rssi >= -75) return 2;
+  return 1;
+}
+
+// Render SVG signal bars (4 bars, filled sesuai kekuatan sinyal)
+static String _signal_svg(int bars) {
+  // 4 bar dengan tinggi 4/7/10/13px
+  String s = "<svg width='20' height='14' viewBox='0 0 20 14' style='vertical-align:middle;margin-right:6px'>";
+  int heights[] = {4, 7, 10, 14};
+  const char* filled_clr  = "#22c55e";  // green
+  const char* empty_clr   = "#334155";  // slate
+  for (int i = 0; i < 4; i++) {
+    int x  = i * 5;
+    int h  = heights[i];
+    int y  = 14 - h;
+    s += "<rect x='" + String(x) + "' y='" + String(y) +
+         "' width='4' height='" + String(h) +
+         "' rx='1' fill='" + (i < bars ? filled_clr : empty_clr) + "'/>";
+  }
+  s += "</svg>";
+  return s;
+}
+
 static String build_scan_html()
 {
   int n = WiFi.scanNetworks();
-  String h = "<div style='margin:8px 0'><b>Available Networks</b><br>";
-  if (n <= 0) h += "None found.<br>";
-  else for (int i = 0; i < n; i++) {
-    h += "<label style='display:block;padding:4px 0'>"
-         "<input type='radio' name='ssid' value='" + html_esc(WiFi.SSID(i)) + "'> ";
-    h += html_esc(WiFi.SSID(i)) + " (RSSI " + String(WiFi.RSSI(i)) + ")</label>";
+
+  String h = "<div class='section-label'>Available Networks</div>";
+
+  if (n <= 0) {
+    h += "<div class='empty-state'>No networks found</div>";
+  } else {
+    h += "<div class='network-list'>";
+    for (int i = 0; i < n; i++) {
+      int    rssi  = WiFi.RSSI(i);
+      int    bars  = _rssi_bars(rssi);
+      bool   open  = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+      String ssid  = html_esc(WiFi.SSID(i));
+      String idstr = "net" + String(i);
+
+      h += "<label class='network-item' for='" + idstr + "'>";
+      h += "<input type='radio' id='" + idstr +
+           "' name='ssid' value='" + ssid + "'>";
+      h += "<span class='network-info'>";
+      h += _signal_svg(bars);
+      h += "<span class='network-name'>" + ssid + "</span>";
+      if (!open) h += "<span class='lock-icon'>&#x1F512;</span>";
+      h += "</span>";
+      h += "<span class='network-meta'>" + String(rssi) + " dBm &bull; " +
+           _rssi_label(rssi) + "</span>";
+      h += "</label>";
+    }
+    h += "</div>";
   }
   WiFi.scanDelete();
-  h += "</div>";
   return h;
 }
 
 static String build_portal_page(const String &msg = "", bool ok = false)
 {
   String h;
-  h += "<!doctype html><html><head><meta charset='utf-8'>"
-       "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-       "<title>CIREN Setup</title></head>"
-       "<body style='font-family:sans-serif;max-width:600px;margin:20px auto;padding:0 12px'>";
-  h += "<h2>CIREN WiFi Setup</h2>"
-       "<p><b>Device:</b> " + String(DEVICE_ID) +
-       " | <b>FW:</b> " + String(FW_VERSION) + "</p>";
+  h += F("<!doctype html><html lang='en'><head>"
+         "<meta charset='utf-8'>"
+         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+         "<title>CIREN Setup</title>"
+         "<style>"
+         "*{box-sizing:border-box;margin:0;padding:0}"
+         "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+               "background:#0f172a;color:#e2e8f0;min-height:100vh;"
+               "display:flex;align-items:flex-start;justify-content:center;padding:16px}"
+         ".card{background:#1e293b;border:1px solid #334155;border-radius:16px;"
+               "width:100%;max-width:480px;overflow:hidden;margin-top:16px}"
+         ".header{background:linear-gradient(135deg,#0e7490,#1e40af);"
+                 "padding:24px;text-align:center}"
+         ".header-dot{width:48px;height:48px;background:rgba(255,255,255,.15);"
+                      "border-radius:12px;display:inline-flex;align-items:center;"
+                      "justify-content:center;margin-bottom:12px;"
+                      "font-size:24px;line-height:1}"
+         ".header h1{font-size:20px;font-weight:700;color:#fff;letter-spacing:.5px}"
+         ".header p{font-size:12px;color:rgba(255,255,255,.6);margin-top:4px}"
+         ".body{padding:24px}"
+         ".section-label{font-size:11px;font-weight:600;text-transform:uppercase;"
+                         "letter-spacing:.08em;color:#64748b;margin-bottom:10px}"
+         ".network-list{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}"
+         ".network-item{display:flex;align-items:center;justify-content:space-between;"
+                        "background:#0f172a;border:1px solid #334155;border-radius:10px;"
+                        "padding:12px 14px;cursor:pointer;transition:border-color .15s}"
+         ".network-item:has(input:checked){border-color:#0ea5e9;background:#0c1a2e}"
+         ".network-item input{position:absolute;opacity:0;pointer-events:none}"
+         ".network-info{display:flex;align-items:center;gap:4px;font-size:14px;font-weight:500}"
+         ".network-name{color:#f1f5f9}"
+         ".lock-icon{font-size:11px;margin-left:4px;opacity:.5}"
+         ".network-meta{font-size:11px;color:#64748b;white-space:nowrap}"
+         ".empty-state{text-align:center;padding:20px;color:#64748b;"
+                       "font-size:13px;margin-bottom:20px}"
+         ".divider{display:flex;align-items:center;gap:10px;margin:20px 0;color:#475569;font-size:12px}"
+         ".divider::before,.divider::after{content:'';flex:1;height:1px;background:#334155}"
+         ".field{margin-bottom:16px}"
+         ".field label{display:block;font-size:12px;font-weight:500;color:#94a3b8;margin-bottom:6px}"
+         ".field input{width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;"
+                       "padding:10px 14px;color:#f1f5f9;font-size:14px;outline:none;transition:border-color .15s}"
+         ".field input:focus{border-color:#0ea5e9}"
+         ".field input::placeholder{color:#475569}"
+         ".btn-row{display:flex;gap:10px;margin-top:8px}"
+         ".btn{flex:1;padding:12px;border:none;border-radius:10px;font-size:14px;"
+               "font-weight:600;cursor:pointer;transition:opacity .15s}"
+         ".btn-primary{background:linear-gradient(135deg,#0ea5e9,#2563eb);color:#fff}"
+         ".btn-secondary{background:#1e293b;border:1px solid #334155;color:#94a3b8}"
+         ".btn:active{opacity:.85}"
+         ".alert{padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:20px;"
+                 "display:flex;align-items:center;gap:10px}"
+         ".alert-ok{background:#052e16;border:1px solid #166534;color:#4ade80}"
+         ".alert-err{background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171}"
+         ".alert-icon{font-size:16px;flex-shrink:0}"
+         ".meta{font-size:11px;color:#475569;text-align:center;margin-top:16px}"
+         "</style>"
+         "</head><body><div class='card'>");
+
+  // Header
+  h += "<div class='header'>"
+       "<div class='header-dot'>&#x1F4F6;</div>"
+       "<h1>CIREN WiFi Setup</h1>"
+       "<p>Device: " + String(DEVICE_ID) + " &nbsp;&bull;&nbsp; Firmware v" + String(FW_VERSION) + "</p>"
+       "</div>";
+
+  h += "<div class='body'>";
+
+  // Alert message
   if (msg.length()) {
-    h += "<div style='padding:10px;border-radius:6px;margin:10px 0;background:";
-    h += ok ? "#e7f7e7;color:#145214" : "#fdeaea;color:#7a1010";
-    h += "'>" + html_esc(msg) + "</div>";
+    h += "<div class='alert " + String(ok ? "alert-ok" : "alert-err") + "'>"
+         "<span class='alert-icon'>" + String(ok ? "&#x2713;" : "&#x26A0;") + "</span>"
+         "<span>" + html_esc(msg) + "</span></div>";
   }
-  h += "<form method='POST' action='/save'>" + portal_scan_html;
-  h += "<p><a href='/refresh' style='font-size:13px'>Refresh list</a></p>";
-  h += "<div style='margin:8px 0'><b>Manual SSID</b><br>"
-       "<input name='ssid_m' placeholder='Type SSID' style='width:100%;padding:7px'></div>";
-  h += "<div style='margin:8px 0'><b>Password</b><br>"
-       "<input type='password' name='pass' placeholder='WiFi Password' style='width:100%;padding:7px'></div>";
-  h += "<button type='submit' style='padding:10px 18px'>Save &amp; Reboot</button></form>";
-  h += "</body></html>";
+
+  // Form
+  h += "<form method='POST' action='/save'>";
+
+  // Network list
+  h += portal_scan_html;
+
+  // Refresh link
+  h += "<div style='text-align:right;margin-bottom:20px'>"
+       "<a href='/refresh' style='font-size:12px;color:#0ea5e9;text-decoration:none'>"
+       "&#x21BB; Refresh networks</a></div>";
+
+  // Divider
+  h += "<div class='divider'>or enter manually</div>";
+
+  // Manual SSID
+  h += "<div class='field'><label>Network Name (SSID)</label>"
+       "<input name='ssid_m' placeholder='Enter WiFi name' autocomplete='off'></div>";
+
+  // Password
+  h += "<div class='field'><label>Password</label>"
+       "<input type='password' name='pass' placeholder='Enter WiFi password' autocomplete='off'></div>";
+
+  // Buttons
+  h += "<div class='btn-row'>"
+       "<button type='submit' class='btn btn-primary'>Save &amp; Reboot</button>"
+       "</div>";
+
+  h += "</form>";
+
+  h += "<p class='meta'>After saving, reconnect to your usual WiFi network.</p>";
+
+  h += "</div></div></body></html>";
   return h;
 }
 
