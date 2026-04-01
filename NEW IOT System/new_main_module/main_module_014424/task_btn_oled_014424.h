@@ -9,7 +9,8 @@
 #include "system_state_014424.h"
 
 // ─── TFT instance ────────────────────────────────────────────────────────────
-// Hardware SPI: SCK=18, MOSI=23, MISO=19 (ESP32 VSPI defaults)
+// Hardware SPI — pin dikonfigurasi lewat SPI.begin() di btn_oled_init()
+// sebelum tft.begin() dipanggil.
 static Adafruit_ILI9341 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
 static bool tft_ready = false;
 
@@ -892,6 +893,9 @@ void btn_oled_init()
 {
   pinMode(PIN_BTN, INPUT_PULLUP);
 
+  // ESP32-S3: eksplisit set SPI pins — harus dilakukan SEBELUM tft.begin()
+  // agar hardware SPI menggunakan pin yang benar (ESP32-S3 tidak ada pin 23)
+  SPI.begin(PIN_TFT_SCK, PIN_TFT_MISO, PIN_TFT_MOSI, -1);
   tft.begin(40000000UL);   // 40 MHz SPI
   tft.setRotation(TFT_ROTATION);
   tft.fillScreen(C_BG);

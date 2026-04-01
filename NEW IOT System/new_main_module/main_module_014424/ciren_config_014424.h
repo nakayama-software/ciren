@@ -3,17 +3,21 @@
 #define DEVICE_ID          "MM-001"
 #define FW_VERSION         "1.0.0"
 
-// ── TFT SPI 2.4" 320×240 (ILI9341) ─────────────────────────────────────────
-// VSPI: SCK=18, MOSI=23, MISO=19 (ESP32 hardware SPI defaults)
-#define PIN_TFT_CS         5
-#define PIN_TFT_DC         2
-#define PIN_TFT_RST        4
+// ── TFT SPI 2.4" 320×240 (ILI9341) — ESP32-S3 ──────────────────────────────
+// Eksplisit SPI pins (ESP32-S3 tidak punya GPIO22-32, tidak ada pin23 klasik)
+// Gunakan SPI2/FSPI dengan pin bebas:
+#define PIN_TFT_SCK        12    // SPI Clock
+#define PIN_TFT_MOSI       11    // SPI MOSI (Master Out)
+#define PIN_TFT_MISO       13    // SPI MISO (-1 jika tidak disambung)
+#define PIN_TFT_CS         10    // Chip Select
+#define PIN_TFT_DC         9     // Data/Command
+#define PIN_TFT_RST        8     // Reset
 #define TFT_WIDTH          320
 #define TFT_HEIGHT         240
-#define TFT_ROTATION       1      // landscape (USB port on left)
+#define TFT_ROTATION       1     // landscape (USB port on left)
 
 // ── Button ──────────────────────────────────────────────────────────────────
-// Moved from 18 (conflicts with SPI SCK) to 0 (BOOT button, active-LOW)
+// GPIO 0 = BOOT button pada ESP32-S3, active-LOW, internal pullup
 #define PIN_BTN            0
 
 #define PIN_MODEM_RX       16
