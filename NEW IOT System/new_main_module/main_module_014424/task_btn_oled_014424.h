@@ -922,10 +922,13 @@ void btn_oled_init()
 // ─── Task ────────────────────────────────────────────────────────────────────
 void task_oled(void *param)
 {
-  Preferences *prefs = (Preferences *)param;
+  Preferences *prefs       = (Preferences *)param;
+  uint32_t    last_draw_ms = 0;
 
   for (;;) {
-    vTaskDelay(pdMS_TO_TICKS(TFT_REFRESH_MS));
+    // Button di-poll setiap 20ms (50Hz) agar press pendek tidak terlewat.
+    // TFT hanya di-refresh setiap TFT_REFRESH_MS (200ms).
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     portal_tick();
 
@@ -985,6 +988,10 @@ void task_oled(void *param)
       }
     }
 
-    tft_draw();
+    // Refresh TFT hanya saat interval terpenuhi
+    if (millis() - last_draw_ms >= TFT_REFRESH_MS) {
+      last_draw_ms = millis();
+      tft_draw();
+    }
   }
 }
