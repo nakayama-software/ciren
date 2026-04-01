@@ -1063,6 +1063,18 @@ void task_oled(void *param)
   Preferences *prefs       = (Preferences *)param;
   uint32_t    last_draw_ms = 0;
 
+  // Reinisialisasi TFT di Core 0 context (task ini berjalan di Core 0,
+  // sedangkan btn_oled_init() berjalan di Core 1/setup). Beberapa versi
+  // Adafruit + ESP32-S3 perlu SPI di-init ulang dari core yang sama dengan
+  // core yang menggunakannya.
+  vTaskDelay(pdMS_TO_TICKS(50));  // beri waktu system settle dulu
+  SPI.begin(PIN_TFT_SCK, PIN_TFT_MISO, PIN_TFT_MOSI, -1);
+  tft.begin(40000000UL);
+  tft.setRotation(TFT_ROTATION);
+  tft_ready  = true;
+  page_dirty = true;   // paksa full redraw setelah reinit
+  Serial.println("[TFT] Task reinit OK (Core 0)");
+
   for (;;) {
     // Button di-poll setiap 20ms (50Hz) agar press pendek tidak terlewat.
     // TFT hanya di-refresh setiap TFT_REFRESH_MS (200ms).
@@ -1129,6 +1141,12 @@ void task_oled(void *param)
     // Refresh TFT hanya saat interval terpenuhi
     if (millis() - last_draw_ms >= TFT_REFRESH_MS) {
       last_draw_ms = millis();
+      static uint8_t _dbg_cnt = 0;
+      if (_dbg_cnt < 5) {
+        Serial.printf("[TFT] draw tick #%d page=%d dirty=%d\n",
+                      _dbg_cnt, tft_page, page_dirty);
+        _dbg_cnt++;
+      }
       tft_draw();
     }
   }
