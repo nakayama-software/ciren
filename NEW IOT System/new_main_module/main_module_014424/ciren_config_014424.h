@@ -3,13 +3,18 @@
 #define DEVICE_ID          "MM-001"
 #define FW_VERSION         "1.0.0"
 
-#define PIN_OLED_SDA       8
-#define PIN_OLED_SCL       9
-#define PIN_BTN            18
+// ── TFT SPI 2.4" 320×240 (ILI9341) ─────────────────────────────────────────
+// VSPI: SCK=18, MOSI=23, MISO=19 (ESP32 hardware SPI defaults)
+#define PIN_TFT_CS         5
+#define PIN_TFT_DC         2
+#define PIN_TFT_RST        4
+#define TFT_WIDTH          320
+#define TFT_HEIGHT         240
+#define TFT_ROTATION       1      // landscape (USB port on left)
 
-#define OLED_ADDR          0x3C
-#define OLED_WIDTH         128
-#define OLED_HEIGHT        64
+// ── Button ──────────────────────────────────────────────────────────────────
+// Moved from 18 (conflicts with SPI SCK) to 0 (BOOT button, active-LOW)
+#define PIN_BTN            0
 
 #define PIN_MODEM_RX       16
 #define PIN_MODEM_TX       17
@@ -33,7 +38,8 @@
 #define BTN_HOLD_MS        5000
 #define BTN_DEBOUNCE_MS    30
 
-#define OLED_REFRESH_MS    200
+#define TFT_REFRESH_MS     200    // display refresh interval
+#define OLED_REFRESH_MS    TFT_REFRESH_MS   // compat alias
 #define OLED_TOTAL_PAGES   6
 
 #define PAGE_GATEWAY       0

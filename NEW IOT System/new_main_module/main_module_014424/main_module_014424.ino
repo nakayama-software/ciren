@@ -102,18 +102,9 @@ void setup()
   if (strlen(cfg.wifi_ssid) == 0)
   {
     Serial.println("[SETUP] No WiFi credentials — portal mode only");
-    oled.clearDisplay();
-    oled.setTextSize(1);
-    oled.setTextColor(WHITE);
-    oled.setCursor(0, 0);
-    oled.println("CIREN " FW_VERSION);
-    oled.setCursor(0, 16);
-    oled.println("No WiFi config!");
-    oled.setCursor(0, 32);
-    oled.println("Go to page 4");
-    oled.setCursor(0, 44);
-    oled.println("Hold 5s = WiFi Setup");
-    oled.display();
+    tft_show_msg("No WiFi Config",
+                 "Go to Settings (page 4)",
+                 "Hold 5s to start WiFi Setup");
     xTaskCreatePinnedToCore(task_oled, "oled", STACK_OLED, &prefs, PRIO_OLED, &h_oled, 0);
     return;
   }
