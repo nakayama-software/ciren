@@ -22,12 +22,18 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
   esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)event_data;
   switch (ev->event_id) {
     case MQTT_EVENT_CONNECTED:
-      state_set_connected(true);
+      // Hanya update connected state jika sedang dalam WiFi mode
+      if (strcmp(sys_state.conn_mode, "wifi") == 0) {
+        state_set_connected(true);
+      }
       esp_mqtt_client_subscribe(mqtt_client, TOPIC_CONFIG, MQTT_QOS);
       Serial.println("[MQTT] Connected");
       break;
     case MQTT_EVENT_DISCONNECTED:
-      state_set_connected(false);
+      // Hanya clear connected state jika sedang dalam WiFi mode
+      if (strcmp(sys_state.conn_mode, "wifi") == 0) {
+        state_set_connected(false);
+      }
       Serial.println("[MQTT] Disconnected");
       break;
     default: break;

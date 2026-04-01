@@ -32,6 +32,47 @@ void sim_manager_init() {
   delay(100);
 }
 
+// ── Internal: update GPS state from modem ───────────────────────────────────
+static void _sim_update_gps() {
+  float lat, lon, speed, alt;
+  int vsat, usat;
+  float accuracy;
+  int year, month, day, hour, min, sec;
+
+  bool fix = modem.getGPS(&lat, &lon, &speed, &alt,
+                           &vsat, &usat, &accuracy,
+                           &year, &month, &day,
+                           &hour, &min, &sec);
+
+  char ts_buf[24] = "";
+  if (fix) {
+    snprintf(ts_buf, sizeof(ts_buf),
+             "%04d-%02d-%02dT%02d:%02d:%02dZ",
+             year, month, day, hour, min, sec);
+  }
+
+  xSemaphoreTake(state_mutex, portMAX_DELAY);
+  sys_state.gps_fix   = fix;
+  if (fix) {
+    sys_state.gps_lat    = lat;
+    sys_state.gps_lon    = lon;
+    sys_state.gps_alt    = alt;
+    sys_state.gps_speed  = speed;
+    sys_state.gps_fix_ms = millis();
+    strncpy(sys_state.gps_ts, ts_buf, sizeof(sys_state.gps_ts) - 1);
+    Serial.printf("[SIM-GPS] Fix: %.6f, %.6f  sat:%d  alt:%.1f\n", lat, lon, vsat, alt);
+  } else {
+    // Mark stale if no fix for too long
+    if (sys_state.gps_fix_ms > 0 &&
+        (millis() - sys_state.gps_fix_ms) > GPS_STALE_MS) {
+      sys_state.gps_lat = 0;
+      sys_state.gps_lon = 0;
+    }
+    Serial.println("[SIM-GPS] No fix");
+  }
+  xSemaphoreGive(state_mutex);
+}
+
 // ── Task ────────────────────────────────────────────────────────────────────
 void sim_manager_task(void* param) {
   if (!sys_state.sim_enabled) {
@@ -47,15 +88,22 @@ void sim_manager_task(void* param) {
   // Try to initialize modem (restart clears previous state)
   if (!modem.restart()) {
     Serial.println("[SIM] Modem restart failed — retrying AT...");
-    // Some modems skip restart, try init instead
     if (!modem.init()) {
       Serial.println("[SIM] Modem init failed");
-      // Continue anyway — modem may still respond
     }
   }
 
   String modemInfo = modem.getModemInfo();
   Serial.printf("[SIM] Modem: %s\n", modemInfo.c_str());
+
+  // Check SIM card
+  SimStatus simStatus = modem.getSimStatus();
+  if (simStatus != SIM_READY) {
+    Serial.println("[SIM] SIM card not ready");
+    // Continue — may recover after network wait
+  } else {
+    Serial.println("[SIM] SIM OK");
+  }
 
   String op = modem.getOperator();
   xSemaphoreTake(state_mutex, portMAX_DELAY);
@@ -63,16 +111,39 @@ void sim_manager_task(void* param) {
   strncpy(sys_state.sim_operator, op.c_str(), sizeof(sys_state.sim_operator) - 1);
   xSemaphoreGive(state_mutex);
 
+  // Enable GPS once modem is up (before GPRS — GPS runs independently)
+  Serial.println("[SIM] Enabling GPS...");
+  modem.enableGPS();
+
+  bool gprs_was_connected = false;
+  uint32_t last_gps_ms    = 0;
+  uint32_t last_signal_ms = 0;
+
   for (;;) {
-    // Re-connect GPRS if dropped
+    uint32_t now_ms = millis();
+
+    // ── GPRS connectivity ────────────────────────────────────────────────────
     if (!modem.isGprsConnected()) {
-      Serial.println("[SIM] Connecting GPRS...");
+      if (gprs_was_connected) {
+        Serial.println("[SIM] GPRS dropped");
+      }
+      gprs_was_connected = false;
+
       xSemaphoreTake(state_mutex, portMAX_DELAY);
       sys_state.sim_gprs = false;
       xSemaphoreGive(state_mutex);
 
+      Serial.println("[SIM] Waiting for network...");
+      if (!modem.waitForNetwork(30000UL)) {
+        Serial.println("[SIM] Network wait failed, retry in 60s");
+        vTaskDelay(pdMS_TO_TICKS(SIM_RETRY_MS));
+        continue;
+      }
+
+      Serial.println("[SIM] Connecting GPRS...");
       if (modem.gprsConnect(SIM_APN, SIM_USER, SIM_PASS)) {
         Serial.println("[SIM] GPRS connected");
+        gprs_was_connected = true;
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.sim_gprs = true;
         xSemaphoreGive(state_mutex);
@@ -83,15 +154,26 @@ void sim_manager_task(void* param) {
       }
     }
 
-    // Periodic signal quality update
-    int8_t sig = (int8_t)modem.getSignalQuality();
-    String op_now = modem.getOperator();
-    xSemaphoreTake(state_mutex, portMAX_DELAY);
-    sys_state.sim_signal = sig;
-    sys_state.sim_gprs   = modem.isGprsConnected();
-    strncpy(sys_state.sim_operator, op_now.c_str(), sizeof(sys_state.sim_operator) - 1);
-    xSemaphoreGive(state_mutex);
+    // ── GPS polling ──────────────────────────────────────────────────────────
+    if (now_ms - last_gps_ms >= GPS_POLL_MS) {
+      last_gps_ms = now_ms;
+      _sim_update_gps();
+    }
 
-    vTaskDelay(pdMS_TO_TICKS(SIM_SIGNAL_INT_MS));
+    // ── Periodic signal quality + operator update ────────────────────────────
+    if (now_ms - last_signal_ms >= SIM_SIGNAL_INT_MS) {
+      last_signal_ms = now_ms;
+      int8_t sig     = (int8_t)modem.getSignalQuality();
+      String op_now  = modem.getOperator();
+      xSemaphoreTake(state_mutex, portMAX_DELAY);
+      sys_state.sim_signal = sig;
+      sys_state.sim_gprs   = modem.isGprsConnected();
+      strncpy(sys_state.sim_operator, op_now.c_str(), sizeof(sys_state.sim_operator) - 1);
+      xSemaphoreGive(state_mutex);
+      Serial.printf("[SIM] Signal:%d  GPRS:%s  Op:%s\n",
+                    sig, sys_state.sim_gprs ? "Y" : "N", op_now.c_str());
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }

@@ -4,7 +4,10 @@ import { getNodeKey, getReadingKey, isIMUSensor } from '../utils/sensors'
 import SensorNodeCard from './SensorNodeCard'
 import LineChartModal from './charts/LineChartModal'
 import IMU3DModal from './charts/IMU3DModal'
+import RotaryChartModal from './charts/RotaryChartModal'
 import ExportModal from './ExportModal'
+import ResetPortModal from './ResetPortModal'
+import AliasInlineEdit from './AliasInlineEdit'
 
 export default function ControllerDetailView({
   ctrlId,
@@ -17,27 +20,31 @@ export default function ControllerDetailView({
   wsRef,
   t,
 }) {
-  const [lineTarget, setLineTarget] = useState(null)   // { ctrlId, portNum, sensorType }
-  const [imu3DTarget, setImu3DTarget] = useState(null) // { ctrlId, portNum }
-  const [showExport, setShowExport] = useState(false)
+  const [lineTarget, setLineTarget]     = useState(null)  // { ctrlId, portNum, sensorType }
+  const [imu3DTarget, setImu3DTarget]   = useState(null)  // { ctrlId, portNum }
+  const [rotaryTarget, setRotaryTarget] = useState(null)  // { ctrlId, portNum }
+  const [resetTarget, setResetTarget]   = useState(null)  // { ctrlId, portNum, sensorType }
+  const [showExport, setShowExport]     = useState(false)
 
   const ctrlNodes = nodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
   const nowMs = now || Date.now()
 
-  const activeCount = ctrlNodes.filter((node) => {
-    const key = getNodeKey(node.ctrl_id, node.port_num)
-    const status = nodeStatus[key]
-    if (status === 'online') return true
+  // Hanya tampilkan node yang menerima data dalam 30 detik terakhir
+  function isNodeActive(node) {
+    const nKey = getNodeKey(node.ctrl_id, node.port_num)
+    if (nodeStatus[nKey] === 'online') return true
     const rKey = getReadingKey(node.ctrl_id, node.port_num, node.sensor_type)
     const reading = latestData[rKey]
-    if (reading?.server_ts && (nowMs - new Date(reading.server_ts).getTime()) < 30000) return true
-    return false
-  }).length
+    return !!(reading?.server_ts && (nowMs - new Date(reading.server_ts).getTime()) < 30000)
+  }
 
-  // Deteksi port yang punya BOTH 0x01 (temp) dan 0x02 (humidity) — tampilkan sebagai HumTempCard
+  const activeCtrlNodes = ctrlNodes.filter(isNodeActive)
+  const activeCount = activeCtrlNodes.length
+
+  // Deteksi port yang punya BOTH 0x01 (temp) dan 0x02 (humidity) — dari node aktif saja
   const humTempPorts = new Set()
   const portSTypeMap = {}
-  for (const n of ctrlNodes) {
+  for (const n of activeCtrlNodes) {
     const pk = `${n.ctrl_id}_${n.port_num}`
     portSTypeMap[pk] = portSTypeMap[pk] || new Set()
     portSTypeMap[pk].add(Number(n.sensor_type))
@@ -46,23 +53,30 @@ export default function ControllerDetailView({
     if (stypes.has(0x01) && stypes.has(0x02)) humTempPorts.add(pk)
   }
 
-  // Deduplicate: IMU nodes tampil sekali per port, HumTemp tampil sekali via 0x01 (skip 0x02)
+  // Deduplicate: IMU tampil sekali per port, HumTemp tampil via 0x01 (skip 0x02)
   const seenIMUPorts = new Set()
-  const displayNodes = ctrlNodes.filter((node) => {
+  const displayNodes = activeCtrlNodes.filter((node) => {
     if (isIMUSensor(node.sensor_type)) {
       const portKey = `${node.ctrl_id}_${node.port_num}`
       if (seenIMUPorts.has(portKey)) return false
       seenIMUPorts.add(portKey)
     }
     const pk = `${node.ctrl_id}_${node.port_num}`
-    // Skip 0x02 jika port ini adalah HumTemp (sudah dihandle via 0x01 card)
     if (humTempPorts.has(pk) && Number(node.sensor_type) === 0x02) return false
     return true
   })
 
-  const tBack = t?.controllerDetail?.back || 'Back'
+  function handleChartClick(node) {
+    if (Number(node.sensor_type) === 0x13) {
+      setRotaryTarget({ ctrlId: node.ctrl_id, portNum: node.port_num })
+    } else {
+      setLineTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type })
+    }
+  }
+
+  const tBack        = t?.controllerDetail?.back        || 'Back'
   const tSensorNodes = t?.controllerDetail?.sensorNodes || 'Active Nodes'
-  const tNoNode = t?.controllerDetail?.noNode || 'No node connected.'
+  const tNoNode      = t?.controllerDetail?.noNode      || 'No node connected.'
 
   return (
     <div className="rounded-2xl border border-black/10 bg-white/80 p-6 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
@@ -73,9 +87,12 @@ export default function ControllerDetailView({
             <Cpu className="h-6 w-6 text-white" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
-              Controller {ctrlId}
-            </h2>
+            <AliasInlineEdit
+              deviceId={deviceId}
+              ctrlId={ctrlId}
+              originalName={`Controller ${ctrlId}`}
+              textClass="text-xl font-semibold text-slate-900 dark:text-white"
+            />
             <p className="text-xs text-slate-500 dark:text-gray-400">
               {ctrlNodes.length} node{ctrlNodes.length !== 1 ? 's' : ''} registered
             </p>
@@ -106,7 +123,7 @@ export default function ControllerDetailView({
           <Zap className="w-4 h-4 text-cyan-500" />
           <span className="text-xs text-gray-600 dark:text-gray-400">{tSensorNodes}:</span>
           <span className="text-xl font-semibold text-slate-900 dark:text-white">{activeCount}</span>
-          <span className="text-xs text-slate-400 dark:text-gray-500">/ {ctrlNodes.length}</span>
+          <span className="text-xs text-slate-400 dark:text-gray-500">/ {ctrlNodes.length} registered</span>
         </div>
       </div>
 
@@ -118,30 +135,41 @@ export default function ControllerDetailView({
           {tNoNode}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
           {displayNodes.map((node) => {
-            const rKey = getReadingKey(node.ctrl_id, node.port_num, node.sensor_type)
+            const rKey    = getReadingKey(node.ctrl_id, node.port_num, node.sensor_type)
             const reading = latestData[rKey] || null
-            const nKey = getNodeKey(node.ctrl_id, node.port_num)
-            const status = nodeStatus[nKey] || node.status || null
-
+            const nKey    = getNodeKey(node.ctrl_id, node.port_num)
+            const status  = nodeStatus[nKey] || node.status || null
             const portKey   = `${node.ctrl_id}_${node.port_num}`
             const isHumTemp = humTempPorts.has(portKey) && Number(node.sensor_type) === 0x01
 
             return (
-              <SensorNodeCard
-                key={`${node.ctrl_id}_${node.port_num}_${node.sensor_type}`}
-                ctrlId={node.ctrl_id}
-                portNum={node.port_num}
-                sensorType={node.sensor_type}
-                reading={reading}
-                status={status}
-                now={nowMs}
-                latestData={latestData}
-                isHumTemp={isHumTemp}
-                onChartClick={() => setLineTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type })}
-                onIMU3DClick={() => setImu3DTarget({ ctrlId: node.ctrl_id, portNum: node.port_num })}
-              />
+              <div key={`${node.ctrl_id}_${node.port_num}_${node.sensor_type}`} className="relative group h-full">
+                <SensorNodeCard
+                  ctrlId={node.ctrl_id}
+                  portNum={node.port_num}
+                  sensorType={node.sensor_type}
+                  reading={reading}
+                  status={status}
+                  now={nowMs}
+                  latestData={latestData}
+                  isHumTemp={isHumTemp}
+                  onChartClick={() => handleChartClick(node)}
+                  onIMU3DClick={() => setImu3DTarget({ ctrlId: node.ctrl_id, portNum: node.port_num })}
+                />
+                {/* Reset button — hover only */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setResetTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type }) }}
+                  title="Reset port data"
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500"
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 2a6 6 0 1 0 5.5 3.6l1.4-1.4A8 8 0 1 1 8 0v2z"/>
+                    <path d="M8 0v4L6 2l2-2z"/>
+                  </svg>
+                </button>
+              </div>
             )
           })}
         </div>
@@ -166,6 +194,24 @@ export default function ControllerDetailView({
         portNum={imu3DTarget?.portNum}
         latestData={latestData}
         wsRef={wsRef}
+      />
+
+      <RotaryChartModal
+        open={!!rotaryTarget}
+        onClose={() => setRotaryTarget(null)}
+        deviceId={deviceId}
+        ctrlId={rotaryTarget?.ctrlId}
+        portNum={rotaryTarget?.portNum}
+      />
+
+      <ResetPortModal
+        open={!!resetTarget}
+        onClose={() => setResetTarget(null)}
+        deviceId={deviceId}
+        ctrlId={resetTarget?.ctrlId}
+        portNum={resetTarget?.portNum}
+        sensorType={resetTarget?.sensorType}
+        onSuccess={() => setResetTarget(null)}
       />
 
       <ExportModal

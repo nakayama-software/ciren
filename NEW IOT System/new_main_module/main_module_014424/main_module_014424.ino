@@ -35,7 +35,7 @@ void load_config()
   prefs.begin("ciren", true);
   strncpy(cfg.wifi_ssid, prefs.getString("ssid", "").c_str(), sizeof(cfg.wifi_ssid));
   strncpy(cfg.wifi_pass, prefs.getString("pass", "").c_str(), sizeof(cfg.wifi_pass));
-  strncpy(cfg.mqtt_host, prefs.getString("mqtt_host", "192.168.103.174").c_str(), sizeof(cfg.mqtt_host));
+  strncpy(cfg.mqtt_host, prefs.getString("mqtt_host", "192.168.103.241").c_str(), sizeof(cfg.mqtt_host));
   strncpy(cfg.conn_mode, prefs.getString("conn_mode", "wifi").c_str(), sizeof(cfg.conn_mode));
   cfg.sim_enabled = prefs.getBool("sim_en", true);
   prefs.end();
@@ -46,7 +46,7 @@ void save_config_defaults()
   prefs.begin("ciren", false);
   if (!prefs.isKey("mqtt_host"))
   {
-    prefs.putString("mqtt_host", "192.168.103.174");
+    prefs.putString("mqtt_host", "192.168.103.241");
     prefs.putString("conn_mode", "wifi");
     prefs.putBool("sim_en", true);
   }
@@ -68,7 +68,7 @@ void setup()
 
   // Force update mqtt_host — hapus 5 baris ini setelah upload pertama
   prefs.begin("ciren", false);
-  prefs.putString("mqtt_host", "192.168.103.174");
+  prefs.putString("mqtt_host", "192.168.103.241");
   prefs.end();
 
   save_config_defaults();

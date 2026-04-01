@@ -5,6 +5,11 @@ import {
   Move3d,
   RotateCw,
   RadioTower,
+  Zap,
+  Sun,
+  Gauge,
+  AlertTriangle,
+  Radio,
 } from 'lucide-react'
 
 export const SENSOR_INFO = {
@@ -66,6 +71,48 @@ export const SENSOR_INFO = {
     label: 'Temperature (1-Wire)',
     unit: '°C',
     icon: Thermometer,
+    colors: { icon: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20' },
+  },
+  0x0B: {
+    label: 'Voltage',
+    unit: 'V',
+    icon: Zap,
+    colors: { icon: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
+  },
+  0x0C: {
+    label: 'Current',
+    unit: 'A',
+    icon: Activity,
+    colors: { icon: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+  },
+  0x0D: {
+    label: 'Light Intensity',
+    unit: 'lux',
+    icon: Sun,
+    colors: { icon: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/20' },
+  },
+  0x0E: {
+    label: 'Pressure',
+    unit: 'hPa',
+    icon: Gauge,
+    colors: { icon: 'text-yellow-400', bg: 'bg-yellow-400/10', border: 'border-yellow-400/20' },
+  },
+  0x0F: {
+    label: 'Infrared',
+    unit: '',
+    icon: AlertTriangle,
+    colors: { icon: 'text-purple-500', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+  },
+  0x13: {
+    label: 'Rotary',
+    unit: 'step',
+    icon: RotateCw,
+    colors: { icon: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
+  },
+  0x14: {
+    label: 'Vibration',
+    unit: '',
+    icon: Radio,
     colors: { icon: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20' },
   },
   0x10: {

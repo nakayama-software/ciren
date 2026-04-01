@@ -48,9 +48,9 @@ export default function IMUCard({ ctrlId, portNum, latestData }) {
   const hasEuler = euler?.pitch !== null || euler?.roll !== null || euler?.yaw !== null
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+    <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4 h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex items-center gap-3">
         <div className="rounded-lg bg-violet-500/10 border border-violet-400/20 p-2">
           <Move3d className="w-5 h-5 text-violet-500 dark:text-violet-300" />
         </div>
@@ -69,14 +69,14 @@ export default function IMUCard({ ctrlId, portNum, latestData }) {
 
       {/* Euler angle bars */}
       {hasEuler ? (
-        <div className="rounded-xl bg-slate-100/80 dark:bg-black/20 border border-slate-200 dark:border-white/10 p-3 space-y-2">
+        <div className="rounded-xl bg-slate-100/80 dark:bg-black/20 border border-slate-200 dark:border-white/10 p-3 space-y-2 mt-3 flex-1">
           <AngleRow label="P" value={euler.pitch ?? 0} color="text-cyan-500" />
           <AngleRow label="R" value={euler.roll  ?? 0} color="text-violet-500" />
           <AngleRow label="Y" value={euler.yaw   ?? 0} color="text-emerald-500" />
         </div>
       ) : (
         /* Fallback: show whichever of accel/gyro is available */
-        <div className="rounded-xl bg-slate-100/80 dark:bg-black/20 border border-slate-200 dark:border-white/10 p-3 space-y-2">
+        <div className="rounded-xl bg-slate-100/80 dark:bg-black/20 border border-slate-200 dark:border-white/10 p-3 space-y-2 mt-3 flex-1">
           {(imu.accelerometer?.x !== null || imu.accelerometer?.y !== null || imu.accelerometer?.z !== null) && (
             <div>
               <p className="text-[10px] text-slate-400 dark:text-gray-500 mb-1">Accel (m/s²)</p>

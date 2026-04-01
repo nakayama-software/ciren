@@ -10,6 +10,7 @@
 
 #include "ciren_config_014424.h"
 #include "system_state_014424.h"
+#include "task_publish_014424.h"
 
 // ── Minimal MQTT 3.1.1 client via TinyGSM TCP ──────────────────────────────
 // Tidak membutuhkan PubSubClient — langsung di atas TinyGsmClient dari
@@ -156,19 +157,39 @@ void mqtt_sim_task(void* param) {
   for (;;) {
     // Hanya aktif jika SIM enabled dan GPRS sudah konek
     if (!sys_state.sim_enabled || !sys_state.sim_gprs) {
-      _sim_mqtt_conn = false;
+      if (_sim_mqtt_conn) {
+        _sim_mqtt_conn = false;
+        simClient.stop();
+      }
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
 
-    // (Re)connect jika belum terhubung
+    // Cek apakah sedang dalam mode SIM
+    char current_mode[8];
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    strncpy(current_mode, sys_state.conn_mode, sizeof(current_mode));
+    xSemaphoreGive(state_mutex);
+
+    bool in_sim_mode = (strcmp(current_mode, "sim") == 0);
+
+    // Jika WiFi mode aktif, SIM MQTT tidak perlu connect — tutup jika masih buka
+    if (!in_sim_mode) {
+      if (_sim_mqtt_conn) {
+        Serial.println("[SIM MQTT] WiFi mode active — disconnecting SIM MQTT");
+        _sim_mqtt_conn = false;
+        simClient.stop();
+      }
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      continue;
+    }
+
+    // ── SIM mode: (Re)connect jika belum terhubung ───────────────────────────
     if (!_sim_mqtt_conn || !simClient.connected()) {
       _sim_mqtt_conn = false;
+      state_set_connected(false);
 
-      // Baca broker dari sys_state conn_mode — gunakan MQTT_HOST default
-      // (bisa dikembangkan membaca dari Preferences jika diperlukan)
-      const char* broker = "192.168.103.174";
-
+      const char* broker = "192.168.103.241";
       char client_id[32];
       snprintf(client_id, sizeof(client_id), "%s-sim", DEVICE_ID);
 
@@ -176,9 +197,33 @@ void mqtt_sim_task(void* param) {
         vTaskDelay(pdMS_TO_TICKS(10000));
         continue;
       }
+
+      // SIM MQTT connected — set connected state
+      state_set_connected(true);
     }
 
-    // Keepalive ping setiap setengah keepalive interval
+    // ── Drain publish_queue ─────────────────────────────────────────────────
+    PublishItem item;
+    // Non-blocking: process up to 8 items per cycle to avoid hogging
+    int drained = 0;
+    while (drained < 8 && xQueueReceive(publish_queue, &item, 0) == pdTRUE) {
+      bool ok = _sim_mqtt_publish(item.topic, item.payload, item.len, item.qos);
+      if (!ok) {
+        // TCP connection lost — put item back and reconnect
+        xQueueSendToFront(publish_queue, &item, 0);
+        _sim_mqtt_conn = false;
+        simClient.stop();
+        state_set_connected(false);
+        Serial.println("[SIM MQTT] Connection lost during publish");
+        break;
+      }
+      xSemaphoreTake(state_mutex, portMAX_DELAY);
+      sys_state.last_publish_ms = millis();
+      xSemaphoreGive(state_mutex);
+      drained++;
+    }
+
+    // ── Keepalive ping setiap setengah keepalive interval ───────────────────
     if (millis() - _sim_last_ping_ms > (uint32_t)(MQTT_KEEPALIVE * 500UL)) {
       _sim_mqtt_ping();
       _sim_last_ping_ms = millis();

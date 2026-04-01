@@ -18,7 +18,6 @@ import {
 } from './lib/api'
 import { getNodeKey, getReadingKey, isIMUSensor } from './utils/sensors'
 import { translations } from './utils/translation'
-import DeviceStatusCard from './components/DeviceStatusCard'
 import ControllerDetailView from './components/ControllerDetailView'
 import LeafletMap from './components/LeafletMap'
 import LoginPage from './pages/LoginPage'
@@ -484,10 +483,23 @@ export default function App() {
       {/* Device overview */}
       {selectedDevice && !selectedCtrlId && (
         <>
-          {/* Device status + info */}
+          {/* Map + Status panel */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2">
-              <DeviceStatusCard device={selectedDevice} now={now} />
+
+            {/* Map col-span-2 */}
+            <div className="lg:col-span-2 rounded-2xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm h-[26rem] relative">
+              <h2 className="text-base font-medium tracking-tight text-slate-900 dark:text-white flex items-center gap-2 mb-3">
+                <MapPin className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
+                <span>{t.dashboard?.devicePositions || 'Device Positions'}</span>
+              </h2>
+              <div className="w-full h-[calc(100%-2.5rem)]">
+                <LeafletMap devices={devicesForMap} selectedDeviceId={selectedDeviceId} />
+              </div>
+              {!hasGpsFix && (
+                <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg animate-pulse z-[100]">
+                  GPS not connected
+                </div>
+              )}
             </div>
 
             {/* Main module status panel */}
@@ -498,7 +510,7 @@ export default function App() {
 
               {/* GPS */}
               <div className="rounded-xl border border-black/10 bg-white/70 p-3 dark:border-white/10 dark:bg-slate-800/60 flex items-center gap-3">
-                <MapPin size={16} className="text-cyan-500 shrink-0" />
+                <MapPin size={16} className={`shrink-0 ${hasGpsFix ? 'text-cyan-500' : 'text-red-500'}`} />
                 <div className="min-w-0">
                   <p className="text-xs font-medium text-slate-600 dark:text-gray-400">GPS</p>
                   {hasGpsFix && selectedDevice.gps_lat != null ? (
@@ -506,7 +518,7 @@ export default function App() {
                       {Number(selectedDevice.gps_lat).toFixed(6)}, {Number(selectedDevice.gps_lon).toFixed(6)}
                     </p>
                   ) : (
-                    <p className="text-xs text-slate-400 dark:text-gray-500 mt-0.5">No GPS fix</p>
+                    <p className="text-xs text-red-500 dark:text-red-400 mt-0.5 font-medium">No GPS fix</p>
                   )}
                 </div>
               </div>
@@ -551,7 +563,7 @@ export default function App() {
                 <div>
                   <p className="text-xs font-medium text-slate-600 dark:text-gray-400">Controllers</p>
                   <p className="text-xs text-slate-900 dark:text-white mt-0.5">
-                    {ctrlIds.length} registered · {selectedNodes.length} node{selectedNodes.length !== 1 ? 's' : ''}
+                    {ctrlIds.filter(isCtrlOnline).length} online · {ctrlIds.length} registered
                   </p>
                 </div>
               </div>
@@ -569,70 +581,67 @@ export default function App() {
             </div>
           </div>
 
-          {/* Map */}
-          <div className="rounded-2xl border border-black/10 bg-white/80 overflow-hidden backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
-            <div className="px-4 pt-4 pb-2">
-              <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-300">
-                {t.dashboard?.devicePositions || 'Device Positions'}
-              </h3>
-            </div>
-            <div className="h-64">
-              <LeafletMap devices={devicesForMap} selectedDeviceId={selectedDeviceId} />
-            </div>
-          </div>
-
           {/* Controller cards */}
           <div>
             <h3 className="text-base font-semibold mb-4 text-slate-900 dark:text-white">
               {t.dashboard?.sensorControllers || 'Sensor Controllers'}
             </h3>
-            {ctrlIds.length === 0 ? (
-              <div className="rounded-2xl border border-black/10 bg-white/80 p-8 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm text-center">
-                <p className="text-sm text-slate-400 dark:text-gray-500">
-                  {t.dashboard?.noHubDetected || 'No sensor controllers registered for this device.'}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {ctrlIds.map((ctrlId) => {
-                  const ctrlNodes = selectedNodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
-                  const online = isCtrlOnline(ctrlId)
-                  return (
-                    <div
-                      key={ctrlId}
-                      className="rounded-xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm hover:border-black/20 dark:hover:border-white/30 transition-all"
-                    >
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="h-10 w-10 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-500 flex items-center justify-center shrink-0">
-                          <Cpu className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-900 dark:text-white truncate">Controller {ctrlId}</p>
-                          <p className="text-xs text-slate-500 dark:text-gray-400">
-                            {ctrlNodes.length} node{ctrlNodes.length !== 1 ? 's' : ''}
-                          </p>
-                        </div>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0
-                          ${online
-                            ? 'bg-green-500/10 text-green-700 dark:text-green-400'
-                            : 'bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-gray-500'
-                          }`}>
-                          {online
-                            ? (t.dashboard?.online || 'Online')
-                            : 'Offline'}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setSelectedCtrlId(ctrlId)}
-                        className="w-full rounded-lg bg-slate-900 py-2 text-xs font-medium text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 transition-colors cursor-pointer"
+            {(() => {
+              const onlineCtrlIds = ctrlIds.filter(isCtrlOnline)
+              if (ctrlIds.length === 0) {
+                return (
+                  <div className="rounded-2xl border border-black/10 bg-white/80 p-8 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm text-center">
+                    <p className="text-sm text-slate-400 dark:text-gray-500">
+                      {t.dashboard?.noHubDetected || 'No sensor controllers registered for this device.'}
+                    </p>
+                  </div>
+                )
+              }
+              if (onlineCtrlIds.length === 0) {
+                return (
+                  <div className="rounded-2xl border border-black/10 bg-white/80 p-8 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm text-center">
+                    <Cpu className="mx-auto mb-3 w-8 h-8 text-slate-300 dark:text-gray-600" />
+                    <p className="text-sm text-slate-400 dark:text-gray-500">
+                      {ctrlIds.length} controller{ctrlIds.length !== 1 ? 's' : ''} registered — waiting for data…
+                    </p>
+                  </div>
+                )
+              }
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {onlineCtrlIds.map((ctrlId) => {
+                    const ctrlNodes = selectedNodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
+                    return (
+                      <div
+                        key={ctrlId}
+                        className="rounded-xl border border-black/10 bg-white/80 p-4 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm hover:border-black/20 dark:hover:border-white/30 transition-all"
                       >
-                        {t.dashboard?.viewDetails || 'View Details'}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="h-10 w-10 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-500 flex items-center justify-center shrink-0">
+                            <Cpu className="w-5 h-5 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-slate-900 dark:text-white truncate">Controller {ctrlId}</p>
+                            <p className="text-xs text-slate-500 dark:text-gray-400">
+                              {ctrlNodes.length} node{ctrlNodes.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0 bg-green-500/10 text-green-700 dark:text-green-400">
+                            {t.dashboard?.online || 'Online'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setSelectedCtrlId(ctrlId)}
+                          className="w-full rounded-lg bg-slate-900 py-2 text-xs font-medium text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 transition-colors cursor-pointer"
+                        >
+                          {t.dashboard?.viewDetails || 'View Details'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </div>
 
           {/* Footer */}

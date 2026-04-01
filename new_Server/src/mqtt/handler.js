@@ -177,10 +177,11 @@ async function handleSensorData(deviceId, data) {
       server_ts: new Date(),
     })
 
-    // Update last_seen node (match by sensor_type juga agar tidak confuse multi-type port)
+    // Update last_seen node — upsert sebagai fallback jika HELLO belum diterima
     await SensorNode.findOneAndUpdate(
       { device_id: deviceId, ctrl_id, port_num, sensor_type },
-      { status: 'online', last_seen: new Date() }
+      { status: 'online', last_seen: new Date(), $setOnInsert: { first_seen: new Date() } },
+      { upsert: true }
     )
 
     // Update last_seen device

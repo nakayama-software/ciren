@@ -204,6 +204,31 @@ router.get('/devices/:deviceId/data/history', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// DELETE /api/devices/:deviceId/data
+// Hapus semua reading untuk kombinasi ctrl_id + port_num + sensor_type
+// Body atau query: ctrl_id, port_num, sensor_type (semua required)
+router.delete('/devices/:deviceId/data', async (req, res) => {
+  try {
+    const { ctrl_id, port_num, sensor_type } = { ...req.query, ...req.body }
+    if (!ctrl_id || !port_num || !sensor_type)
+      return res.status(400).json({ error: 'ctrl_id, port_num, sensor_type required' })
+
+    const filter = {
+      device_id:   req.params.deviceId,
+      ctrl_id:     Number(ctrl_id),
+      port_num:    Number(port_num),
+      sensor_type: Number(sensor_type),
+    }
+
+    const result = await SensorReading.deleteMany(filter)
+
+    // Hapus SensorNode juga
+    await SensorNode.deleteMany(filter)
+
+    res.json({ ok: true, deleted: result.deletedCount })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // ══════════════════════════════════════════════════
 //  HEALTH CHECK
 // ══════════════════════════════════════════════════

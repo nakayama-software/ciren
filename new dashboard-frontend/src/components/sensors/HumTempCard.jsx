@@ -42,10 +42,10 @@ export default function HumTempCard({ ctrlId, portNum, latestData, status, now, 
     <div
       role="button"
       onClick={onChartClick}
-      className="rounded-xl border border-teal-500/20 bg-teal-500/5 p-4 hover:border-teal-500/40 transition-all cursor-pointer"
+      className="rounded-xl border border-teal-500/20 bg-teal-500/5 p-4 hover:border-teal-500/40 transition-all cursor-pointer h-full flex flex-col"
     >
       {/* Header */}
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex items-center gap-3">
         <div className="rounded-lg bg-teal-500/10 border border-teal-500/20 p-2 shrink-0">
           <Thermometer className="w-5 h-5 text-teal-500" />
         </div>
@@ -59,7 +59,7 @@ export default function HumTempCard({ ctrlId, portNum, latestData, status, now, 
       </div>
 
       {/* Values */}
-      <div className="rounded-xl bg-slate-100/80 dark:bg-black/20 border border-slate-200 dark:border-white/10 p-3 grid grid-cols-2 gap-3">
+      <div className="rounded-xl bg-slate-100/80 dark:bg-black/20 border border-slate-200 dark:border-white/10 p-3 grid grid-cols-2 gap-3 mt-3 flex-1">
         {/* Temperature */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
