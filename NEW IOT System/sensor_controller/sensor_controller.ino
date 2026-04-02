@@ -80,9 +80,9 @@ SoftwareSerial U3, U4, U5, U6, U7, U8;
 
 // ─── Pin RX mapping ───────────────────────────────
 const int RX_P1 = 16;
-const int RX_P2 = 4;
-const int RX_P3 = 13;
-const int RX_P4 = 2;
+const int RX_P2 = 25;
+const int RX_P3 = 4;
+const int RX_P4 = 27;
 const int RX_P5 = 33;
 const int RX_P6 = 34;
 const int RX_P7 = 35;

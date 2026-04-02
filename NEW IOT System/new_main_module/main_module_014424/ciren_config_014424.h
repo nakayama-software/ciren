@@ -18,7 +18,7 @@
 
 // ── Button ──────────────────────────────────────────────────────────────────
 // GPIO 0 = BOOT button pada ESP32-S3, active-LOW, internal pullup
-#define PIN_BTN            0
+#define PIN_BTN            4
 
 #define PIN_MODEM_RX       16
 #define PIN_MODEM_TX       17
