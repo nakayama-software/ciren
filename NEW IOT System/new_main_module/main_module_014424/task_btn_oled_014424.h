@@ -7,6 +7,8 @@
 #include "ciren_config_014424.h"
 #include "ring_buffer_014424.h"
 #include "system_state_014424.h"
+#include "logo_014424.h"
+
 
 // ─── TFT instance ────────────────────────────────────────────────────────────
 // Hardware SPI — pin dikonfigurasi lewat SPI.begin() di btn_oled_init()
@@ -148,6 +150,7 @@ static String build_scan_html()
       h += "<label class='network-item' for='" + idstr + "'>";
       h += "<input type='radio' id='" + idstr +
            "' name='ssid' value='" + ssid + "'>";
+      h += "<span class='check-dot'></span>";
       h += "<span class='network-info'>";
       h += _signal_svg(bars);
       h += "<span class='network-name'>" + ssid + "</span>";
@@ -190,12 +193,17 @@ static String build_portal_page(const String &msg = "", bool ok = false)
                          "letter-spacing:.08em;color:#64748b;margin-bottom:10px}"
          ".network-list{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}"
          ".network-item{display:flex;align-items:center;justify-content:space-between;"
-                        "background:#0f172a;border:1px solid #334155;border-radius:10px;"
-                        "padding:12px 14px;cursor:pointer;transition:border-color .15s}"
-         ".network-item:has(input:checked){border-color:#0ea5e9;background:#0c1a2e}"
+                        "background:#0f172a;border:2px solid #334155;border-radius:10px;"
+                        "padding:12px 14px;cursor:pointer;transition:all .15s}"
+         ".network-item:has(input:checked){border-color:#0ea5e9;background:#0c2a3d;"
+                                          "box-shadow:0 0 0 3px rgba(14,165,233,0.2)}"
+         ".network-item:has(input:checked) .network-name{color:#0ea5e9;font-weight:700}"
+         ".network-item:has(input:checked) .check-dot{display:block}"
+         ".check-dot{display:none;width:8px;height:8px;border-radius:50%;"
+                    "background:#0ea5e9;flex-shrink:0;margin-right:6px}"
          ".network-item input{position:absolute;opacity:0;pointer-events:none}"
          ".network-info{display:flex;align-items:center;gap:4px;font-size:14px;font-weight:500}"
-         ".network-name{color:#f1f5f9}"
+         ".network-name{color:#f1f5f9;transition:color .15s}"
          ".lock-icon{font-size:11px;margin-left:4px;opacity:.5}"
          ".network-meta{font-size:11px;color:#64748b;white-space:nowrap}"
          ".empty-state{text-align:center;padding:20px;color:#64748b;"
@@ -257,9 +265,9 @@ static String build_portal_page(const String &msg = "", bool ok = false)
   h += "<div class='field'><label>Network Name (SSID)</label>"
        "<input name='ssid_m' placeholder='Enter WiFi name' autocomplete='off'></div>";
 
-  // Password
+  // Password (shown as plain text for easy entry on mobile)
   h += "<div class='field'><label>Password</label>"
-       "<input type='password' name='pass' placeholder='Enter WiFi password' autocomplete='off'></div>";
+       "<input type='text' name='pass' placeholder='Enter WiFi password' autocomplete='off'></div>";
 
   // Buttons
   h += "<div class='btn-row'>"
@@ -300,15 +308,14 @@ static void tft_badge(int x, int y, const char *text, uint16_t bg, uint16_t fg, 
   tft.print(text);
 }
 
-// Section label — small gray caps, with underline
+// Section label — large cyan text, easy to read for elderly users
 static void tft_section(int x, int y, const char *label)
 {
-  tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
+  tft.setTextSize(2);
+  tft.setTextColor(C_ACCENT, C_BG);
   tft.setCursor(x, y);
   tft.print(label);
-  int lw = (int)strlen(label) * 6;
-  tft.drawFastHLine(x, y + 10, lw, C_SEP);
+  // Callers should add y += 22 after this (16px text + 6px gap)
 }
 
 // WiFi/SIM signal bars (5 vertical bars)
@@ -367,12 +374,17 @@ static void tft_draw_footer()
 {
   tft.drawFastHLine(0, FTR_Y, TFT_WIDTH, C_SEP);
   tft.fillRect(0, FTR_Y + 1, TFT_WIDTH, TFT_HEIGHT - FTR_Y - 1, C_BG);
+
+  // Device ID + version (left)
   tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
-  tft.setCursor(PAD, FTR_Y + 6);
+  tft.setTextColor(C_WHITE, C_BG);
+  tft.setCursor(PAD, FTR_Y + 5);
   tft.print(DEVICE_ID "  v" FW_VERSION);
-  tft.setCursor(190, FTR_Y + 6);
-  tft.print("BTN: short=next");
+
+  // Company logo (right-aligned)
+  int lx = TFT_WIDTH - LOGO_FOOTER_W - PAD;
+  int ly = FTR_Y + (TFT_HEIGHT - FTR_Y - LOGO_FOOTER_H) / 2;
+  tft.drawRGBBitmap(lx, ly, LOGO_FOOTER, LOGO_FOOTER_W, LOGO_FOOTER_H);
 }
 
 // ─── Page: Gateway ───────────────────────────────────────────────────────────
@@ -382,81 +394,62 @@ static void _draw_gateway()
 
   // ── Connection row ──
   tft_section(PAD, y, "CONNECTION");
-  y += 14;
+  y += 22;
 
   bool wifi_mode = (strncmp(sys_state.conn_mode, "wifi", 4) == 0);
-  tft_badge(PAD, y, wifi_mode ? "WiFi" : "SIM",
-            wifi_mode ? 0x000F : 0x6000, C_WHITE, 1);
   bool conn = sys_state.is_connected;
-  tft_badge(PAD + 60, y, conn ? "CONNECTED" : "OFFLINE",
-            conn ? 0x0320 : 0x6000, C_WHITE, 1);
+  tft_badge(PAD, y, wifi_mode ? "WiFi" : "SIM",
+            wifi_mode ? 0x000F : 0x6000, C_WHITE, 2);
+  tft_badge(PAD + 80, y, conn ? "CONNECTED" : "OFFLINE",
+            conn ? 0x0320 : 0x6000, C_WHITE, 2);
 
-  // ── RSSI ──
-  y += 26;
-  tft_section(PAD, y, "RSSI SIGNAL");
-  y += 14;
+  // ── RSSI / Signal ──
+  y += 36;
+  tft_section(PAD, y, "SIGNAL");
+  y += 22;
 
-  int rssi = (int)sys_state.rssi;
-  float rssi_pct = (rssi == 0) ? 0.0f : constrain((rssi + 90.0f) / 60.0f, 0.0f, 1.0f);
-  uint16_t rssi_clr = (rssi < -75) ? C_YELLOW : C_ACCENT;
+  int      rssi;
+  float    rssi_pct;
+  uint16_t rssi_clr;
+
+  if (wifi_mode) {
+    rssi     = (int)sys_state.rssi;
+    rssi_pct = (rssi == 0) ? 0.0f : constrain((rssi + 90.0f) / 60.0f, 0.0f, 1.0f);
+    rssi_clr = (rssi == 0) ? C_GRAY : (rssi < -75) ? C_YELLOW : C_GREEN;
+  } else {
+    int sig  = sys_state.sim_signal;
+    rssi     = (sig > 0 && sig < 99) ? (-113 + sig * 2) : 0;
+    rssi_pct = constrain(sig / 31.0f, 0.0f, 1.0f);
+    rssi_clr = (sig == 0 || sig == 99) ? C_GRAY : (sig < 8) ? C_RED : (sig < 16) ? C_YELLOW : C_GREEN;
+  }
 
   tft_signal_bars(PAD, y, rssi_pct, rssi_clr);
 
-  char rbuf[16];
-  if (rssi != 0) snprintf(rbuf, sizeof(rbuf), "%-8d dBm", rssi);
-  else           snprintf(rbuf, sizeof(rbuf), "%-12s",    "--");
-  tft.setTextSize(1);
+  char rbuf[14];
+  if (rssi != 0) snprintf(rbuf, sizeof(rbuf), "%d dBm", rssi);
+  else           snprintf(rbuf, sizeof(rbuf), "--");
+  tft.setTextSize(2);
   tft.setTextColor(rssi_clr, C_BG);
-  tft.setCursor(54, y + 8);
+  tft.setCursor(58, y + 5);
   tft.print(rbuf);
 
   y += 30;
-  tft_hbar(PAD, y, 220, 10, rssi_pct, rssi_clr);
+  tft_hbar(PAD, y, 240, 12, rssi_pct, rssi_clr);
 
   // ── Buffer ──
-  y += 18;
+  y += 22;
   tft_section(PAD, y, "BUFFER");
-  y += 14;
+  y += 22;
 
   float buf_pct = rb_usage();
   uint16_t buf_clr = (buf_pct > 0.8f) ? C_RED : (buf_pct > 0.5f) ? C_YELLOW : C_ACCENT;
-  tft_hbar(PAD, y, 180, 10, buf_pct, buf_clr);
-  char bbuf[10];
-  snprintf(bbuf, sizeof(bbuf), "%-4.0f%%", buf_pct * 100.0f);
-  tft.setTextSize(1);
+  tft_hbar(PAD, y, 200, 12, buf_pct, buf_clr);
+  char bbuf[8];
+  snprintf(bbuf, sizeof(bbuf), "%3.0f%%", buf_pct * 100.0f);
+  tft.setTextSize(2);
   tft.setTextColor(C_WHITE, C_BG);
-  tft.setCursor(196, y + 1);
+  tft.setCursor(218, y - 2);
   tft.print(bbuf);
-
-  // ── Uptime + Published ──
-  y += 18;
-  char upbuf[24];
-  snprintf(upbuf, sizeof(upbuf), "Up: %-7lus", millis() / 1000UL);
-  tft.setTextSize(1);
-  tft.setTextColor(C_WHITE, C_BG);
-  tft.setCursor(PAD, y);
-  tft.print(upbuf);
-
-  tft.setCursor(160, y);
-  int sc = sys_state.last_status_code;
-  if (sc == 200)      { tft.setTextColor(C_GREEN,  C_BG); tft.print("PUB: OK   "); }
-  else if (sc > 0)    { tft.setTextColor(C_RED,    C_BG);
-                        char pb[12]; snprintf(pb, sizeof(pb), "PUB: %-5d", sc);
-                        tft.print(pb); }
-  else                { tft.setTextColor(C_GRAY,   C_BG); tft.print("PUB: --   "); }
-
-  // ── MAC ──
-  y += 14;
-  uint8_t _mac[6];
-  WiFi.macAddress(_mac);
-  char macbuf[22];
-  snprintf(macbuf, sizeof(macbuf), "%02X:%02X:%02X:%02X:%02X:%02X",
-           _mac[0], _mac[1], _mac[2], _mac[3], _mac[4], _mac[5]);
-  tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
-  tft.setCursor(PAD, y);
-  tft.print("MAC: ");
-  tft.print(macbuf);
 }
 
 // ─── Page: WiFi ──────────────────────────────────────────────────────────────
@@ -465,73 +458,72 @@ static void _draw_wifi()
   int y = CONT_Y;
 
   tft_section(PAD, y, "NETWORK");
-  y += 14;
+  y += 22;
 
   if (WiFi.status() == WL_CONNECTED) {
     // Status dot + SSID
-    tft_dot(PAD + 5, y + 8, C_GREEN);
+    tft_dot(PAD + 6, y + 10, C_GREEN);
     String ssid = WiFi.SSID();
-    if (ssid.length() > 20) ssid = ssid.substring(0, 20) + "..";
+    if (ssid.length() > 17) ssid = ssid.substring(0, 17) + "..";
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD + 18, y);
-    char sbuf[24]; snprintf(sbuf, sizeof(sbuf), "%-22s", ssid.c_str());
-    tft.print(sbuf);
+    tft.setCursor(PAD + 22, y);
+    tft.print(ssid.c_str());
+    // Clear trailing space
+    tft.setTextColor(C_BG, C_BG);
+    tft.print("     ");
     y += 24;
 
     // IP address
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("IP  ");
+    tft.print("IP:");
     tft.setTextColor(C_ACCENT, C_BG);
-    char ipbuf[20];
-    snprintf(ipbuf, sizeof(ipbuf), "%-18s", WiFi.localIP().toString().c_str());
+    char ipbuf[18];
+    snprintf(ipbuf, sizeof(ipbuf), "%-15s", WiFi.localIP().toString().c_str());
     tft.print(ipbuf);
-    y += 14;
+    y += 24;
 
     // RSSI + signal bars
-    tft_section(PAD, y, "SIGNAL STRENGTH");
-    y += 14;
+    tft_section(PAD, y, "SIGNAL");
+    y += 22;
 
     int rssi = WiFi.RSSI();
     float pct = constrain((rssi + 90.0f) / 60.0f, 0.0f, 1.0f);
     uint16_t sc = (rssi < -75) ? C_YELLOW : C_GREEN;
     tft_signal_bars(PAD, y, pct, sc);
-    char rbuf[16]; snprintf(rbuf, sizeof(rbuf), "%-6d dBm", rssi);
-    tft.setTextSize(1);
+    char rbuf[12]; snprintf(rbuf, sizeof(rbuf), "%d dBm", rssi);
+    tft.setTextSize(2);
     tft.setTextColor(sc, C_BG);
-    tft.setCursor(54, y + 9);
+    tft.setCursor(58, y + 5);
     tft.print(rbuf);
-    y += 32;
-    tft_hbar(PAD, y, 240, 10, pct, sc);
-    y += 18;
+    y += 30;
+    tft_hbar(PAD, y, 240, 12, pct, sc);
+    y += 22;
 
     // Channel
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Channel ");
+    tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y);
+    tft.print("Ch:");
+    tft.setTextColor(C_ACCENT, C_BG);
     char chbuf[8]; snprintf(chbuf, sizeof(chbuf), "%-4d", WiFi.channel());
     tft.print(chbuf);
 
   } else {
     // Not connected
-    tft_dot(PAD + 5, y + 8, C_RED);
+    tft_dot(PAD + 6, y + 10, C_RED);
     tft.setTextSize(2);
     tft.setTextColor(C_RED, C_BG);
-    tft.setCursor(PAD + 18, y);
-    tft.print("NOT CONNECTED     ");
-    y += 32;
+    tft.setCursor(PAD + 22, y);
+    tft.print("NOT CONNECTED   ");
+    y += 36;
 
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("Go to Settings page    ");
-    y += 16;
-    tft.setCursor(PAD, y);
-    tft.print("Hold 5s to start WiFi Setup");
+    tft.print("See Settings page ");
   }
 }
 
@@ -541,62 +533,61 @@ static void _draw_sim()
   int y = CONT_Y;
 
   tft_section(PAD, y, "SIM MODULE");
-  y += 14;
+  y += 22;
 
   if (!sys_state.sim_enabled) {
-    tft_badge(PAD, y, "DISABLED", C_DARKRED, C_WHITE);
-    y += 28;
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
+    tft_badge(PAD, y, "DISABLED", C_DARKRED, C_WHITE, 2);
+    y += 36;
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("Go to SIM Control page  ");
-    y += 14;
+    tft.print("Go to SIM Ctrl  ");
+    y += 24;
+    tft.setTextColor(C_YELLOW, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("Hold 5s to enable        ");
+    tft.print("Hold 5s =Enable  ");
     return;
   }
 
   // Modem status badge
   tft_badge(PAD, y, sys_state.sim_modem_ok ? "MODEM OK" : "INIT...",
-            sys_state.sim_modem_ok ? 0x0320 : C_DGRAY, C_WHITE);
+            sys_state.sim_modem_ok ? 0x0320 : C_DGRAY, C_WHITE, 2);
   bool active = (strncmp(sys_state.conn_mode, "sim", 3) == 0);
   if (active)
-    tft_badge(PAD + 110, y, "ACTIVE", C_ACCENT, C_BG);
-  y += 28;
+    tft_badge(PAD + 150, y, "ACTIVE", C_ACCENT, C_BG, 2);
+  y += 36;
 
   if (sys_state.sim_modem_ok) {
     // Operator
     tft_section(PAD, y, "OPERATOR");
-    y += 14;
+    y += 22;
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
-    char opbuf[24];
-    snprintf(opbuf, sizeof(opbuf), "%-18s", sys_state.sim_operator);
+    char opbuf[17];
+    snprintf(opbuf, sizeof(opbuf), "%-16s", sys_state.sim_operator);
     tft.setCursor(PAD, y);
     tft.print(opbuf);
-    y += 26;
+    y += 24;
 
     // Signal
     tft_section(PAD, y, "SIGNAL");
-    y += 14;
+    y += 22;
     int sig = sys_state.sim_signal;
+    // CSQ → dBm: rssi = -113 + csq*2  (valid range 0–31; 99 = unknown)
+    int sim_dbm = (sig > 0 && sig < 99) ? (-113 + sig * 2) : 0;
     float pct = constrain(sig / 31.0f, 0.0f, 1.0f);
     uint16_t sc = (sig < 8) ? C_RED : (sig < 16) ? C_YELLOW : C_GREEN;
     tft_signal_bars(PAD, y, pct, sc);
-    char sbuf[12]; snprintf(sbuf, sizeof(sbuf), "%-3d/31", sig);
-    tft.setTextSize(1);
+    char sbuf[16];
+    if (sim_dbm != 0) snprintf(sbuf, sizeof(sbuf), "%d dBm", sim_dbm);
+    else              snprintf(sbuf, sizeof(sbuf), "--");
+    tft.setTextSize(2);
     tft.setTextColor(sc, C_BG);
-    tft.setCursor(54, y + 9);
+    tft.setCursor(58, y + 5);
     tft.print(sbuf);
-    y += 32;
-
-    // GPRS
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("GPRS: ");
-    tft.setTextColor(sys_state.sim_gprs ? C_GREEN : C_GRAY, C_BG);
-    tft.print(sys_state.sim_gprs ? "CONNECTED  " : "DISCONNECTED");
+    y += 30;
+    tft_hbar(PAD, y, 240, 12, pct, sc);
+    y += 22;
   }
 }
 
@@ -610,76 +601,74 @@ static void _draw_gps()
 {
   int y = CONT_Y;
 
-  tft_section(PAD, y, "GNSS STATUS");
-  y += 14;
+  tft_section(PAD, y, "GPS STATUS");
+  y += 22;
 
   if (!sys_state.sim_enabled) {
-    tft_badge(PAD, y, "SIM DISABLED", C_DARKRED, C_WHITE);
-    y += 28;
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
+    tft_badge(PAD, y, "SIM DISABLED", C_DARKRED, C_WHITE, 2);
+    y += 36;
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("GPS requires SIM module  ");
+    tft.print("Need SIM module ");
     return;
   }
 
   bool fix = _has_recent_gps();
-  if (fix)
-    tft_badge(PAD, y, "FIX ACQUIRED", 0x0320, C_WHITE);
-  else
-    tft_badge(PAD, y, "NO FIX", C_DARKRED, C_WHITE);
-  y += 28;
+  tft_badge(PAD, y, fix ? "FIX OK" : "NO FIX",
+            fix ? 0x0320 : C_DARKRED, C_WHITE, 2);
+  y += 36;
 
   if (fix) {
     // Latitude
     tft_section(PAD, y, "LATITUDE");
-    y += 14;
-    char latbuf[16]; snprintf(latbuf, sizeof(latbuf), "%.6f", sys_state.gps_lat);
-    tft.setTextSize(2);
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(PAD, y);
-    char pad_lat[20]; snprintf(pad_lat, sizeof(pad_lat), "%-16s", latbuf);
-    tft.print(pad_lat);
     y += 22;
+    char latbuf[12]; snprintf(latbuf, sizeof(latbuf), "%.5f", sys_state.gps_lat);
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y);
+    tft.print(latbuf);
+    tft.setTextColor(C_BG, C_BG); tft.print("         ");  // clear
+    y += 24;
 
     // Longitude
     tft_section(PAD, y, "LONGITUDE");
-    y += 14;
-    char lonbuf[16]; snprintf(lonbuf, sizeof(lonbuf), "%.6f", sys_state.gps_lon);
+    y += 22;
+    char lonbuf[12]; snprintf(lonbuf, sizeof(lonbuf), "%.5f", sys_state.gps_lon);
     tft.setTextSize(2);
-    tft.setTextColor(C_ACCENT, C_BG);
+    tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y);
-    char pad_lon[20]; snprintf(pad_lon, sizeof(pad_lon), "%-16s", lonbuf);
-    tft.print(pad_lon);
+    tft.print(lonbuf);
+    tft.setTextColor(C_BG, C_BG); tft.print("         ");  // clear
     y += 24;
 
-    // Alt + age
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Alt: ");
-    tft.setTextColor(C_WHITE, C_BG);
-    char altbuf[16]; snprintf(altbuf, sizeof(altbuf), "%-8.1f m", sys_state.gps_alt);
-    tft.print(altbuf);
-
+    // Alt + fix age
     uint32_t age_s = (millis() - sys_state.gps_fix_ms) / 1000UL;
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.print("  Fix: ");
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y);
+    tft.print("Alt:");
+    tft.setTextColor(C_ACCENT, C_BG);
+    char altbuf[10]; snprintf(altbuf, sizeof(altbuf), "%.0fm", sys_state.gps_alt);
+    tft.print(altbuf);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.print("  Age:");
     tft.setTextColor(age_s < 120 ? C_GREEN : C_YELLOW, C_BG);
-    char agebuf[12]; snprintf(agebuf, sizeof(agebuf), "%-4lus ago", age_s);
+    char agebuf[8]; snprintf(agebuf, sizeof(agebuf), "%lus", age_s);
     tft.print(agebuf);
 
   } else {
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
+    tft.setTextSize(2);
+    tft.setTextColor(C_YELLOW, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("Waiting for satellites...  ");
-    y += 16;
+    tft.print("Searching...    ");
+    y += 24;
+    tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y);
-    tft.print("Place device outdoors      ");
-    y += 16;
+    tft.print("Go outdoors     ");
+    y += 24;
     tft.setCursor(PAD, y);
-    tft.print("Clear sky view recommended ");
+    tft.print("Clear sky needed");
   }
 }
 
@@ -689,65 +678,64 @@ static void _draw_settings()
   int y = CONT_Y;
 
   tft_section(PAD, y, "WiFi SETTINGS");
-  y += 14;
+  y += 22;
 
   if (portal_active) {
-    // Portal is running
-    tft_badge(PAD, y, "PORTAL ACTIVE", C_ACCENT, C_BG);
-    y += 28;
+    // Portal is running — show connection instructions
+    tft_badge(PAD, y, "SETUP MODE", C_ACCENT, C_BG, 2);
+    y += 36;
 
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Connect your phone to:");
-    y += 14;
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    char apbuf[24]; snprintf(apbuf, sizeof(apbuf), "%-18s", portal_ssid.c_str());
-    tft.print(apbuf);
+    tft.setCursor(PAD, y); tft.print("Connect to WiFi:");
     y += 22;
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Password: " PORTAL_PASS "          ");
-    y += 14;
     tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(PAD, y); tft.print("Open: 192.168.4.1             ");
-    y += 20;
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Hold 5s = Delete & Reboot   ");
+    tft.setCursor(PAD, y);
+    String ap = portal_ssid;
+    if (ap.length() > 16) ap = ap.substring(0, 16);
+    tft.print(ap.c_str());
+    tft.setTextColor(C_BG, C_BG); tft.print("         ");
+    y += 22;
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y); tft.print("Pass: " PORTAL_PASS "  ");
+    y += 22;
+    tft.setTextColor(C_ACCENT, C_BG);
+    tft.setCursor(PAD, y); tft.print("192.168.4.1     ");
 
   } else if (WiFi.status() == WL_CONNECTED) {
-    tft_dot(PAD + 5, y + 8, C_GREEN);
+    tft_dot(PAD + 6, y + 10, C_GREEN);
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
     String ssid = WiFi.SSID();
-    if (ssid.length() > 18) ssid = ssid.substring(0, 18);
-    tft.setCursor(PAD + 18, y);
-    char sbuf[22]; snprintf(sbuf, sizeof(sbuf), "%-20s", ssid.c_str());
-    tft.print(sbuf);
-    y += 26;
+    if (ssid.length() > 15) ssid = ssid.substring(0, 15);
+    tft.setCursor(PAD + 22, y);
+    tft.print(ssid.c_str());
+    tft.setTextColor(C_BG, C_BG); tft.print("     ");
+    y += 28;
 
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("IP: ");
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y); tft.print("IP:");
     tft.setTextColor(C_ACCENT, C_BG);
-    char ipbuf[20];
-    snprintf(ipbuf, sizeof(ipbuf), "%-16s", WiFi.localIP().toString().c_str());
+    char ipbuf[16];
+    snprintf(ipbuf, sizeof(ipbuf), "%-13s", WiFi.localIP().toString().c_str());
     tft.print(ipbuf);
-    y += 32;
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Hold 5s = Change WiFi         ");
+    y += 36;
+    tft.setTextColor(C_YELLOW, C_BG);
+    tft.setCursor(PAD, y); tft.print("Hold 5s = Reset   ");
 
   } else {
-    tft_dot(PAD + 5, y + 8, C_RED);
+    // Credentials saved but WiFi not connected (wrong password / network down)
+    tft_dot(PAD + 6, y + 10, C_RED);
     tft.setTextSize(2);
     tft.setTextColor(C_RED, C_BG);
-    tft.setCursor(PAD + 18, y); tft.print("NOT CONNECTED     ");
-    y += 32;
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Hold 5s = Start WiFi Setup    ");
+    tft.setCursor(PAD + 22, y); tft.print("NOT CONNECTED   ");
+    y += 36;
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y); tft.print("Wrong password? ");
+    y += 24;
+    tft.setTextColor(C_YELLOW, C_BG);
+    tft.setCursor(PAD, y); tft.print("Hold 5s = Reset   ");
   }
 }
 
@@ -757,7 +745,7 @@ static void _draw_sim_ctrl()
   int y = CONT_Y;
 
   tft_section(PAD, y, "SIM CONTROL");
-  y += 14;
+  y += 22;
 
   bool enabled = sys_state.sim_enabled;
   tft_badge(PAD, y, enabled ? "ENABLED" : "DISABLED",
@@ -765,29 +753,29 @@ static void _draw_sim_ctrl()
   y += 38;
 
   if (enabled) {
-    tft.setTextSize(1);
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Modem:  ");
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y); tft.print("Modem:");
     tft.setTextColor(sys_state.sim_modem_ok ? C_GREEN : C_YELLOW, C_BG);
     tft.print(sys_state.sim_modem_ok ? "OK      " : "Init... ");
-    y += 18;
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("GPRS:   ");
-    tft.setTextColor(sys_state.sim_gprs ? C_GREEN : C_GRAY, C_BG);
-    tft.print(sys_state.sim_gprs ? "Connected     " : "Disconnected  ");
-    y += 18;
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, y); tft.print("Mode:   ");
+    y += 22;
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y); tft.print("GPRS: ");
+    tft.setTextColor(sys_state.sim_gprs ? C_GREEN : C_RED, C_BG);
+    tft.print(sys_state.sim_gprs ? "OK      " : "OFFLINE ");
+    y += 22;
     bool sim_active = (strncmp(sys_state.conn_mode, "sim", 3) == 0);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, y); tft.print("Mode: ");
     tft.setTextColor(sim_active ? C_ACCENT : C_WHITE, C_BG);
-    tft.print(sim_active ? "SIM (active)    " : "Standby         ");
-    y += 24;
+    tft.print(sim_active ? "SIM     " : "Standby ");
+    y += 28;
   }
 
-  tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
+  tft.setTextSize(2);
+  tft.setTextColor(C_YELLOW, C_BG);
   tft.setCursor(PAD, y);
-  tft.print(enabled ? "Hold 5s = Disable SIM  " : "Hold 5s = Enable SIM   ");
+  tft.print(enabled ? "Hold 5s = Disable " : "Hold 5s =Enable  ");
 }
 
 // ─── Hold-progress overlay ───────────────────────────────────────────────────
@@ -814,13 +802,11 @@ static void _draw_hold_overlay(uint32_t held_ms)
   tft.setTextSize(1);
   tft.setTextColor(C_ACCENT, C_BG);
   tft.setCursor(PAD + 8, inner_y);
-  if (tft_page == PAGE_SETTINGS) {
-    tft.print(portal_active ? "Release = Delete WiFi + Reboot  " :
-              (WiFi.status() == WL_CONNECTED ? "Release = Change WiFi Config    " :
-                                               "Release = Start WiFi Setup      "));
-  } else {
+  if (tft_page == PAGE_SIM_CTRL) {
     tft.print(sys_state.sim_enabled ? "Release = Disable SIM Module    " :
                                       "Release = Enable SIM Module     ");
+  } else {
+    tft.print("Release = Reset WiFi + Reboot   ");
   }
   inner_y += 18;
 
@@ -956,7 +942,9 @@ static void tft_draw()
 {
   if (!tft_ready) return;
 
-  bool on_action = (tft_page == PAGE_SETTINGS || tft_page == PAGE_SIM_CTRL);
+  // Hold is always active when WiFi is configured (to reset from any page),
+  // or specifically on SIM_CTRL page.
+  bool on_action = (!portal_active || tft_page == PAGE_SIM_CTRL);
   uint32_t held  = btn_held_ms();
 
   // Hold progress overlay
@@ -1013,15 +1001,15 @@ static void tft_show_msg(const char *line1, const char *line2,
   tft_draw_footer();
   tft.setTextSize(2);
   tft.setTextColor(C_WHITE, C_BG);
-  tft.setCursor(PAD, CONT_Y + 20);
+  tft.setCursor(PAD, CONT_Y + 16);
   tft.print(line1);
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(C_YELLOW, C_BG);
-  tft.setCursor(PAD, CONT_Y + 52);
+  tft.setCursor(PAD, CONT_Y + 46);
   tft.print(line2);
   if (line3) {
-    tft.setTextColor(C_GRAY, C_BG);
-    tft.setCursor(PAD, CONT_Y + 68);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.setCursor(PAD, CONT_Y + 76);
     tft.print(line3);
   }
 }
@@ -1039,20 +1027,42 @@ void btn_oled_init()
   tft.fillScreen(C_BG);
   tft_ready = true;
 
-  // Boot splash
-  tft_draw_header();
-  tft_draw_footer();
+  // ── Boot splash ──────────────────────────────────────────────────────────
+  // Layout (content area: y 37–221 = 185px tall):
+  //   Logo  56px  y=62
+  //   Title 16px  y=128  (size 2, 18 chars × 12px = 216px → x=52)
+  //   ─────────── y=150
+  //   Device 8px  y=158  (size 1, ~24 chars × 6px = 144px → x=88)
+  //   Boot   8px  y=174  (size 1, 10 chars × 6px = 60px → x=130)
+
+  // Logo — horizontally centred
+  tft.drawRGBBitmap(
+    (TFT_WIDTH - LOGO_SPLASH_W) / 2,   // x = 20
+    62,                                  // y
+    LOGO_SPLASH, LOGO_SPLASH_W, LOGO_SPLASH_H
+  );
+
+  // Title
   tft.setTextSize(2);
-  tft.setTextColor(C_ACCENT, C_BG);
-  tft.setCursor(PAD, CONT_Y + 30);
+  tft.setTextColor(C_WHITE, C_BG);
+  tft.setCursor(52, 128);
   tft.print("CIREN IoT Gateway");
+
+  // Thin separator
+  tft.drawFastHLine(PAD, 150, TFT_WIDTH - PAD * 2, C_SEP);
+
+  // Device & firmware — centre-calculated
   tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
-  tft.setCursor(PAD, CONT_Y + 58);
-  tft.print("Firmware v" FW_VERSION "   Device: " DEVICE_ID);
-  tft.setCursor(PAD, CONT_Y + 75);
+  tft.setTextColor(C_ACCENT, C_BG);
+  tft.setCursor(88, 158);
+  tft.print("Device: " DEVICE_ID "    v" FW_VERSION);
+
+  // Booting indicator
+  tft.setTextColor(C_WHITE, C_BG);
+  tft.setCursor(130, 174);
   tft.print("Booting...");
-  tft.fillCircle(PAD + 80, CONT_Y + 75 + 4, 3, C_ACCENT);
+
+  delay(2000);   // hold splash for 2 seconds
 
   Serial.println("[TFT] ILI9341 ready");
 }
@@ -1090,33 +1100,7 @@ void task_oled(void *param)
       Serial.printf("[BTN] Page -> %d\n", tft_page);
     }
     else if (act == BA_HOLD5) {
-      if (tft_page == PAGE_SETTINGS) {
-        if (!portal_active) {
-          Serial.println("[BTN] Hold 5s — starting WiFi portal");
-          portal_start(prefs);
-        } else {
-          // Delete WiFi credentials + reboot
-          if (prefs) {
-            prefs->begin("ciren", false);
-            prefs->remove("ssid");
-            prefs->remove("pass");
-            prefs->end();
-          }
-          tft.fillScreen(C_BG);
-          tft_draw_header();
-          tft.setTextSize(2);
-          tft.setTextColor(C_RED, C_BG);
-          tft.setCursor(PAD, CONT_Y + 30);
-          tft.print("WiFi Deleted!");
-          tft.setTextSize(1);
-          tft.setTextColor(C_GRAY, C_BG);
-          tft.setCursor(PAD, CONT_Y + 58);
-          tft.print("Rebooting in 1.5 s...");
-          delay(1500);
-          esp_restart();
-        }
-      }
-      else if (tft_page == PAGE_SIM_CTRL) {
+      if (tft_page == PAGE_SIM_CTRL) {
         bool new_val = !sys_state.sim_enabled;
         if (prefs) {
           prefs->begin("ciren", false);
@@ -1130,9 +1114,31 @@ void task_oled(void *param)
         tft.setCursor(PAD, CONT_Y + 30);
         tft.print(new_val ? "SIM ENABLED" : "SIM DISABLED");
         tft.setTextSize(1);
-        tft.setTextColor(C_GRAY, C_BG);
+        tft.setTextColor(C_WHITE, C_BG);
         tft.setCursor(PAD, CONT_Y + 58);
         tft.print("Rebooting in 1.5 s...");
+        delay(1500);
+        esp_restart();
+      }
+      else if (!portal_active) {
+        // WiFi is configured — hold from any page = wipe credentials + reboot to portal
+        Serial.println("[BTN] Hold 5s — resetting WiFi credentials");
+        if (prefs) {
+          prefs->begin("ciren", false);
+          prefs->remove("ssid");
+          prefs->remove("pass");
+          prefs->end();
+        }
+        tft.fillScreen(C_BG);
+        tft_draw_header();
+        tft.setTextSize(2);
+        tft.setTextColor(C_RED, C_BG);
+        tft.setCursor(PAD, CONT_Y + 30);
+        tft.print("WiFi Reset!");
+        tft.setTextSize(1);
+        tft.setTextColor(C_WHITE, C_BG);
+        tft.setCursor(PAD, CONT_Y + 58);
+        tft.print("Rebooting...");
         delay(1500);
         esp_restart();
       }
@@ -1141,12 +1147,6 @@ void task_oled(void *param)
     // Refresh TFT hanya saat interval terpenuhi
     if (millis() - last_draw_ms >= TFT_REFRESH_MS) {
       last_draw_ms = millis();
-      static uint8_t _dbg_cnt = 0;
-      if (_dbg_cnt < 5) {
-        Serial.printf("[TFT] draw tick #%d page=%d dirty=%d\n",
-                      _dbg_cnt, tft_page, page_dirty);
-        _dbg_cnt++;
-      }
       tft_draw();
     }
   }

@@ -101,33 +101,32 @@ void setup()
 
   if (strlen(cfg.wifi_ssid) == 0)
   {
-    Serial.println("[SETUP] No WiFi credentials — portal mode only");
-    tft_show_msg("No WiFi Config",
-                 "Go to Settings (page 4)",
-                 "Hold 5s to start WiFi Setup");
-    xTaskCreatePinnedToCore(task_oled, "oled", STACK_OLED, &prefs, PRIO_OLED, &h_oled, 0);
-    return;
+    // No WiFi credentials — auto-start portal; SIM becomes primary connection
+    Serial.println("[SETUP] No WiFi credentials — auto-starting portal, SIM as primary");
+    portal_start(&prefs);
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    strncpy(sys_state.conn_mode, "sim", sizeof(sys_state.conn_mode));
+    xSemaphoreGive(state_mutex);
   }
-
-  // Only initialize WiFi connection manager if in WiFi mode
-  if (strcmp(cfg.conn_mode, "wifi") == 0) {
+  else
+  {
+    // WiFi credentials exist — init conn_manager and start WiFi connection task
     conn_manager_init(cfg.wifi_ssid, cfg.wifi_pass, cfg.mqtt_host);
+    xTaskCreatePinnedToCore(task_conn_manager, "conn_mgr", STACK_CONN, NULL, PRIO_CONN, &h_conn_mgr, 0);
   }
 
-  // Core 0: network + IO
-  // Simpan handle ke variabel global di task_watchdog_014424.h
-  // agar HWM monitor bisa query tanpa xTaskGetHandle (hemat stack)
-  xTaskCreatePinnedToCore(task_conn_manager, "conn_mgr",  STACK_CONN,    NULL,   PRIO_CONN,     &h_conn_mgr,   0);
-  xTaskCreatePinnedToCore(task_espnow_rx,    "espnow_rx", STACK_RX,      NULL,   PRIO_RX,       &h_espnow_rx,  0);
-  xTaskCreatePinnedToCore(task_watchdog,     "watchdog",  STACK_WATCHDOG,NULL,   PRIO_WATCHDOG, NULL,          0);
-  xTaskCreatePinnedToCore(task_oled,         "oled",      STACK_OLED,    &prefs, PRIO_OLED,     &h_oled,       0);
-  xTaskCreatePinnedToCore(sim_manager_task,  "sim_mgr",   STACK_SIM_MGR, NULL,   PRIO_CONN,     NULL,          0);
+  // All other tasks start regardless of WiFi state
+  // Core 0: IO + display
+  xTaskCreatePinnedToCore(task_espnow_rx,   "espnow_rx", STACK_RX,      NULL,   PRIO_RX,       &h_espnow_rx,  0);
+  xTaskCreatePinnedToCore(task_watchdog,    "watchdog",  STACK_WATCHDOG,NULL,   PRIO_WATCHDOG, NULL,          0);
+  xTaskCreatePinnedToCore(task_oled,        "oled",      STACK_OLED,    &prefs, PRIO_OLED,     &h_oled,       0);
+  xTaskCreatePinnedToCore(sim_manager_task, "sim_mgr",   STACK_SIM_MGR, NULL,   PRIO_CONN,     NULL,          0);
 
   // Core 1: data processing
-  xTaskCreatePinnedToCore(task_publish,      "publish",    STACK_PUBLISH,  NULL, PRIO_PUBLISH, &h_publish,    1);
-  xTaskCreatePinnedToCore(task_aggregator,   "aggregator", STACK_AGG,      NULL, PRIO_AGG,     &h_aggregator, 1);
-  xTaskCreatePinnedToCore(task_status,       "status",     STACK_STATUS,   NULL, PRIO_STATUS,  &h_status,     1);
-  xTaskCreatePinnedToCore(mqtt_sim_task,     "mqtt_sim",   STACK_MQTT_SIM, NULL, PRIO_CONN,    NULL,          1);
+  xTaskCreatePinnedToCore(task_publish,     "publish",    STACK_PUBLISH,  NULL, PRIO_PUBLISH, &h_publish,    1);
+  xTaskCreatePinnedToCore(task_aggregator,  "aggregator", STACK_AGG,      NULL, PRIO_AGG,     &h_aggregator, 1);
+  xTaskCreatePinnedToCore(task_status,      "status",     STACK_STATUS,   NULL, PRIO_STATUS,  &h_status,     1);
+  xTaskCreatePinnedToCore(mqtt_sim_task,    "mqtt_sim",   STACK_MQTT_SIM, NULL, PRIO_CONN,    NULL,          1);
 
   Serial.println("All tasks started.");
 }

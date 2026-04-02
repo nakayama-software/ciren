@@ -1,4 +1,5 @@
-require('dotenv').config()
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', envFile) })
 const express  = require('express')
 const cors     = require('cors')
 const mongoose = require('mongoose')

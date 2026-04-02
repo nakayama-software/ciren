@@ -8,6 +8,8 @@ import RotaryChartModal from './charts/RotaryChartModal'
 import ExportModal from './ExportModal'
 import ResetPortModal from './ResetPortModal'
 import AliasInlineEdit from './AliasInlineEdit'
+import LabelManager from './LabelManager'
+import MultiSensorView from './MultiSensorView'
 
 export default function ControllerDetailView({
   ctrlId,
@@ -25,21 +27,21 @@ export default function ControllerDetailView({
   const [rotaryTarget, setRotaryTarget] = useState(null)  // { ctrlId, portNum }
   const [resetTarget, setResetTarget]   = useState(null)  // { ctrlId, portNum, sensorType }
   const [showExport, setShowExport]     = useState(false)
+  const [openLabel, setOpenLabel]       = useState(null)  // label object for MultiSensorView
 
   const ctrlNodes = nodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
   const nowMs = now || Date.now()
 
-  // Hanya tampilkan node yang menerima data dalam 30 detik terakhir
+  // Hanya tampilkan node yang benar-benar menerima data sensor type ini dalam 30 detik terakhir.
+  // PENTING: tidak pakai nodeStatus (port-level) karena bisa "ghost" — misal IMU online bikin
+  // sensor lama di port yang sama ikut muncul padahal tidak ada data.
   function isNodeActive(node) {
-    const nKey = getNodeKey(node.ctrl_id, node.port_num)
-    if (nodeStatus[nKey] === 'online') return true
     const rKey = getReadingKey(node.ctrl_id, node.port_num, node.sensor_type)
     const reading = latestData[rKey]
     return !!(reading?.server_ts && (nowMs - new Date(reading.server_ts).getTime()) < 30000)
   }
 
   const activeCtrlNodes = ctrlNodes.filter(isNodeActive)
-  const activeCount = activeCtrlNodes.length
 
   // Deteksi port yang punya BOTH 0x01 (temp) dan 0x02 (humidity) — dari node aktif saja
   const humTempPorts = new Set()
@@ -65,6 +67,9 @@ export default function ControllerDetailView({
     if (humTempPorts.has(pk) && Number(node.sensor_type) === 0x02) return false
     return true
   })
+
+  // activeCount = jumlah kartu yang ditampilkan (IMU dihitung 1, HumTemp dihitung 1)
+  const activeCount = displayNodes.length
 
   function handleChartClick(node) {
     if (Number(node.sensor_type) === 0x13) {
@@ -123,7 +128,7 @@ export default function ControllerDetailView({
           <Zap className="w-4 h-4 text-cyan-500" />
           <span className="text-xs text-gray-600 dark:text-gray-400">{tSensorNodes}:</span>
           <span className="text-xl font-semibold text-slate-900 dark:text-white">{activeCount}</span>
-          <span className="text-xs text-slate-400 dark:text-gray-500">/ {ctrlNodes.length} registered</span>
+          <span className="text-xs text-slate-400 dark:text-gray-500">active now</span>
         </div>
       </div>
 
@@ -147,6 +152,7 @@ export default function ControllerDetailView({
             return (
               <div key={`${node.ctrl_id}_${node.port_num}_${node.sensor_type}`} className="relative group h-full">
                 <SensorNodeCard
+                  deviceId={deviceId}
                   ctrlId={node.ctrl_id}
                   portNum={node.port_num}
                   sensorType={node.sensor_type}
@@ -220,6 +226,34 @@ export default function ControllerDetailView({
         deviceId={deviceId}
         ctrlId={ctrlId}
         nodes={ctrlNodes}
+      />
+
+      <MultiSensorView
+        open={!!openLabel}
+        onClose={() => setOpenLabel(null)}
+        label={openLabel}
+        deviceId={deviceId}
+        ctrlId={ctrlId}
+        wsRef={wsRef}
+        latestData={latestData}
+        onPopOut={(sensor) => {
+          setOpenLabel(null)
+          if (isIMUSensor(sensor.sensorType)) {
+            setImu3DTarget({ ctrlId, portNum: sensor.portNum })
+          } else if (Number(sensor.sensorType) === 0x13) {
+            setRotaryTarget({ ctrlId, portNum: sensor.portNum })
+          } else {
+            setLineTarget({ ctrlId, portNum: sensor.portNum, sensorType: sensor.sensorType })
+          }
+        }}
+      />
+
+      {/* Label manager — sensor grouping for compare view */}
+      <LabelManager
+        deviceId={deviceId}
+        ctrlId={ctrlId}
+        displayNodes={displayNodes}
+        onOpenLabel={setOpenLabel}
       />
     </div>
   )

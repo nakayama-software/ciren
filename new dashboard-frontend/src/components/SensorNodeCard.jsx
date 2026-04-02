@@ -21,6 +21,7 @@ function timeAgo(ts) {
 }
 
 export default function SensorNodeCard({
+  deviceId,
   ctrlId,
   portNum,
   sensorType,
@@ -55,6 +56,7 @@ export default function SensorNodeCard({
   if (st === 0x01 && isHumTemp) {
     return (
       <HumTempCard
+        deviceId={deviceId}
         ctrlId={ctrlId}
         portNum={portNum}
         latestData={latestData}
