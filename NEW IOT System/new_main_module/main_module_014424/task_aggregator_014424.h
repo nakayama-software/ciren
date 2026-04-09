@@ -24,7 +24,7 @@ void task_aggregator(void* param) {
 
       PublishItem item;
       item.qos = MQTT_QOS_DATA;
-      strncpy(item.topic, TOPIC_DATA, sizeof(item.topic));
+      strncpy(item.topic, sys_state.topic_data, sizeof(item.topic));
       item.len = snprintf(item.payload, PQ_MAX_PAYLOAD,
         "{\"device_id\":\"%s\","
         "\"ctrl_id\":%d,"
@@ -33,7 +33,7 @@ void task_aggregator(void* param) {
         "\"value\":%.4f,"
         "\"timestamp_ms\":%lu,"
         "\"ftype\":%d}",
-        DEVICE_ID, batch[i].ctrl_id, batch[i].port_num,
+        sys_state.device_id, batch[i].ctrl_id, batch[i].port_num,
         batch[i].sensor_type, batch[i].value,
         batch[i].timestamp_ms, batch[i].ftype
       );

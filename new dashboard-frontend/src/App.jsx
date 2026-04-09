@@ -10,13 +10,12 @@ import {
   Globe,
   Settings,
   LogOut,
-  BatteryMedium,
   Signal,
 } from 'lucide-react'
 import {
   getDevice, getLatest, getUserDevices, clearToken, getToken,
 } from './lib/api'
-import { getNodeKey, getReadingKey, isIMUSensor } from './utils/sensors'
+import { getNodeKey, getReadingKey, isIMUSensor, countDisplayNodes } from './utils/sensors'
 import { translations } from './utils/translation'
 import ControllerDetailView from './components/ControllerDetailView'
 import LeafletMap from './components/LeafletMap'
@@ -113,6 +112,7 @@ export default function App() {
   const [selectedDeviceId, setSelectedDeviceId] = useState(null)
   const [selectedCtrlId, setSelectedCtrlId] = useState(null)
   const [wsStatus, setWsStatus] = useState('connecting')
+  const [devicesLoading, setDevicesLoading] = useState(false)
 
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
@@ -120,6 +120,7 @@ export default function App() {
 
   // ---------- load devices from user account ----------
   async function loadUserDevices() {
+    setDevicesLoading(true)
     try {
       const userDevIds = await getUserDevices()
       if (!mountedRef.current) return
@@ -164,6 +165,8 @@ export default function App() {
       if (firstId) setSelectedDeviceId(firstId)
     } catch (err) {
       console.error('Failed to load user devices:', err)
+    } finally {
+      if (mountedRef.current) setDevicesLoading(false)
     }
   }
 
@@ -186,7 +189,9 @@ export default function App() {
   const connect = useCallback(() => {
     if (!mountedRef.current) return
     setWsStatus('connecting')
-    const ws = new WebSocket(WS_URL)
+    const token = getToken()
+    const wsUrlWithToken = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL
+    const ws = new WebSocket(wsUrlWithToken)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -314,23 +319,18 @@ export default function App() {
   const shell = (children, showHeader = false) => (
     <div
       className="min-h-screen font-['Noto_Sans_JP','Hiragino_Kaku_Gothic_ProN','Yu_Gothic_UI',system-ui,sans-serif]
-                 selection:bg-cyan-300/30 selection:text-white
+                 selection:bg-emerald-300/30 selection:text-white
                  bg-slate-50 text-slate-900 dark:text-white
-                 dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-950
-                 transition-colors duration-500"
+                 dark:bg-slate-950
+                 transition-colors duration-300"
     >
-      {/* Background blur orbs */}
-      <div className="pointer-events-none fixed inset-0">
-        <div className="absolute -top-32 -right-24 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl" />
-        <div className="absolute -bottom-32 -left-24 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
-      </div>
 
       {showHeader && (
         <header className="sticky top-0 z-40 border-b border-black/10 bg-white/80 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/80">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="flex h-14 items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-500">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600">
                   <Activity size={16} className="text-white" />
                 </div>
                 <div>
@@ -470,9 +470,24 @@ export default function App() {
         </div>
       )}
 
+      {/* Loading skeleton */}
+      {devicesLoading && (
+        <div className="space-y-6 animate-pulse">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 rounded-2xl border border-black/10 bg-slate-100 dark:border-white/10 dark:bg-slate-800 h-[26rem]" />
+            <div className="rounded-2xl border border-black/10 bg-slate-100 dark:border-white/10 dark:bg-slate-800 h-[26rem]" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-xl border border-black/10 bg-slate-100 dark:border-white/10 dark:bg-slate-800 h-28" />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* No device state */}
-      {!selectedDevice && (
-        <div className="rounded-2xl border border-black/10 bg-white/80 p-12 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm text-center">
+      {!devicesLoading && !selectedDevice && (
+        <div className="rounded-2xl border border-black/10 bg-white p-12 dark:border-white/10 dark:bg-slate-800 text-center">
           <Cpu className="mx-auto mb-3 w-10 h-10 text-slate-300 dark:text-gray-600" />
           <p className="text-slate-500 dark:text-gray-400">
             {deviceIds.length === 0 ? 'No devices found. Waiting for data…' : 'Select a device above.'}
@@ -481,7 +496,7 @@ export default function App() {
       )}
 
       {/* Device overview */}
-      {selectedDevice && !selectedCtrlId && (
+      {!devicesLoading && selectedDevice && !selectedCtrlId && (
         <>
           {/* Map + Status panel */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -520,27 +535,6 @@ export default function App() {
                   ) : (
                     <p className="text-xs text-red-500 dark:text-red-400 mt-0.5 font-medium">No GPS fix</p>
                   )}
-                </div>
-              </div>
-
-              {/* Battery */}
-              <div className="rounded-xl border border-black/10 bg-white/70 p-3 dark:border-white/10 dark:bg-slate-800/60 flex items-center gap-3">
-                <BatteryMedium size={16} className="text-green-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-slate-600 dark:text-gray-400">
-                    {t.dashboard?.battery || 'Battery'}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <div className="flex-1 h-1.5 rounded-full bg-slate-200 dark:bg-white/10 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-green-500 transition-all"
-                        style={{ width: `${Math.min(100, selectedDevice.batt_pct ?? 0)}%` }}
-                      />
-                    </div>
-                    <span className="text-xs font-mono text-slate-900 dark:text-white shrink-0">
-                      {selectedDevice.batt_pct != null ? `${selectedDevice.batt_pct}%` : '—'}
-                    </span>
-                  </div>
                 </div>
               </div>
 
@@ -611,6 +605,12 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {onlineCtrlIds.map((ctrlId) => {
                     const ctrlNodes = selectedNodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
+                    const nowMs = Date.now()
+                    const activeCtrlNodes = ctrlNodes.filter((n) => {
+                      const r = selectedLatest[getReadingKey(n.ctrl_id, n.port_num, n.sensor_type)]
+                      return !!(r?.server_ts && (nowMs - new Date(r.server_ts).getTime()) < 30000)
+                    })
+                    const displayCount = countDisplayNodes(activeCtrlNodes)
                     return (
                       <div
                         key={ctrlId}
@@ -623,7 +623,7 @@ export default function App() {
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-slate-900 dark:text-white truncate">Controller {ctrlId}</p>
                             <p className="text-xs text-slate-500 dark:text-gray-400">
-                              {ctrlNodes.length} node{ctrlNodes.length !== 1 ? 's' : ''}
+                              {displayCount} node{displayCount !== 1 ? 's' : ''}
                             </p>
                           </div>
                           <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0 bg-green-500/10 text-green-700 dark:text-green-400">
@@ -652,7 +652,7 @@ export default function App() {
       )}
 
       {/* Controller detail */}
-      {selectedDevice && selectedCtrlId && (
+      {!devicesLoading && selectedDevice && selectedCtrlId && (
         <ControllerDetailView
           ctrlId={selectedCtrlId}
           deviceId={selectedDeviceId}

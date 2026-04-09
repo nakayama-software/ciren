@@ -13,8 +13,10 @@ const sensorReadingSchema = new mongoose.Schema({
   server_ts:   { type: Date, default: Date.now, index: true },
 }, { versionKey: false })
 
-// Compound index untuk query dashboard
+// Compound index untuk query dashboard dan history
 sensorReadingSchema.index({ device_id: 1, ctrl_id: 1, port_num: 1, server_ts: -1 })
+// Index dengan sensor_type untuk aggregation /data/latest (group by sensor_type)
+sensorReadingSchema.index({ device_id: 1, ctrl_id: 1, port_num: 1, sensor_type: 1, server_ts: -1 })
 
 // TTL index: hapus data otomatis setelah 30 hari
 sensorReadingSchema.index({ server_ts: 1 }, { expireAfterSeconds: 2592000 })

@@ -22,19 +22,32 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
   esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)event_data;
   switch (ev->event_id) {
     case MQTT_EVENT_CONNECTED:
-      // Hanya update connected state jika sedang dalam WiFi mode
-      if (strcmp(sys_state.conn_mode, "wifi") == 0) {
-        state_set_connected(true);
-      }
-      esp_mqtt_client_subscribe(mqtt_client, TOPIC_CONFIG, MQTT_QOS);
-      Serial.println("[MQTT] Connected");
+      // connected state sekarang ditentukan oleh heartbeat server, bukan MQTT broker connect
+      esp_mqtt_client_subscribe(mqtt_client, sys_state.topic_config, MQTT_QOS);
+      esp_mqtt_client_subscribe(mqtt_client, TOPIC_SERVER_HB, 0);
+      Serial.println("[MQTT] Connected — waiting for server heartbeat");
       break;
     case MQTT_EVENT_DISCONNECTED:
-      // Hanya clear connected state jika sedang dalam WiFi mode
       if (strcmp(sys_state.conn_mode, "wifi") == 0) {
         state_set_connected(false);
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        sys_state.server_hb_ms = 0;
+        xSemaphoreGive(state_mutex);
       }
       Serial.println("[MQTT] Disconnected");
+      break;
+    case MQTT_EVENT_DATA:
+      // Cek apakah ini heartbeat dari server
+      if (ev->topic_len > 0 &&
+          strncmp(ev->topic, TOPIC_SERVER_HB, ev->topic_len) == 0) {
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        sys_state.server_hb_ms = millis();
+        xSemaphoreGive(state_mutex);
+        if (strcmp(sys_state.conn_mode, "wifi") == 0) {
+          state_set_connected(true);
+        }
+        Serial.println("[MQTT] Server heartbeat received");
+      }
       break;
     default: break;
   }
@@ -58,13 +71,13 @@ void mqtt_init(const char* broker_host) {
   cfg.broker.address.port      = MQTT_PORT;
   cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
   cfg.session.keepalive         = MQTT_KEEPALIVE;
-  cfg.credentials.client_id     = DEVICE_ID;
+  cfg.credentials.client_id     = sys_state.device_id;
 #else
   cfg.host      = broker_host;
   cfg.port      = MQTT_PORT;
   cfg.transport = MQTT_TRANSPORT_OVER_TCP;
   cfg.keepalive = MQTT_KEEPALIVE;
-  cfg.client_id = DEVICE_ID;
+  cfg.client_id = sys_state.device_id;
 #endif
 
   mqtt_client = esp_mqtt_client_init(&cfg);
@@ -86,7 +99,15 @@ void task_publish(void* param) {
   for (;;) {
     // Only process MQTT when in WiFi mode
     if (strcmp(sys_state.conn_mode, "wifi") == 0) {
-      if (xQueueReceive(publish_queue, &item, portMAX_DELAY) == pdTRUE) {
+      // Cek heartbeat timeout — anggap server offline jika tidak ada HB > 60s
+      xSemaphoreTake(state_mutex, portMAX_DELAY);
+      uint32_t hb_ms = sys_state.server_hb_ms;
+      xSemaphoreGive(state_mutex);
+      if (hb_ms > 0 && (millis() - hb_ms) > SERVER_HB_TIMEOUT_MS) {
+        state_set_connected(false);
+      }
+
+      if (xQueueReceive(publish_queue, &item, pdMS_TO_TICKS(5000)) == pdTRUE) {
         if (!state_is_connected()) {
           // Kembalikan ke depan queue, tunggu reconnect
           xQueueSendToFront(publish_queue, &item, 0);

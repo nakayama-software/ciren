@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useIsDark } from '../utils/useIsDark'
 import { X, ExternalLink, Activity } from 'lucide-react'
 import {
   Chart as ChartJS,
@@ -69,19 +70,25 @@ function fmtTime(r) {
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
-const BASE_OPTS = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: 0 },
-  plugins: { legend: { display: false }, tooltip: { enabled: true, mode: 'index', intersect: false } },
-  scales: {
-    x: { ticks: { maxTicksLimit: 4, maxRotation: 0, font: { size: 9 }, color: 'rgba(128,128,128,0.8)' }, grid: { display: false } },
-    y: { ticks: { maxTicksLimit: 4, font: { size: 9 }, color: 'rgba(128,128,128,0.8)' }, grid: { color: 'rgba(128,128,128,0.12)' } },
-  },
+function buildBaseOpts(isDark) {
+  const tick = isDark ? 'rgba(148,163,184,0.8)' : 'rgba(71,85,105,0.8)'
+  const grid = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 0 },
+    plugins: { legend: { display: false }, tooltip: { enabled: true, mode: 'index', intersect: false } },
+    scales: {
+      x: { ticks: { maxTicksLimit: 4, maxRotation: 0, font: { size: 9 }, color: tick }, grid: { display: false } },
+      y: { ticks: { maxTicksLimit: 4, font: { size: 9 }, color: tick }, grid: { color: grid } },
+    },
+  }
 }
 
 // ─── Line Panel ───────────────────────────────────────────────────────────────
 function LinePanel({ readings, sensorType }) {
+  const isDark = useIsDark()
+  const BASE_OPTS = useMemo(() => buildBaseOpts(isDark), [isDark])
   const info = getSensorInfo(Number(sensorType))
   const { chartData, liveDisplay } = useMemo(() => {
     const labels = readings.map(fmtTime)
@@ -112,28 +119,29 @@ function LinePanel({ readings, sensorType }) {
   )
 }
 
-// ─── HumTemp Panel ────────────────────────────────────────────────────────────
-const HUM_TEMP_OPTS = {
-  ...BASE_OPTS,
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      enabled: true,
-      mode: 'index',
-      intersect: false,
-      callbacks: {
-        label: (ctx) => ` ${ctx.parsed.y?.toFixed(1)} ${ctx.datasetIndex === 0 ? '°C' : '%RH'}`,
+function buildHumTempOpts(isDark) {
+  const base = buildBaseOpts(isDark)
+  const grid = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+  return {
+    ...base,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        enabled: true, mode: 'index', intersect: false,
+        callbacks: { label: (ctx) => ` ${ctx.parsed.y?.toFixed(1)} ${ctx.datasetIndex === 0 ? '°C' : '%RH'}` },
       },
     },
-  },
-  scales: {
-    x: BASE_OPTS.scales.x,
-    yTemp: { position: 'left',  ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(249,115,22,0.8)' }, grid: { color: 'rgba(128,128,128,0.12)' } },
-    yHum:  { position: 'right', ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(99,102,241,0.8)'  }, grid: { display: false } },
-  },
+    scales: {
+      x: base.scales.x,
+      yTemp: { position: 'left',  ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(249,115,22,0.8)' }, grid: { color: grid } },
+      yHum:  { position: 'right', ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(99,102,241,0.8)' }, grid: { display: false } },
+    },
+  }
 }
 
 function HumTempPanel({ deviceId, ctrlId, portNum, open, wsRef, latestData }) {
+  const isDark = useIsDark()
+  const HUM_TEMP_OPTS = useMemo(() => buildHumTempOpts(isDark), [isDark])
   const tempReadings = useSensorFeed(deviceId, ctrlId, portNum, 0x01, open, wsRef)
   const humReadings  = useSensorFeed(deviceId, ctrlId, portNum, 0x02, open, wsRef)
 

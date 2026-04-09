@@ -2,6 +2,11 @@
 #include <Arduino.h>
 
 typedef struct {
+  char     device_id[32];    // runtime device ID — generate dari MAC, bisa di-override via portal
+  char     topic_data[72];   // "ciren/data/{device_id}"
+  char     topic_status[72];
+  char     topic_hello[72];
+  char     topic_config[72];
   bool     is_connected;
   char     conn_mode[8];
   float    gps_lat;
@@ -24,11 +29,24 @@ typedef struct {
   uint16_t peer_count;
   bool     last_post_ok;
   int      last_status_code;
+  char     mqtt_host[64];
+  uint32_t server_hb_ms;   // millis() of last received server heartbeat (0 = never)
+  char     sim_apn[64];
+  char     sim_apn_user[32];
+  char     sim_apn_pass[32];
 } SystemState;
 
 // Deklarasi extern — definisi ada di main_module.ino
 extern SystemState       sys_state;
 extern SemaphoreHandle_t state_mutex;
+
+// Build topic strings dari device_id yang sudah diset — panggil setelah device_id di-set
+void state_build_topics() {
+  snprintf(sys_state.topic_data,   sizeof(sys_state.topic_data),   "ciren/data/%s",   sys_state.device_id);
+  snprintf(sys_state.topic_status, sizeof(sys_state.topic_status), "ciren/status/%s", sys_state.device_id);
+  snprintf(sys_state.topic_hello,  sizeof(sys_state.topic_hello),  "ciren/hello/%s",  sys_state.device_id);
+  snprintf(sys_state.topic_config, sizeof(sys_state.topic_config), "ciren/config/%s", sys_state.device_id);
+}
 
 void state_init() {
   memset(&sys_state, 0, sizeof(sys_state));

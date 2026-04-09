@@ -100,6 +100,13 @@ export function getDeviceData(id, ctrl_id, port_num, limit = 50) {
   return apiFetch(url)
 }
 
+// Public — tidak butuh token, dipakai login page
+export async function getPublicStats() {
+  const res = await fetch(`${BASE}/api/stats`)
+  if (!res.ok) throw new Error('stats unavailable')
+  return res.json()
+}
+
 export function getHistory(id, ctrl_id, port_num, hours = 24, sensor_type) {
   let url = `/api/devices/${id}/data/history?ctrl_id=${ctrl_id}&port_num=${port_num}&hours=${hours}`
   if (sensor_type !== undefined && sensor_type !== null) {

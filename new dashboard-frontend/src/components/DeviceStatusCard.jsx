@@ -1,4 +1,4 @@
-import { Wifi, Signal, Battery, MapPin, Cpu, Clock, Globe } from 'lucide-react'
+import { Wifi, Signal, MapPin, Cpu, Clock } from 'lucide-react'
 
 function timeAgo(ts, now) {
   if (!ts) return 'Never'
@@ -72,24 +72,6 @@ export default function DeviceStatusCard({ device, now }) {
         <InfoRow icon={Signal} label="RSSI">
           {device.rssi != null ? (
             <span className="font-mono text-xs">{device.rssi} dBm</span>
-          ) : (
-            <span className="text-slate-400 dark:text-gray-500">—</span>
-          )}
-        </InfoRow>
-
-        <InfoRow icon={Battery} label="Battery">
-          {device.batt_pct != null ? (
-            <div className="flex items-center gap-2">
-              <div className="w-20 h-1.5 bg-slate-200 dark:bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${
-                    device.batt_pct > 50 ? 'bg-green-500' : device.batt_pct > 20 ? 'bg-yellow-400' : 'bg-red-500'
-                  }`}
-                  style={{ width: `${Math.min(100, Math.max(0, device.batt_pct))}%` }}
-                />
-              </div>
-              <span className="text-xs">{device.batt_pct}%</span>
-            </div>
           ) : (
             <span className="text-slate-400 dark:text-gray-500">—</span>
           )}

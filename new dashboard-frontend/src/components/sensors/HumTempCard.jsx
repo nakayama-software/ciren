@@ -12,6 +12,7 @@ import {
 import { Line } from 'react-chartjs-2'
 import { getReadingKey, formatValue } from '../../utils/sensors'
 import { getHistory } from '../../lib/api'
+import { useIsDark } from '../../utils/useIsDark'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler)
 
@@ -34,43 +35,49 @@ function fmtTime(ts) {
   return `${hh}:${mm}`
 }
 
-const CHART_OPTS = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: 200 },
-  interaction: { mode: 'index', intersect: false },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      enabled: true,
-      callbacks: {
-        label: (ctx) => {
-          const unit = ctx.datasetIndex === 0 ? '°C' : '%RH'
-          return ` ${ctx.parsed.y?.toFixed(1)} ${unit}`
+function buildChartOpts(isDark) {
+  const tickColor  = isDark ? 'rgba(148,163,184,0.7)' : 'rgba(71,85,105,0.7)'
+  const gridColor  = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 200 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        enabled: true,
+        callbacks: {
+          label: (ctx) => {
+            const unit = ctx.datasetIndex === 0 ? '°C' : '%RH'
+            return ` ${ctx.parsed.y?.toFixed(1)} ${unit}`
+          },
         },
       },
     },
-  },
-  scales: {
-    x: {
-      ticks: { maxTicksLimit: 4, maxRotation: 0, font: { size: 9 }, color: 'rgba(128,128,128,0.7)' },
-      grid: { display: false },
+    scales: {
+      x: {
+        ticks: { maxTicksLimit: 4, maxRotation: 0, font: { size: 9 }, color: tickColor },
+        grid: { display: false },
+      },
+      yTemp: {
+        position: 'left',
+        ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(249,115,22,0.8)' },
+        grid: { color: gridColor },
+      },
+      yHum: {
+        position: 'right',
+        ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(99,102,241,0.8)' },
+        grid: { display: false },
+      },
     },
-    yTemp: {
-      position: 'left',
-      ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(249,115,22,0.8)' },
-      grid: { color: 'rgba(128,128,128,0.1)' },
-    },
-    yHum: {
-      position: 'right',
-      ticks: { maxTicksLimit: 3, font: { size: 9 }, color: 'rgba(99,102,241,0.8)' },
-      grid: { display: false },
-    },
-  },
+  }
 }
 
 // Gabungan temperature (0x01) + humidity (0x02) dari port yang sama
 export default function HumTempCard({ deviceId, ctrlId, portNum, latestData, status, now, onChartClick }) {
+  const isDark = useIsDark()
+  const chartOpts = useMemo(() => buildChartOpts(isDark), [isDark])
   const tempKey = getReadingKey(ctrlId, portNum, 0x01)
   const humKey  = getReadingKey(ctrlId, portNum, 0x02)
   const tempR   = latestData?.[tempKey] || null
@@ -269,7 +276,7 @@ export default function HumTempCard({ deviceId, ctrlId, portNum, latestData, sta
               </div>
             </div>
             <div className="h-[80px]">
-              <Line data={chartData} options={CHART_OPTS} />
+              <Line data={chartData} options={chartOpts} />
             </div>
           </>
         ) : (

@@ -166,6 +166,12 @@ static String build_scan_html()
   return h;
 }
 
+static String _portal_mqtt_host;
+static String _portal_sim_apn;
+static String _portal_sim_user;
+static String _portal_sim_pass;
+static String _portal_device_id;
+
 static String build_portal_page(const String &msg = "", bool ok = false)
 {
   String h;
@@ -268,6 +274,29 @@ static String build_portal_page(const String &msg = "", bool ok = false)
   // Password (shown as plain text for easy entry on mobile)
   h += "<div class='field'><label>Password</label>"
        "<input type='text' name='pass' placeholder='Enter WiFi password' autocomplete='off'></div>";
+
+  // Advanced: Device ID + MQTT + SIM APN
+  h += "<div style='margin:20px 0 16px;border-top:1px solid #334155;padding-top:16px'>"
+       "<p class='section-label'>Advanced</p>"
+       "<div class='field'><label>Device ID <span style='color:#475569'>(kosongkan untuk pakai auto-generated)</span></label>"
+       "<input type='text' name='device_id' value='" + html_esc(_portal_device_id) + "' "
+       "placeholder='e.g. MM-A1B2C3' autocomplete='off' maxlength='31'></div>"
+       "<div class='field'><label>MQTT Broker IP</label>"
+       "<input type='text' name='mqtt_host' value='" + html_esc(_portal_mqtt_host) + "' "
+       "placeholder='e.g. 118.22.31.254' autocomplete='off'></div>"
+       "</div>"
+       "<div style='margin:0 0 16px;border-top:1px solid #334155;padding-top:16px'>"
+       "<p class='section-label'>SIM Card APN</p>"
+       "<div class='field'><label>APN</label>"
+       "<input type='text' name='sim_apn' value='" + html_esc(_portal_sim_apn) + "' "
+       "placeholder='e.g. internet' autocomplete='off'></div>"
+       "<div class='field'><label>APN Username <span style='color:#475569'>(kosongkan jika tidak ada)</span></label>"
+       "<input type='text' name='sim_user' value='" + html_esc(_portal_sim_user) + "' "
+       "placeholder='optional' autocomplete='off'></div>"
+       "<div class='field'><label>APN Password <span style='color:#475569'>(kosongkan jika tidak ada)</span></label>"
+       "<input type='text' name='sim_pass' value='" + html_esc(_portal_sim_pass) + "' "
+       "placeholder='optional' autocomplete='off'></div>"
+       "</div>";
 
   // Buttons
   h += "<div class='btn-row'>"
@@ -392,60 +421,58 @@ static void _draw_gateway()
 {
   int y = CONT_Y;
 
-  // ── Connection row ──
+  // ── Device MAC ──
+  tft_section(PAD, y, "DEVICE");
+  y += 22;
+
+  tft.setTextSize(1);
+  tft.setTextColor(C_WHITE, C_BG);
+  tft.setCursor(PAD, y);
+  tft.print("MAC: ");
+  tft.setTextColor(C_ACCENT, C_BG);
+  tft.print(WiFi.macAddress().c_str());
+  y += 18;
+
+  // ── Connection mode + server status ──
   tft_section(PAD, y, "CONNECTION");
   y += 22;
 
   bool wifi_mode = (strncmp(sys_state.conn_mode, "wifi", 4) == 0);
-  bool conn = sys_state.is_connected;
-  tft_badge(PAD, y, wifi_mode ? "WiFi" : "SIM",
-            wifi_mode ? 0x000F : 0x6000, C_WHITE, 2);
-  tft_badge(PAD + 80, y, conn ? "CONNECTED" : "OFFLINE",
-            conn ? 0x0320 : 0x6000, C_WHITE, 2);
+  bool conn      = sys_state.is_connected;
 
-  // ── RSSI / Signal ──
-  y += 36;
-  tft_section(PAD, y, "SIGNAL");
+  tft_badge(PAD,       y, wifi_mode ? "WiFi" : "SIM",
+            wifi_mode  ? 0x000F : 0x6000, C_WHITE, 2);
+  tft_badge(PAD + 90,  y, conn ? "SERVER OK" : "NO SERVER",
+            conn       ? 0x0320 : 0x6000, C_WHITE, 2);
+  y += 28;
+
+  // ── Sensor controllers ──
+  tft_section(PAD, y, "CONTROLLERS");
   y += 22;
 
-  int      rssi;
-  float    rssi_pct;
-  uint16_t rssi_clr;
-
-  if (wifi_mode) {
-    rssi     = (int)sys_state.rssi;
-    rssi_pct = (rssi == 0) ? 0.0f : constrain((rssi + 90.0f) / 60.0f, 0.0f, 1.0f);
-    rssi_clr = (rssi == 0) ? C_GRAY : (rssi < -75) ? C_YELLOW : C_GREEN;
-  } else {
-    int sig  = sys_state.sim_signal;
-    rssi     = (sig > 0 && sig < 99) ? (-113 + sig * 2) : 0;
-    rssi_pct = constrain(sig / 31.0f, 0.0f, 1.0f);
-    rssi_clr = (sig == 0 || sig == 99) ? C_GRAY : (sig < 8) ? C_RED : (sig < 16) ? C_YELLOW : C_GREEN;
-  }
-
-  tft_signal_bars(PAD, y, rssi_pct, rssi_clr);
-
-  char rbuf[14];
-  if (rssi != 0) snprintf(rbuf, sizeof(rbuf), "%d dBm", rssi);
-  else           snprintf(rbuf, sizeof(rbuf), "--");
+  uint16_t peers = sys_state.peer_count;
+  char pbuf[4];  snprintf(pbuf, sizeof(pbuf), "%d", peers);
   tft.setTextSize(2);
-  tft.setTextColor(rssi_clr, C_BG);
-  tft.setCursor(58, y + 5);
-  tft.print(rbuf);
-
-  y += 30;
-  tft_hbar(PAD, y, 240, 12, rssi_pct, rssi_clr);
-
-  // ── Buffer ──
-  y += 22;
-  tft_section(PAD, y, "BUFFER");
+  tft.setTextColor(peers > 0 ? C_ACCENT : C_GRAY, C_BG);
+  tft.setCursor(PAD, y);
+  tft.print(pbuf);
+  tft.setTextSize(1);
+  tft.setTextColor(C_WHITE, C_BG);
+  tft.setCursor(PAD + (peers >= 10 ? 28 : 16), y + 5);
+  tft.print(peers == 1 ? "controller" : "controllers");
+  tft.print(" connected");
   y += 22;
 
-  float buf_pct = rb_usage();
+  // ── Data buffer ──
+  // Ring buffer (128 slots) antrian sensor data antara ESP-NOW dan MQTT publish.
+  // 0% = normal. >50% = jaringan lambat. >80% = data lama mulai tertimpa.
+  tft_section(PAD, y, "DATA BUFFER");
+  y += 22;
+
+  float    buf_pct = rb_usage();
   uint16_t buf_clr = (buf_pct > 0.8f) ? C_RED : (buf_pct > 0.5f) ? C_YELLOW : C_ACCENT;
   tft_hbar(PAD, y, 200, 12, buf_pct, buf_clr);
-  char bbuf[8];
-  snprintf(bbuf, sizeof(bbuf), "%3.0f%%", buf_pct * 100.0f);
+  char bbuf[8];  snprintf(bbuf, sizeof(bbuf), "%3.0f%%", buf_pct * 100.0f);
   tft.setTextSize(2);
   tft.setTextColor(C_WHITE, C_BG);
   tft.setCursor(218, y - 2);
@@ -838,7 +865,7 @@ static void portal_loading_anim()
   for (int p = 40; p <= 75; p += 3) { frame(p, "Scanning WiFi...     "); delay(30); }
 }
 
-static void portal_ready_anim(const String &ap)
+static void portal_ready_anim(const String &ap, const char* pass)
 {
   auto frame = [](int pct) {
     tft_hbar(PAD, 104, TFT_WIDTH - PAD * 2, 16, pct / 100.0f, C_GREEN);
@@ -863,7 +890,7 @@ static void portal_ready_anim(const String &ap)
   tft.setTextSize(1);
   tft.setTextColor(C_GRAY, C_BG);
   tft.setCursor(PAD, 174);
-  tft.print("Password: " PORTAL_PASS "    then open 192.168.4.1");
+  tft.printf("Pass: %s  then 192.168.4.1", pass);
   delay(800);
 }
 
@@ -873,6 +900,13 @@ static Preferences *_prefs_ptr = nullptr;
 static void portal_start(Preferences *prefs)
 {
   _prefs_ptr = prefs;
+  prefs->begin("ciren", true);
+  _portal_mqtt_host = prefs->getString("mqtt_host", "118.22.31.254");
+  _portal_sim_apn   = prefs->getString("sim_apn",  "");
+  _portal_sim_user  = prefs->getString("sim_user", "");
+  _portal_sim_pass  = prefs->getString("sim_pass", "");
+  _portal_device_id = String(sys_state.device_id);  // sudah di-set sebelum portal_start dipanggil
+  prefs->end();
   portal_loading_anim();
 
   uint8_t mac[6];
@@ -881,12 +915,18 @@ static void portal_start(Preferences *prefs)
   snprintf(suffix, sizeof(suffix), "%02X%02X", mac[4], mac[5]);
   portal_ssid = String("CIREN-") + suffix;
 
+  // Generate portal password unik dari 4 byte terakhir MAC: "xx-AABBCCDD"
+  // Tiap unit punya password berbeda — tidak bisa ditebak dari SSID
+  char portal_pass_buf[12];
+  snprintf(portal_pass_buf, sizeof(portal_pass_buf), "ci-%02X%02X%02X%02X",
+           mac[2], mac[3], mac[4], mac[5]);
+
   WiFi.disconnect();
   delay(50);
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
                     IPAddress(255, 255, 255, 0));
-  WiFi.softAP(portal_ssid.c_str(), PORTAL_PASS, 1, 0, 4);
+  WiFi.softAP(portal_ssid.c_str(), portal_pass_buf, 1, 0, 4);
   portal_scan_html = build_scan_html();
 
   portal_server.on("/", HTTP_GET, []() {
@@ -898,10 +938,16 @@ static void portal_start(Preferences *prefs)
     portal_server.send(302, "text/plain", "");
   });
   portal_server.on("/save", HTTP_POST, []() {
-    String ssid   = portal_server.arg("ssid");
-    String ssid_m = portal_server.arg("ssid_m");
-    String pass   = portal_server.arg("pass");
-    ssid.trim(); ssid_m.trim(); pass.trim();
+    String ssid      = portal_server.arg("ssid");
+    String ssid_m    = portal_server.arg("ssid_m");
+    String pass      = portal_server.arg("pass");
+    String mqtt_host = portal_server.arg("mqtt_host");
+    String sim_apn   = portal_server.arg("sim_apn");
+    String sim_user  = portal_server.arg("sim_user");
+    String sim_pass  = portal_server.arg("sim_pass");
+    String device_id = portal_server.arg("device_id");
+    ssid.trim(); ssid_m.trim(); pass.trim(); mqtt_host.trim();
+    sim_apn.trim(); sim_user.trim(); sim_pass.trim(); device_id.trim();
     if (ssid.length() == 0) ssid = ssid_m;
     if (ssid.length() == 0) {
       portal_server.send(400, "text/html", build_portal_page("SSID empty.", false));
@@ -911,6 +957,28 @@ static void portal_start(Preferences *prefs)
       _prefs_ptr->begin("ciren", false);
       _prefs_ptr->putString("ssid", ssid);
       _prefs_ptr->putString("pass", pass);
+      if (mqtt_host.length() > 0) {
+        _prefs_ptr->putString("mqtt_host", mqtt_host);
+        _portal_mqtt_host = mqtt_host;
+      }
+      // Simpan APN — izinkan string kosong (hapus APN lama)
+      _prefs_ptr->putString("sim_apn",  sim_apn);
+      _prefs_ptr->putString("sim_user", sim_user);
+      _prefs_ptr->putString("sim_pass", sim_pass);
+      _portal_sim_apn  = sim_apn;
+      _portal_sim_user = sim_user;
+      _portal_sim_pass = sim_pass;
+      // Update sys_state langsung agar berlaku saat reboot
+      strncpy(sys_state.sim_apn,      sim_apn.c_str(),  sizeof(sys_state.sim_apn));
+      strncpy(sys_state.sim_apn_user, sim_user.c_str(), sizeof(sys_state.sim_apn_user));
+      strncpy(sys_state.sim_apn_pass, sim_pass.c_str(), sizeof(sys_state.sim_apn_pass));
+      // Device ID — hanya update jika diisi, jika kosong pertahankan yang ada
+      if (device_id.length() > 0) {
+        _prefs_ptr->putString("device_id", device_id);
+        _portal_device_id = device_id;
+        strncpy(sys_state.device_id, device_id.c_str(), sizeof(sys_state.device_id) - 1);
+        state_build_topics();  // rebuild topic strings
+      }
       _prefs_ptr->end();
     }
     portal_server.send(200, "text/html",
@@ -924,11 +992,11 @@ static void portal_start(Preferences *prefs)
   });
   portal_server.begin();
 
-  portal_ready_anim(portal_ssid);
+  portal_ready_anim(portal_ssid, portal_pass_buf);
   portal_active = true;
   page_dirty    = true;   // force page redraw after animation
 
-  Serial.printf("[PORTAL] AP=%s Pass=%s\n", portal_ssid.c_str(), PORTAL_PASS);
+  Serial.printf("[PORTAL] AP=%s Pass=%s\n", portal_ssid.c_str(), portal_pass_buf);
 }
 
 static void portal_tick()

@@ -1,5 +1,6 @@
 #pragma once
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include "ciren_config_014424.h"
 #include "system_state_014424.h"
 #include "task_publish_014424.h"
@@ -23,6 +24,8 @@ static bool wifi_connect() {
     if (millis() - start > WIFI_TIMEOUT_MS) return false;
     vTaskDelay(pdMS_TO_TICKS(200));
   }
+  // Disable WiFi power save — mencegah dropout ESP-NOW saat WiFi aktif
+  esp_wifi_set_ps(WIFI_PS_NONE);
   xSemaphoreTake(state_mutex, portMAX_DELAY);
   sys_state.rssi = WiFi.RSSI();
   xSemaphoreGive(state_mutex);

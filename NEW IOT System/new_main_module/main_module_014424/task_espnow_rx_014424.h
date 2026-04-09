@@ -27,6 +27,38 @@ typedef struct {
 
 static QueueHandle_t espnow_log_queue = NULL;
 
+// ── Active controller tracking ───────────────────────────────────────────────
+// Tracks last millis() when each ctrl_id sent any packet.
+// Updated from callback (safe: uint32 writes are atomic on Xtensa).
+// Read from task on same core — no true parallelism, preemption-safe.
+static uint8_t  _ctrl_ids[MAX_CTRL_IDS];
+static uint32_t _ctrl_seen_ms[MAX_CTRL_IDS];
+static uint8_t  _ctrl_id_count = 0;
+
+static void _ctrl_touch(uint8_t ctrl_id) {
+  uint32_t now_ms = (uint32_t)millis();
+  for (uint8_t i = 0; i < _ctrl_id_count; i++) {
+    if (_ctrl_ids[i] == ctrl_id) {
+      _ctrl_seen_ms[i] = now_ms;   // atomic uint32 write
+      return;
+    }
+  }
+  if (_ctrl_id_count < MAX_CTRL_IDS) {
+    _ctrl_ids[_ctrl_id_count]     = ctrl_id;  // write entry before incrementing count
+    _ctrl_seen_ms[_ctrl_id_count] = now_ms;
+    _ctrl_id_count++;
+  }
+}
+
+static uint16_t _ctrl_count_active() {
+  uint32_t now_ms = (uint32_t)millis();
+  uint16_t n = 0;
+  for (uint8_t i = 0; i < _ctrl_id_count; i++) {
+    if ((now_ms - _ctrl_seen_ms[i]) < (uint32_t)CTRL_TIMEOUT_MS) n++;
+  }
+  return n;
+}
+
 // ── Deferred HELLO_ACK ───────────────────────────────────────────────────────
 // esp_now_send() di dalam callback memakan ~512B stack WiFi task.
 // Defer ke task_espnow_rx menggunakan queue kecil.
@@ -56,6 +88,9 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
 
   SensorPacket pkt;
   memcpy(&pkt, data, sizeof(pkt));
+
+  // Catat waktu terakhir paket diterima dari ctrl_id ini (semua jenis paket)
+  _ctrl_touch(pkt.ctrl_id);
 
   // ── HELLO ──────────────────────────────────────────────────────────────────
   if (pkt.ftype == FTYPE_HELLO) {
@@ -95,11 +130,6 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
       esp_now_mod_peer(&peer);
     }
 
-    // Update peer_count tanpa semaphore (atomic read/write uint16 di Xtensa = safe)
-    esp_now_peer_num_t peer_num = {};
-    esp_now_get_peer_num(&peer_num);
-    sys_state.peer_count = peer_num.total_num;
-
     // Defer esp_now_send (HELLO_ACK) ke task — tidak boleh di callback
     if (espnow_ack_queue) {
       PendingAck ack = {};
@@ -114,7 +144,7 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
       log.type    = EspNowLog::LOG_HELLO_ACK;
       log.ctrl_id = pkt.ctrl_id;
       log.ch      = ch;
-      log.peers   = (uint8_t)peer_num.total_num;
+      log.peers   = 0;  // peer_count sekarang diupdate dari _ctrl_count_active()
       xQueueSendFromISR(espnow_log_queue, &log, NULL);
     }
 
@@ -159,6 +189,8 @@ void task_espnow_rx(void* param) {
   HelloAck ack_pkt;
   ack_pkt.type = 0xAC;
 
+  uint32_t last_peer_check_ms = 0;
+
   for (;;) {
     // ── Kirim HELLO_ACK yang pending ─────────────────────────────────────────
     PendingAck pending;
@@ -172,8 +204,7 @@ void task_espnow_rx(void* param) {
     while (xQueueReceive(espnow_log_queue, &log, 0) == pdTRUE) {
       switch (log.type) {
         case EspNowLog::LOG_HELLO_ACK:
-          Serial.printf("[HELLO_ACK] ctrl_id=%d ch=%d peers=%d\n",
-                        log.ctrl_id, log.ch, log.peers);
+          Serial.printf("[HELLO_ACK] ctrl_id=%d ch=%d\n", log.ctrl_id, log.ch);
           break;
         case EspNowLog::LOG_RX:
           Serial.printf("[RX] ctrl=%d port=%d stype=0x%02X val=%.4f ftype=0x%02X\n",
@@ -186,6 +217,18 @@ void task_espnow_rx(void* param) {
           Serial.println("[ESPNOW] add_peer failed");
           break;
         default: break;
+      }
+    }
+
+    // ── Update peer_count setiap 2s berdasarkan timeout ─────────────────────
+    // Lebih akurat dari esp_now_get_peer_num() yang tidak berkurang saat peer mati
+    uint32_t now_ms = (uint32_t)millis();
+    if (now_ms - last_peer_check_ms >= 2000) {
+      last_peer_check_ms = now_ms;
+      uint16_t active = _ctrl_count_active();
+      if (sys_state.peer_count != active) {
+        sys_state.peer_count = active;
+        Serial.printf("[ESPNOW] Active controllers: %d\n", active);
       }
     }
 

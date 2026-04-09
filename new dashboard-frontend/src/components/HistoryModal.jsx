@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
+import { useIsDark } from '../utils/useIsDark'
 import {
   LineChart,
   Line,
@@ -32,8 +33,11 @@ export default function HistoryModal({ deviceId, ctrlId, portNum, sensorType, on
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const isDark = useIsDark()
 
   const info = getSensorInfo(sensorType)
+  const tickColor  = isDark ? '#94a3b8' : '#64748b'
+  const axisStroke = isDark ? '#334155' : '#e2e8f0'
   const colors = info.colors
 
   useEffect(() => {
@@ -109,13 +113,13 @@ export default function HistoryModal({ deviceId, ctrlId, portNum, sensorType, on
                 <XAxis
                   dataKey="server_ts"
                   tickFormatter={formatTs}
-                  tick={{ fill: '#94a3b8', fontSize: 10 }}
-                  axisLine={{ stroke: '#e2e8f0' }}
+                  tick={{ fill: tickColor, fontSize: 10 }}
+                  axisLine={{ stroke: axisStroke }}
                   tickLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
-                  tick={{ fill: '#94a3b8', fontSize: 10 }}
+                  tick={{ fill: tickColor, fontSize: 10 }}
                   axisLine={false}
                   tickLine={false}
                   width={48}

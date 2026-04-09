@@ -9,6 +9,8 @@ const { initMQTT }  = require('./mqtt/handler')
 const apiRoutes     = require('./api/routes')
 const authRoutes    = require('./api/auth')
 const userRoutes    = require('./api/userRoutes')
+const requireAuth   = require('./middleware/auth')
+const handleStats   = require('./api/stats')
 
 
 const app  = express()
@@ -21,8 +23,9 @@ app.use(express.json())
 
 // ─── API Routes ───────────────────────────────────
 app.use('/api/auth', authRoutes)
-app.use('/api/user', userRoutes)
-app.use('/api', apiRoutes)
+app.get('/api/stats', handleStats)           // public — login page stats
+app.use('/api/user', requireAuth, userRoutes)
+app.use('/api', requireAuth, apiRoutes)
 
 // ─── MongoDB ──────────────────────────────────────
 async function connectMongo() {

@@ -27,29 +27,35 @@ struct AppConfig
   char mqtt_host[64];
   char conn_mode[8];
   bool sim_enabled;
+  char sim_apn[64];
+  char sim_apn_user[32];
+  char sim_apn_pass[32];
+  char device_id[32];
 };
 AppConfig cfg;
 
 void load_config()
 {
   prefs.begin("ciren", true);
-  strncpy(cfg.wifi_ssid, prefs.getString("ssid", "").c_str(), sizeof(cfg.wifi_ssid));
-  strncpy(cfg.wifi_pass, prefs.getString("pass", "").c_str(), sizeof(cfg.wifi_pass));
-  strncpy(cfg.mqtt_host, prefs.getString("mqtt_host", "192.168.103.241").c_str(), sizeof(cfg.mqtt_host));
-  strncpy(cfg.conn_mode, prefs.getString("conn_mode", "wifi").c_str(), sizeof(cfg.conn_mode));
+  strncpy(cfg.wifi_ssid,    prefs.getString("ssid", "").c_str(),              sizeof(cfg.wifi_ssid));
+  strncpy(cfg.wifi_pass,    prefs.getString("pass", "").c_str(),              sizeof(cfg.wifi_pass));
+  strncpy(cfg.mqtt_host,    prefs.getString("mqtt_host", "118.22.31.254").c_str(), sizeof(cfg.mqtt_host));
+  strncpy(cfg.conn_mode,    prefs.getString("conn_mode", "wifi").c_str(),     sizeof(cfg.conn_mode));
   cfg.sim_enabled = prefs.getBool("sim_en", true);
+  strncpy(cfg.sim_apn,      prefs.getString("sim_apn",  "").c_str(),          sizeof(cfg.sim_apn));
+  strncpy(cfg.sim_apn_user, prefs.getString("sim_user", "").c_str(),          sizeof(cfg.sim_apn_user));
+  strncpy(cfg.sim_apn_pass, prefs.getString("sim_pass", "").c_str(),          sizeof(cfg.sim_apn_pass));
+  strncpy(cfg.device_id,    prefs.getString("device_id", "").c_str(),         sizeof(cfg.device_id));
   prefs.end();
 }
 
 void save_config_defaults()
 {
   prefs.begin("ciren", false);
-  if (!prefs.isKey("mqtt_host"))
-  {
-    prefs.putString("mqtt_host", "192.168.103.241");
-    prefs.putString("conn_mode", "wifi");
-    prefs.putBool("sim_en", true);
-  }
+  // Always write mqtt_host so firmware update can change the default
+  prefs.putString("mqtt_host", "118.22.31.254");
+  if (!prefs.isKey("conn_mode")) prefs.putString("conn_mode", "wifi");
+  if (!prefs.isKey("sim_en"))    prefs.putBool("sim_en", true);
   prefs.end();
 }
 
@@ -66,16 +72,32 @@ void setup()
 
   btn_oled_init();
 
-  // Force update mqtt_host — hapus 5 baris ini setelah upload pertama
-  prefs.begin("ciren", false);
-  prefs.putString("mqtt_host", "192.168.103.241");
-  prefs.end();
-
   save_config_defaults();
   load_config();
 
-  strncpy(sys_state.conn_mode, cfg.conn_mode, sizeof(sys_state.conn_mode));
+  strncpy(sys_state.conn_mode,    cfg.conn_mode,    sizeof(sys_state.conn_mode));
+  strncpy(sys_state.mqtt_host,    cfg.mqtt_host,    sizeof(sys_state.mqtt_host));
   sys_state.sim_enabled = cfg.sim_enabled;
+  strncpy(sys_state.sim_apn,      cfg.sim_apn,      sizeof(sys_state.sim_apn));
+  strncpy(sys_state.sim_apn_user, cfg.sim_apn_user, sizeof(sys_state.sim_apn_user));
+  strncpy(sys_state.sim_apn_pass, cfg.sim_apn_pass, sizeof(sys_state.sim_apn_pass));
+
+  // ── Device ID: load dari Preferences, atau generate dari MAC suffix ──────────
+  if (strlen(cfg.device_id) > 0) {
+    strncpy(sys_state.device_id, cfg.device_id, sizeof(sys_state.device_id));
+  } else {
+    // First boot — generate dari 3 byte terakhir MAC: "MM-AABBCC"
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(sys_state.device_id, sizeof(sys_state.device_id),
+             "%s-%02X%02X%02X", DEVICE_ID_PREFIX, mac[3], mac[4], mac[5]);
+    // Simpan ke Preferences agar konsisten di reboot berikutnya
+    prefs.begin("ciren", false);
+    prefs.putString("device_id", sys_state.device_id);
+    prefs.end();
+    Serial.printf("[SETUP] Generated Device ID: %s\n", sys_state.device_id);
+  }
+  state_build_topics();  // build topic strings dari device_id
 
   Serial.printf("CIREN Main Module %s\n", FW_VERSION);
   Serial.printf("Device   : %s\n", DEVICE_ID);

@@ -79,21 +79,21 @@ HardwareSerial U1(1);  // Port 2
 SoftwareSerial U3, U4, U5, U6, U7, U8;
 
 // ─── Pin RX mapping ───────────────────────────────
-const int RX_P1 = 16;
-const int RX_P2 = 25;
-const int RX_P3 = 4;
-const int RX_P4 = 27;
-const int RX_P5 = 33;
-const int RX_P6 = 34;
-const int RX_P7 = 35;
-const int RX_P8 = 26;
+const int RX_P1 = 16; //can
+const int RX_P2 = 13; // can
+const int RX_P3 = 4; // can
+const int RX_P4 = 32; // can
+const int RX_P5 = 15; // can
+const int RX_P6 = 17; // can
+const int RX_P7 = 18; // can 
+const int RX_P8 = 19; // can
 
 // ─── Config ───────────────────────────────────────
 #define CTRL_ID_DEFAULT    1
 #define MAX_SENDER_ID      9
 #define NODE_BAUD          115200
 #define SW_BAUD            115200
-#define PORT_ACTIVE        2
+#define PORT_ACTIVE        8
 #define PORT_MAX           8
 #define OFFLINE_TIMEOUT_MS 10000UL
 #define SEND_INTERVAL_MS   200UL
@@ -672,21 +672,21 @@ void setup() {
   U2.begin(NODE_BAUD, SERIAL_8N1, RX_P1, -1);
   U1.begin(NODE_BAUD, SERIAL_8N1, RX_P2, -1);
 
-  if (PORT_ACTIVE >= 3) U3.begin(SW_BAUD, SWSERIAL_8N1, RX_P3, -1, false, 256);
-  if (PORT_ACTIVE >= 4) U4.begin(SW_BAUD, SWSERIAL_8N1, RX_P4, -1, false, 256);
-  if (PORT_ACTIVE >= 5) U5.begin(SW_BAUD, SWSERIAL_8N1, RX_P5, -1, false, 256);
-  if (PORT_ACTIVE >= 6) U6.begin(SW_BAUD, SWSERIAL_8N1, RX_P6, -1, false, 256);
-  if (PORT_ACTIVE >= 7) U7.begin(SW_BAUD, SWSERIAL_8N1, RX_P7, -1, false, 256);
-  if (PORT_ACTIVE >= 8) U8.begin(SW_BAUD, SWSERIAL_8N1, RX_P8, -1, false, 256);
+  U3.begin(SW_BAUD, SWSERIAL_8N1, RX_P3, -1, false, 256);
+  U4.begin(SW_BAUD, SWSERIAL_8N1, RX_P4, -1, false, 256);
+  U5.begin(SW_BAUD, SWSERIAL_8N1, RX_P5, -1, false, 256);
+  U6.begin(SW_BAUD, SWSERIAL_8N1, RX_P6, -1, false, 256);
+  U7.begin(SW_BAUD, SWSERIAL_8N1, RX_P7, -1, false, 256);
+  U8.begin(SW_BAUD, SWSERIAL_8N1, RX_P8, -1, false, 256);
 
   init_port(0, &U2);
   init_port(1, &U1);
-  init_port(2, PORT_ACTIVE >= 3 ? (Stream*)&U3 : nullptr);
-  init_port(3, PORT_ACTIVE >= 4 ? (Stream*)&U4 : nullptr);
-  init_port(4, PORT_ACTIVE >= 5 ? (Stream*)&U5 : nullptr);
-  init_port(5, PORT_ACTIVE >= 6 ? (Stream*)&U6 : nullptr);
-  init_port(6, PORT_ACTIVE >= 7 ? (Stream*)&U7 : nullptr);
-  init_port(7, PORT_ACTIVE >= 8 ? (Stream*)&U8 : nullptr);
+  init_port(2, &U3);
+  init_port(3, &U4);
+  init_port(4, &U5);
+  init_port(5, &U6);
+  init_port(6, &U7);
+  init_port(7, &U8);
 
   // ── EEPROM ──
   EEPROM.begin(EEPROM_SIZE);

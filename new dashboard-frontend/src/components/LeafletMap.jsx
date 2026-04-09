@@ -103,7 +103,6 @@ export default function LeafletMap({ devices = [], selectedDeviceId, onSelectDev
                   </div>
                   <div style={{ fontSize: '12px', color: '#475569', lineHeight: '2' }}>
                     <div>Status: <b style={{ color: device.status === 'online' ? '#16a34a' : '#dc2626' }}>{device.status || '—'}</b></div>
-                    <div>Battery: <b style={{ color: '#0f172a' }}>{device.batt_pct != null ? `${device.batt_pct}%` : '—'}</b></div>
                     <div>Signal: <b style={{ color: '#0f172a' }}>{device.rssi != null ? `${device.rssi} dBm` : '—'}</b></div>
                     <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '2px' }}>
                       {Number(device.gps_lat).toFixed(5)}, {Number(device.gps_lon).toFixed(5)}

@@ -27,7 +27,6 @@ router.post('/devices', async (req, res) => {
     const { device_id } = req.body
     if (!device_id) return res.status(400).json({ error: 'device_id required' })
 
-    // Pastikan device sudah pernah online (terdaftar di DB)
     const device = await Device.findOne({ device_id }).lean()
     if (!device)
       return res.status(404).json({ error: 'Device not found. Make sure the main module is online.' })

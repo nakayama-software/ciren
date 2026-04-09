@@ -20,9 +20,9 @@ const TOPICS = [
 ]
 
 let client = null
+let _hbInterval = null
 
 // ─── Diagnostic counter ───────────────────────────
-// Print ringkasan tiap 5 detik: berapa banyak pesan masuk per stype
 const _rxCount = {}
 let   _rxLogTimer = null
 function _trackRx(key) {
@@ -36,6 +36,28 @@ function _trackRx(key) {
       Object.keys(_rxCount).forEach(k => { _rxCount[k] = 0 })
     }, 5000)
   }
+}
+
+// ─── Rate limiter per device ──────────────────────
+// Batasi max MAX_MSG_PER_SEC pesan DATA per device per detik
+// Mencegah sensor hang/loop dari spam overwhelm server
+const MAX_MSG_PER_SEC  = 50   // max 50 DATA frame per detik per device
+const _rateWindow      = {}   // { deviceId: { count, windowStart } }
+
+function _isRateLimited(deviceId) {
+  const now  = Date.now()
+  const win  = _rateWindow[deviceId]
+  if (!win || now - win.windowStart >= 1000) {
+    _rateWindow[deviceId] = { count: 1, windowStart: now }
+    return false
+  }
+  win.count++
+  if (win.count > MAX_MSG_PER_SEC) {
+    if (win.count === MAX_MSG_PER_SEC + 1)  // log hanya sekali per window
+      console.warn(`[RATE] Device ${deviceId} exceeded ${MAX_MSG_PER_SEC} msg/s — throttling`)
+    return true
+  }
+  return false
 }
 
 function initMQTT() {
@@ -58,11 +80,23 @@ function initMQTT() {
         else     console.log(`[MQTT] Subscribed: ${t}`)
       })
     })
+
+    // Publish server heartbeat immediately, then every 30s
+    // Firmware pakai ini untuk menentukan apakah server (bukan hanya broker) aktif
+    const publishHB = () => {
+      if (client.connected) client.publish('ciren/server/heartbeat', '1')
+    }
+    publishHB()
+    if (_hbInterval) clearInterval(_hbInterval)
+    _hbInterval = setInterval(publishHB, 30000)
   })
 
   client.on('error',       err  => console.error('[MQTT] Error:', err.message))
   client.on('reconnect',   ()   => console.log('[MQTT] Reconnecting...'))
-  client.on('disconnect',  ()   => console.log('[MQTT] Disconnected'))
+  client.on('disconnect',  ()   => {
+    console.log('[MQTT] Disconnected')
+    if (_hbInterval) { clearInterval(_hbInterval); _hbInterval = null }
+  })
 
   client.on('message', (topic, message) => {
     handleMessage(topic, message).catch(err =>
@@ -98,7 +132,10 @@ async function handleMessage(topic, message) {
 // Payload: { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype }
 async function handleSensorData(deviceId, data) {
   const { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype } = data
-  _trackRx(`c${ctrl_id}p${port_num}s${sensor_type}`)  // diagnostic counter
+  _trackRx(`c${ctrl_id}p${port_num}s${sensor_type}`)
+
+  // Rate limit — HELLO dan STALE dikecualikan (penting, frekuensi rendah)
+  if (ftype !== 0x02 && ftype !== 0xFE && _isRateLimited(deviceId)) return
 
   // HELLO frame — update/buat sensor node registry
   // Key: (device_id, ctrl_id, port_num, sensor_type) — satu port bisa multi-type (DHT20 = 0x01+0x02)

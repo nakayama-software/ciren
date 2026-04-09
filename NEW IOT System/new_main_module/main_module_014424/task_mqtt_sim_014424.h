@@ -89,7 +89,28 @@ static bool _sim_mqtt_connect(const char* broker, uint16_t port, const char* cli
 
   _sim_mqtt_conn    = true;
   _sim_last_ping_ms = millis();
-  Serial.println("[SIM MQTT] Connected");
+  Serial.println("[SIM MQTT] Broker connected — subscribing server heartbeat");
+
+  // Subscribe ke server heartbeat topic (QoS 0)
+  {
+    const char* hb_topic = TOPIC_SERVER_HB;
+    int hb_tlen  = strlen(hb_topic);
+    int sub_rem  = 2 + 2 + hb_tlen + 1;  // pkt_id + tlen_prefix + topic + QoS byte
+    uint8_t sbuf[64];
+    int sp = 0;
+    sbuf[sp++] = 0x82;  // SUBSCRIBE packet type
+    uint8_t senc[4];
+    int senc_len = _mqtt_encode_len(senc, sub_rem);
+    memcpy(&sbuf[sp], senc, senc_len); sp += senc_len;
+    sbuf[sp++] = 0x00; sbuf[sp++] = 0x01;  // packet id = 1
+    sbuf[sp++] = (uint8_t)((hb_tlen >> 8) & 0xFF);
+    sbuf[sp++] = (uint8_t)(hb_tlen & 0xFF);
+    memcpy(&sbuf[sp], hb_topic, hb_tlen); sp += hb_tlen;
+    sbuf[sp++] = 0x00;  // QoS 0
+    simClient.write(sbuf, sp);
+  }
+
+  // connected state ditentukan oleh server heartbeat, bukan broker CONNACK
   return true;
 }
 
@@ -137,9 +158,31 @@ static void _sim_mqtt_ping() {
   simClient.write(ping, 2);
 }
 
-// Drain unread bytes (PUBACK, PINGRESP, etc.)
+// Drain unread bytes (PUBACK, SUBACK, PINGRESP, PUBLISH, etc.)
+// Scans payload for server heartbeat topic to update server connectivity state
 static void _sim_mqtt_drain() {
-  while (simClient.available()) simClient.read();
+  uint8_t drain_buf[256];
+  int n = 0;
+  while (simClient.available() && n < (int)sizeof(drain_buf) - 1) {
+    drain_buf[n++] = (uint8_t)simClient.read();
+  }
+  while (simClient.available()) simClient.read();  // discard overflow
+
+  if (n == 0) return;
+
+  // Scan buffer for heartbeat topic string (tidak perlu full MQTT parsing)
+  const char* hb = TOPIC_SERVER_HB;
+  int hb_len = strlen(hb);
+  for (int i = 0; i <= n - hb_len; i++) {
+    if (memcmp(&drain_buf[i], hb, hb_len) == 0) {
+      xSemaphoreTake(state_mutex, portMAX_DELAY);
+      sys_state.server_hb_ms = millis();
+      xSemaphoreGive(state_mutex);
+      state_set_connected(true);
+      Serial.println("[SIM MQTT] Server heartbeat received");
+      break;
+    }
+  }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -189,17 +232,25 @@ void mqtt_sim_task(void* param) {
       _sim_mqtt_conn = false;
       state_set_connected(false);
 
-      const char* broker = "192.168.103.241";
-      char client_id[32];
-      snprintf(client_id, sizeof(client_id), "%s-sim", DEVICE_ID);
+      const char* broker = sys_state.mqtt_host;
+      char client_id[40];
+      snprintf(client_id, sizeof(client_id), "%s-sim", sys_state.device_id);
 
       if (!_sim_mqtt_connect(broker, MQTT_PORT, client_id)) {
         vTaskDelay(pdMS_TO_TICKS(10000));
         continue;
       }
+      // connected state ditentukan oleh server heartbeat — tidak set di sini
+    }
 
-      // SIM MQTT connected — set connected state
-      state_set_connected(true);
+    // ── Heartbeat timeout — anggap server offline jika > 60s tidak ada HB ──
+    {
+      xSemaphoreTake(state_mutex, portMAX_DELAY);
+      uint32_t hb_ms = sys_state.server_hb_ms;
+      xSemaphoreGive(state_mutex);
+      if (hb_ms > 0 && (millis() - hb_ms) > SERVER_HB_TIMEOUT_MS) {
+        state_set_connected(false);
+      }
     }
 
     // ── Drain publish_queue ─────────────────────────────────────────────────

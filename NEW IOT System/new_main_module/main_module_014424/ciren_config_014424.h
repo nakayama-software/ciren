@@ -1,6 +1,6 @@
 #pragma once
 
-#define DEVICE_ID          "MM-001"
+#define DEVICE_ID_PREFIX   "MM"     // prefix untuk auto-generated device ID
 #define FW_VERSION         "1.0.0"
 
 // ── TFT SPI 2.4" 320×240 (ILI9341) — ESP32-S3 ──────────────────────────────
@@ -113,10 +113,14 @@
 #define FTYPE_ERROR        0xFF
 #define FTYPE_STALE        0xFE
 
-#define TOPIC_DATA         "ciren/data/" DEVICE_ID
-#define TOPIC_STATUS       "ciren/status/" DEVICE_ID
-#define TOPIC_HELLO        "ciren/hello/" DEVICE_ID
-#define TOPIC_CONFIG       "ciren/config/" DEVICE_ID
+// TOPIC_* dibuild runtime dari sys_state.device_id — lihat state_build_topics()
+// TOPIC_SERVER_HB satu-satunya yang tetap static (bukan per-device)
+#define TOPIC_SERVER_HB    "ciren/server/heartbeat"
+
+#define SERVER_HB_TIMEOUT_MS  60000   // consider server offline after 60s no heartbeat
 
 #define WD_CHECK_MS        30000
 #define RB_WARN_THRESHOLD  0.8f
+
+#define CTRL_TIMEOUT_MS    15000   // consider controller offline after 15s no packet
+#define MAX_CTRL_IDS       16      // max distinct ctrl_id values tracked

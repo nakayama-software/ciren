@@ -168,6 +168,29 @@ export function isIMUSensor(sensorType) {
   return IMU_STYPES.has(Number(sensorType))
 }
 
+// Count how many display cards a list of nodes would produce
+// (IMU counts as 1 per port, Temp+Humidity on same port counts as 1)
+export function countDisplayNodes(nodes) {
+  const humTempPorts = new Set()
+  for (const n of nodes) {
+    if (Number(n.sensor_type) === 0x01) humTempPorts.add(`${n.ctrl_id}_${n.port_num}`)
+  }
+  const seenIMUPorts = new Set()
+  let count = 0
+  for (const n of nodes) {
+    const st = Number(n.sensor_type)
+    const pk = `${n.ctrl_id}_${n.port_num}`
+    if (isIMUSensor(st)) {
+      if (seenIMUPorts.has(pk)) continue
+      seenIMUPorts.add(pk)
+    } else if (humTempPorts.has(pk) && st === 0x02) {
+      continue  // humidity collapsed with temperature
+    }
+    count++
+  }
+  return count
+}
+
 // Build IMU data object from latestData map for a specific (ctrl_id, port_num)
 // Jika port_num yang terdaftar tidak punya data, scan semua port untuk ctrl_id ini
 // (handle port mismatch antara MongoDB registrasi dan data aktual)

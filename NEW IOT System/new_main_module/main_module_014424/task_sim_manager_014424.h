@@ -15,10 +15,10 @@
 #include "ciren_config_014424.h"
 #include "system_state_014424.h"
 
-// SIM configuration
-#define SIM_APN       "ppsim.jp"
-#define SIM_USER      "pp@sim"
-#define SIM_PASS      "jpn"
+// SIM APN defaults — dipakai jika Preferences kosong
+#define SIM_APN_DEFAULT  "internet"
+#define SIM_USER_DEFAULT ""
+#define SIM_PASS_DEFAULT ""
 
 // ── Global TinyGSM objects (definitions, not just extern) ───────────────────
 static HardwareSerial modemSerial(2);   // UART2
@@ -148,8 +148,6 @@ void sim_manager_task(void* param) {
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.sim_gprs = false;
         xSemaphoreGive(state_mutex);
-        if (strncmp(sys_state.conn_mode, "sim", 3) == 0)
-          state_set_connected(false);
       }
       gprs_was_connected = false;
 
@@ -160,15 +158,24 @@ void sim_manager_task(void* param) {
         continue;
       }
 
-      Serial.println("[SIM] Connecting GPRS...");
-      if (modem.gprsConnect(SIM_APN, SIM_USER, SIM_PASS)) {
+      // Baca APN dari sys_state dengan mutex — string tidak atomic
+      char apn_buf[64], user_buf[32], pass_buf[32];
+      xSemaphoreTake(state_mutex, portMAX_DELAY);
+      strncpy(apn_buf,  sys_state.sim_apn,      sizeof(apn_buf)  - 1);  apn_buf[sizeof(apn_buf)  - 1] = '\0';
+      strncpy(user_buf, sys_state.sim_apn_user, sizeof(user_buf) - 1);  user_buf[sizeof(user_buf) - 1] = '\0';
+      strncpy(pass_buf, sys_state.sim_apn_pass, sizeof(pass_buf) - 1);  pass_buf[sizeof(pass_buf) - 1] = '\0';
+      xSemaphoreGive(state_mutex);
+      // Fallback ke default jika kosong
+      const char* apn  = strlen(apn_buf)  > 0 ? apn_buf  : SIM_APN_DEFAULT;
+      const char* user = strlen(user_buf) > 0 ? user_buf : SIM_USER_DEFAULT;
+      const char* pass = strlen(pass_buf) > 0 ? pass_buf : SIM_PASS_DEFAULT;
+      Serial.printf("[SIM] Connecting GPRS APN=%s user=%s\n", apn, user);
+      if (modem.gprsConnect(apn, user, pass)) {
         Serial.println("[SIM] GPRS connected");
         gprs_was_connected = true;
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.sim_gprs = true;
         xSemaphoreGive(state_mutex);
-        if (strncmp(sys_state.conn_mode, "sim", 3) == 0)
-          state_set_connected(true);
       } else {
         Serial.println("[SIM] GPRS connect failed, retry in 60s");
         vTaskDelay(pdMS_TO_TICKS(SIM_RETRY_MS));
@@ -180,8 +187,6 @@ void sim_manager_task(void* param) {
       xSemaphoreTake(state_mutex, portMAX_DELAY);
       sys_state.sim_gprs = true;
       xSemaphoreGive(state_mutex);
-      if (strncmp(sys_state.conn_mode, "sim", 3) == 0)
-        state_set_connected(true);
     }
 
     vTaskDelay(pdMS_TO_TICKS(1000));

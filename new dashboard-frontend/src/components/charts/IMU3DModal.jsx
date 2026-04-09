@@ -58,7 +58,8 @@ export default function IMU3DModal({ open, onClose, deviceId, ctrlId, portNum, l
   // Display values (updated at ~10Hz to avoid excess re-renders)
   const [display, setDisplay] = useState({ pitch: 0, roll: 0, yaw: 0 })
 
-  // Seed from latestData on open
+  // Seed from latestData on open — intentionally excludes latestData from deps
+  // so that incoming WS readings don't reset offsetRef (which would break Recenter)
   useEffect(() => {
     if (!open) return
     const imu = latestData ? buildIMUFromLatest(ctrlId, portNum, latestData) : null
@@ -79,7 +80,8 @@ export default function IMU3DModal({ open, onClose, deviceId, ctrlId, portNum, l
       yaw:   euler?.yaw ?? 0,
     }
     offsetRef.current = { pitch: 0, roll: 0, yaw: 0 }
-  }, [open, ctrlId, portNum, latestData])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, ctrlId, portNum])  // latestData excluded — only re-seed when modal opens or port changes
 
   // Display refresh timer
   useEffect(() => {

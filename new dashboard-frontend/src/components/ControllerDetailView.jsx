@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Cpu, ArrowLeft, Download, Zap } from 'lucide-react'
+import { Cpu, ArrowLeft, Download, Zap, AlertTriangle } from 'lucide-react'
 import { getNodeKey, getReadingKey, isIMUSensor } from '../utils/sensors'
+import { getThreshold, isOutOfRange } from '../utils/thresholds'
 import SensorNodeCard from './SensorNodeCard'
 import LineChartModal from './charts/LineChartModal'
 import IMU3DModal from './charts/IMU3DModal'
@@ -10,6 +11,7 @@ import ResetPortModal from './ResetPortModal'
 import AliasInlineEdit from './AliasInlineEdit'
 import LabelManager from './LabelManager'
 import MultiSensorView from './MultiSensorView'
+import ThresholdModal from './ThresholdModal'
 
 export default function ControllerDetailView({
   ctrlId,
@@ -22,12 +24,13 @@ export default function ControllerDetailView({
   wsRef,
   t,
 }) {
-  const [lineTarget, setLineTarget]     = useState(null)  // { ctrlId, portNum, sensorType }
-  const [imu3DTarget, setImu3DTarget]   = useState(null)  // { ctrlId, portNum }
-  const [rotaryTarget, setRotaryTarget] = useState(null)  // { ctrlId, portNum }
-  const [resetTarget, setResetTarget]   = useState(null)  // { ctrlId, portNum, sensorType }
-  const [showExport, setShowExport]     = useState(false)
-  const [openLabel, setOpenLabel]       = useState(null)  // label object for MultiSensorView
+  const [lineTarget, setLineTarget]           = useState(null)  // { ctrlId, portNum, sensorType }
+  const [imu3DTarget, setImu3DTarget]         = useState(null)  // { ctrlId, portNum }
+  const [rotaryTarget, setRotaryTarget]       = useState(null)  // { ctrlId, portNum }
+  const [resetTarget, setResetTarget]         = useState(null)  // { ctrlId, portNum, sensorType }
+  const [thresholdTarget, setThresholdTarget] = useState(null)  // { ctrlId, portNum, sensorType }
+  const [showExport, setShowExport]           = useState(false)
+  const [openLabel, setOpenLabel]             = useState(null)  // label object for MultiSensorView
 
   const ctrlNodes = nodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
   const nowMs = now || Date.now()
@@ -149,8 +152,27 @@ export default function ControllerDetailView({
             const portKey   = `${node.ctrl_id}_${node.port_num}`
             const isHumTemp = humTempPorts.has(portKey) && Number(node.sensor_type) === 0x01
 
+            // Threshold check — also check humidity if humTemp card
+            const threshold = getThreshold(deviceId, node.ctrl_id, node.port_num, node.sensor_type)
+            let alert = reading?.value != null && isOutOfRange(reading.value, threshold)
+            if (!alert && isHumTemp) {
+              const humThreshold = getThreshold(deviceId, node.ctrl_id, node.port_num, 0x02)
+              const humRKey = getReadingKey(node.ctrl_id, node.port_num, 0x02)
+              const humReading = latestData[humRKey]
+              if (humReading?.value != null) alert = isOutOfRange(humReading.value, humThreshold)
+            }
+
             return (
-              <div key={`${node.ctrl_id}_${node.port_num}_${node.sensor_type}`} className="relative group h-full">
+              <div
+                key={`${node.ctrl_id}_${node.port_num}_${node.sensor_type}`}
+                className={`relative group h-full rounded-xl transition-shadow ${alert ? 'ring-2 ring-red-500/70 shadow-[0_0_0_2px_rgba(239,68,68,0.15)]' : ''}`}
+              >
+                {alert && (
+                  <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md bg-red-500 px-1.5 py-0.5 text-[10px] font-medium text-white pointer-events-none">
+                    <AlertTriangle className="w-3 h-3" />
+                    Out of range
+                  </div>
+                )}
                 <SensorNodeCard
                   deviceId={deviceId}
                   ctrlId={node.ctrl_id}
@@ -164,17 +186,26 @@ export default function ControllerDetailView({
                   onChartClick={() => handleChartClick(node)}
                   onIMU3DClick={() => setImu3DTarget({ ctrlId: node.ctrl_id, portNum: node.port_num })}
                 />
-                {/* Reset button — hover only */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); setResetTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type }) }}
-                  title="Reset port data"
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500"
-                >
-                  <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 2a6 6 0 1 0 5.5 3.6l1.4-1.4A8 8 0 1 1 8 0v2z"/>
-                    <path d="M8 0v4L6 2l2-2z"/>
-                  </svg>
-                </button>
+                {/* Hover action buttons */}
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setThresholdTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type }) }}
+                    title="Set threshold"
+                    className="p-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-600 dark:text-amber-400"
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setResetTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type }) }}
+                    title="Reset port data"
+                    className="p-1 rounded-md bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500"
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 2a6 6 0 1 0 5.5 3.6l1.4-1.4A8 8 0 1 1 8 0v2z"/>
+                      <path d="M8 0v4L6 2l2-2z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             )
           })}
@@ -226,6 +257,15 @@ export default function ControllerDetailView({
         deviceId={deviceId}
         ctrlId={ctrlId}
         nodes={ctrlNodes}
+      />
+
+      <ThresholdModal
+        open={!!thresholdTarget}
+        onClose={() => setThresholdTarget(null)}
+        deviceId={deviceId}
+        ctrlId={thresholdTarget?.ctrlId}
+        portNum={thresholdTarget?.portNum}
+        sensorType={thresholdTarget?.sensorType}
       />
 
       <MultiSensorView

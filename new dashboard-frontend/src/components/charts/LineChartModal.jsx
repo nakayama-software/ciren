@@ -12,6 +12,7 @@ import {
 } from 'chart.js'
 import { getHistory } from '../../lib/api'
 import { getSensorInfo } from '../../utils/sensors'
+import { useIsDark } from '../../utils/useIsDark'
 
 ChartJS.register(LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
 
@@ -23,13 +24,27 @@ function fmtTick(ms) {
   return `${hh}:${mm}:${ss}`
 }
 
+const RANGE_OPTIONS = [
+  { label: '1h',  hours: 1 },
+  { label: '6h',  hours: 6 },
+  { label: '24h', hours: 24 },
+  { label: '7d',  hours: 168 },
+]
+
 // wsRef: { current: WebSocket | null } — passed from parent so modal can listen
 export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNum, sensorType, wsRef }) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
   const [rows, setRows] = useState([])
+  const [hours, setHours] = useState(24)
+  const isDark = useIsDark()
 
   const info = getSensorInfo(sensorType)
+
+  // Reset range when modal opens for a new sensor
+  useEffect(() => {
+    if (open) setHours(24)
+  }, [open, deviceId, ctrlId, portNum, sensorType])
 
   useEffect(() => {
     if (!open) { setRows([]); return }
@@ -42,7 +57,7 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
       setLoading(true)
       setErr(null)
       try {
-        const data = await getHistory(deviceId, ctrlId, portNum, 24, sensorType)
+        const data = await getHistory(deviceId, ctrlId, portNum, hours, sensorType)
         if (ac.signal.aborted) return
         const mapped = (data || [])
           .map((r) => {
@@ -63,7 +78,7 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
 
     load()
     return () => ac.abort()
-  }, [open, deviceId, ctrlId, portNum, sensorType])
+  }, [open, deviceId, ctrlId, portNum, sensorType, hours])
 
   // Subscribe to WS for live updates
   useEffect(() => {
@@ -110,41 +125,50 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
     }
   }, [rows, info])
 
-  const chartOptions = useMemo(() => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false,
-    parsing: false,
-    normalized: true,
-    interaction: { mode: 'nearest', intersect: false },
-    plugins: {
-      legend: { display: true, position: 'top' },
-      tooltip: {
-        callbacks: {
-          title: (items) => {
-            const x = items?.[0]?.parsed?.x
-            return x ? new Date(x).toLocaleString() : ''
-          },
-          label: (item) => {
-            const y = item?.parsed?.y
-            if (typeof y !== 'number') return `${item.dataset.label}: -`
-            return `${item.dataset.label}: ${y.toFixed(3)}`
+  const chartOptions = useMemo(() => {
+    const tickColor = isDark ? 'rgba(148,163,184,0.8)' : 'rgba(71,85,105,0.8)'
+    const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+    const legendColor = isDark ? '#cbd5e1' : '#475569'
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      parsing: false,
+      normalized: true,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+          labels: { color: legendColor, font: { size: 11 } },
+        },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const x = items?.[0]?.parsed?.x
+              return x ? new Date(x).toLocaleString() : ''
+            },
+            label: (item) => {
+              const y = item?.parsed?.y
+              if (typeof y !== 'number') return `${item.dataset.label}: -`
+              return `${item.dataset.label}: ${y.toFixed(3)}`
+            },
           },
         },
       },
-    },
-    scales: {
-      x: {
-        type: 'linear',
-        ticks: { callback: (v) => fmtTick(Number(v)), maxTicksLimit: 8 },
-        grid: { display: true },
+      scales: {
+        x: {
+          type: 'linear',
+          ticks: { callback: (v) => fmtTick(Number(v)), maxTicksLimit: 8, color: tickColor },
+          grid: { color: gridColor },
+        },
+        y: {
+          ticks: { callback: (v) => String(v), color: tickColor },
+          grid: { color: gridColor },
+        },
       },
-      y: {
-        ticks: { callback: (v) => String(v) },
-        grid: { display: true },
-      },
-    },
-  }), [])
+    }
+  }, [isDark])
 
   if (!open) return null
 
@@ -153,9 +177,26 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
       <div className="w-full max-w-3xl rounded-2xl border border-black/10 bg-white dark:bg-slate-900 dark:border-white/10 shadow-xl">
         <div className="flex items-center justify-between px-4 py-3 border-b border-black/10 dark:border-white/10">
           <div className="text-sm font-medium text-slate-900 dark:text-white">{title}</div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-md border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-0.5 gap-0.5">
+              {RANGE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.label}
+                  onClick={() => setHours(opt.hours)}
+                  className={`px-2.5 py-1 text-xs rounded cursor-pointer transition-colors ${
+                    hours === opt.hours
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={onClose} className="p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer" aria-label="Close">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <div className="p-4">
           {loading && <div className="text-center text-sm text-gray-600 dark:text-gray-300">Loading…</div>}
