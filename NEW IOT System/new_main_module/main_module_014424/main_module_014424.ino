@@ -100,7 +100,7 @@ void setup()
   state_build_topics();  // build topic strings dari device_id
 
   Serial.printf("CIREN Main Module %s\n", FW_VERSION);
-  Serial.printf("Device   : %s\n", DEVICE_ID);
+  Serial.printf("Device   : %s\n", sys_state.device_id);
   Serial.printf("WiFi SSID: %s\n", cfg.wifi_ssid);
   Serial.printf("MQTT Host: %s\n", cfg.mqtt_host);
 

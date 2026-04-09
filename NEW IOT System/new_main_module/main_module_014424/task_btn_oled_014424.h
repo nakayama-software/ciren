@@ -241,7 +241,7 @@ static String build_portal_page(const String &msg = "", bool ok = false)
   h += "<div class='header'>"
        "<div class='header-dot'>&#x1F4F6;</div>"
        "<h1>CIREN WiFi Setup</h1>"
-       "<p>Device: " + String(DEVICE_ID) + " &nbsp;&bull;&nbsp; Firmware v" + String(FW_VERSION) + "</p>"
+       "<p>Device: " + String(sys_state.device_id) + " &nbsp;&bull;&nbsp; Firmware v" + String(FW_VERSION) + "</p>"
        "</div>";
 
   h += "<div class='body'>";
@@ -408,7 +408,7 @@ static void tft_draw_footer()
   tft.setTextSize(1);
   tft.setTextColor(C_WHITE, C_BG);
   tft.setCursor(PAD, FTR_Y + 5);
-  tft.print(DEVICE_ID "  v" FW_VERSION);
+  tft.printf("%s  v%s", sys_state.device_id, FW_VERSION);
 
   // Company logo (right-aligned)
   int lx = TFT_WIDTH - LOGO_FOOTER_W - PAD;
@@ -1123,7 +1123,7 @@ void btn_oled_init()
   tft.setTextSize(1);
   tft.setTextColor(C_ACCENT, C_BG);
   tft.setCursor(88, 158);
-  tft.print("Device: " DEVICE_ID "    v" FW_VERSION);
+  tft.printf("Device: %s    v%s", sys_state.device_id, FW_VERSION);
 
   // Booting indicator
   tft.setTextColor(C_WHITE, C_BG);
