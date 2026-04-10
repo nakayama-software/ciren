@@ -15,7 +15,8 @@ typedef struct {
 // Solusi: simpan data log di struct kecil, cetak dari task_espnow_rx.
 
 typedef struct {
-  enum { LOG_NONE, LOG_HELLO_ACK, LOG_RX, LOG_RX_SKIP, LOG_PEER_FAIL } type;
+  enum { LOG_NONE, LOG_HELLO_ACK, LOG_RX, LOG_RX_SKIP, LOG_PEER_FAIL,
+         LOG_CONFIG_ACK, LOG_CTRL_HELLO } type;
   uint8_t ctrl_id;
   uint8_t ch;
   uint8_t peers;
@@ -96,17 +97,9 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
   if (pkt.ftype == FTYPE_HELLO) {
     uint8_t ch = (uint8_t)WiFi.channel();
 
-    if (ch == 0) {
-      // WiFi belum associate — log dan skip
-      if (espnow_log_queue) {
-        EspNowLog log = {};
-        log.type    = EspNowLog::LOG_RX_SKIP;
-        log.ctrl_id = pkt.ctrl_id;
-        log.ch      = ch;
-        xQueueSendFromISR(espnow_log_queue, &log, NULL);
-      }
-      return;
-    }
+    // ch==0 means WiFi is unassociated (SIM-only mode, scanning, or early boot).
+    // Use the fixed ESP-NOW channel so we can still ACK and receive data.
+    if (ch == 0) ch = ESPNOW_FIXED_CHANNEL;
 
     // Update peer channel (operasi kecil, aman di callback)
     if (!esp_now_is_peer_exist(mac)) {
@@ -148,10 +141,30 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
       xQueueSendFromISR(espnow_log_queue, &log, NULL);
     }
 
+    // Controller HELLO (port_num==0): trigger resync all stored configs for this ctrl
+    if (pkt.port_num == 0 && espnow_log_queue) {
+      EspNowLog log = {};
+      log.type    = EspNowLog::LOG_CTRL_HELLO;
+      log.ctrl_id = pkt.ctrl_id;
+      xQueueSendFromISR(espnow_log_queue, &log, NULL);
+    }
+
     // Hanya NODE HELLO (port_num > 0) yang dipublish ke MQTT untuk update registrasi
     // CONTROLLER HELLO (port_num=0) hanya untuk channel sync — jangan kirim ke server
     if (pkt.port_num > 0) rb_write(&pkt);
     return;
+  }
+
+  // ── CONFIG_ACK ─────────────────────────────────────────────────────────────
+  if (pkt.ftype == FTYPE_CONFIG_ACK) {
+    if (espnow_log_queue) {
+      EspNowLog log = {};
+      log.type     = EspNowLog::LOG_CONFIG_ACK;
+      log.ctrl_id  = pkt.ctrl_id;
+      log.port_num = pkt.port_num;
+      xQueueSendFromISR(espnow_log_queue, &log, NULL);
+    }
+    return;  // do not pass to ring buffer
   }
 
   // ── ERROR ──────────────────────────────────────────────────────────────────
@@ -215,6 +228,12 @@ void task_espnow_rx(void* param) {
           break;
         case EspNowLog::LOG_PEER_FAIL:
           Serial.println("[ESPNOW] add_peer failed");
+          break;
+        case EspNowLog::LOG_CONFIG_ACK:
+          nc_on_ack(log.ctrl_id, log.port_num);
+          break;
+        case EspNowLog::LOG_CTRL_HELLO:
+          nc_resync_ctrl(log.ctrl_id);
           break;
         default: break;
       }

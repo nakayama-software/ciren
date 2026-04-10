@@ -2,7 +2,8 @@ const express    = require('express')
 const router     = express.Router()
 const SensorReading          = require('../models/SensorReading')
 const { SensorNode, Device } = require('../models/Device')
-const { sendConfig }         = require('../mqtt/handler')
+const NodeConfig             = require('../models/NodeConfig')
+const { sendConfig, sendNodeConfig } = require('../mqtt/handler')
 const { STYPE_LABEL }        = require('../utils/constants')
 
 // ══════════════════════════════════════════════════
@@ -226,6 +227,45 @@ router.delete('/devices/:deviceId/data', async (req, res) => {
     await SensorNode.deleteMany(filter)
 
     res.json({ ok: true, deleted: result.deletedCount })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ══════════════════════════════════════════════════
+//  NODE INTERVAL CONFIG
+// ══════════════════════════════════════════════════
+
+// GET /api/devices/:deviceId/node-config
+// Semua node interval config yang tersimpan untuk device ini
+router.get('/devices/:deviceId/node-config', async (req, res) => {
+  try {
+    const configs = await NodeConfig
+      .find({ device_id: req.params.deviceId })
+      .sort({ ctrl_id: 1, port_num: 1 })
+      .lean()
+    res.json(configs)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// POST /api/devices/:deviceId/node-config
+// Set interval untuk satu sensor node: { ctrl_id, port_num, interval_ms }
+router.post('/devices/:deviceId/node-config', async (req, res) => {
+  try {
+    const { ctrl_id, port_num, interval_ms } = req.body
+    if (!ctrl_id || !port_num || !interval_ms)
+      return res.status(400).json({ error: 'ctrl_id, port_num, interval_ms required' })
+    if (interval_ms < 100)
+      return res.status(400).json({ error: 'interval_ms must be >= 100' })
+
+    await NodeConfig.findOneAndUpdate(
+      { device_id: req.params.deviceId, ctrl_id: Number(ctrl_id), port_num: Number(port_num) },
+      { interval_ms: Number(interval_ms), updated_at: new Date() },
+      { upsert: true, new: true }
+    )
+
+    const ok = sendNodeConfig(req.params.deviceId, Number(ctrl_id), Number(port_num), Number(interval_ms))
+    if (!ok) return res.status(503).json({ error: 'MQTT not connected — config saved but not yet delivered' })
+
+    res.json({ ok: true, sent: { ctrl_id, port_num, interval_ms } })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 

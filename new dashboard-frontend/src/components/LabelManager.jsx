@@ -30,7 +30,8 @@ function sensorLabel(portNum, sensorType) {
   return `P${portNum} — ${getSensorInfo(Number(sensorType)).label}`
 }
 
-export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLabel }) {
+export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLabel, t }) {
+  const tr = t?.labels || {}
   const [labels, setLabels] = useState([])
   const [invalidatedNames, setInvalidatedNames] = useState([])
   const [showCreate, setShowCreate] = useState(false)
@@ -113,7 +114,7 @@ export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLab
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Tag className="w-4 h-4 text-cyan-500" />
-          <h3 className="text-base font-medium text-slate-900 dark:text-white">Analysis Labels</h3>
+          <h3 className="text-base font-medium text-slate-900 dark:text-white">{tr.title || 'Analysis Labels'}</h3>
           {labels.length > 0 && (
             <span className="text-xs bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 px-1.5 py-0.5 rounded-full">
               {labels.length}
@@ -125,7 +126,7 @@ export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLab
           className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 transition-colors"
         >
           <Plus className="w-4 h-4" />
-          New Label
+          {tr.newLabel || 'New Label'}
         </button>
       </div>
 
@@ -134,7 +135,7 @@ export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLab
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
             <p className="text-sm text-yellow-800 dark:text-yellow-200">
-              Label <strong>"{name}"</strong> was deleted because its sensors are no longer active.
+              {tr.invalidated ? tr.invalidated(name) : <>Label <strong>"{name}"</strong> was deleted because its sensors are no longer active.</>}
             </p>
           </div>
           <button
@@ -148,16 +149,16 @@ export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLab
 
       {showCreate && (
         <div className="rounded-xl border border-black/10 dark:border-white/10 bg-slate-50 dark:bg-slate-900/50 p-4 mb-4">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">New Analysis Label</p>
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">{tr.createTitle || 'New Analysis Label'}</p>
           <input
             type="text"
             value={newLabelName}
             onChange={(e) => setNewLabelName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreateLabel()}
-            placeholder="Label name (e.g. Analisa Data 1)"
+            placeholder={tr.namePlaceholder || 'Label name (e.g. Analysis 1)'}
             className="w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500 mb-3"
           />
-          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Select sensors to include:</p>
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">{tr.selectSensors || 'Select sensors to include:'}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
             {displayNodes.map((node) => {
               const key = sensorKey(node.port_num, node.sensor_type)
@@ -188,21 +189,21 @@ export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLab
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-400">
-              {selectedSensors.length} sensor{selectedSensors.length !== 1 ? 's' : ''} selected
+              {tr.sensorsSelected ? tr.sensorsSelected(selectedSensors.length) : `${selectedSensors.length} sensor${selectedSensors.length !== 1 ? 's' : ''} selected`}
             </span>
             <div className="flex gap-2">
               <button
                 onClick={cancelCreate}
                 className="px-3 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-sm text-slate-900 dark:text-white hover:bg-black/5 dark:hover:bg-white/10"
               >
-                Cancel
+                {tr.cancel || 'Cancel'}
               </button>
               <button
                 onClick={handleCreateLabel}
                 disabled={!newLabelName.trim() || selectedSensors.length === 0}
                 className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-600 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                Create Label
+                {tr.create || 'Create Label'}
               </button>
             </div>
           </div>
@@ -211,7 +212,7 @@ export default function LabelManager({ deviceId, ctrlId, displayNodes, onOpenLab
 
       {labels.length === 0 && !showCreate && (
         <p className="text-sm text-gray-400 dark:text-gray-500 italic">
-          No labels yet. Click "New Label" to combine multiple sensor views.
+          {tr.empty || 'No labels yet. Click "New Label" to combine multiple sensor views.'}
         </p>
       )}
 

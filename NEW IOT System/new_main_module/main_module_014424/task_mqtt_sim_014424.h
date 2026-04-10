@@ -89,26 +89,28 @@ static bool _sim_mqtt_connect(const char* broker, uint16_t port, const char* cli
 
   _sim_mqtt_conn    = true;
   _sim_last_ping_ms = millis();
-  Serial.println("[SIM MQTT] Broker connected — subscribing server heartbeat");
+  Serial.println("[SIM MQTT] Broker connected — subscribing topics");
 
-  // Subscribe ke server heartbeat topic (QoS 0)
-  {
-    const char* hb_topic = TOPIC_SERVER_HB;
-    int hb_tlen  = strlen(hb_topic);
-    int sub_rem  = 2 + 2 + hb_tlen + 1;  // pkt_id + tlen_prefix + topic + QoS byte
-    uint8_t sbuf[64];
+  // Helper: subscribe one topic
+  auto _sub = [&](const char* topic, uint8_t qos, uint8_t pkt_id) {
+    int tlen    = strlen(topic);
+    int sub_rem = 2 + 2 + tlen + 1;
+    uint8_t sbuf[128];
     int sp = 0;
-    sbuf[sp++] = 0x82;  // SUBSCRIBE packet type
+    sbuf[sp++] = 0x82;
     uint8_t senc[4];
     int senc_len = _mqtt_encode_len(senc, sub_rem);
     memcpy(&sbuf[sp], senc, senc_len); sp += senc_len;
-    sbuf[sp++] = 0x00; sbuf[sp++] = 0x01;  // packet id = 1
-    sbuf[sp++] = (uint8_t)((hb_tlen >> 8) & 0xFF);
-    sbuf[sp++] = (uint8_t)(hb_tlen & 0xFF);
-    memcpy(&sbuf[sp], hb_topic, hb_tlen); sp += hb_tlen;
-    sbuf[sp++] = 0x00;  // QoS 0
+    sbuf[sp++] = 0x00; sbuf[sp++] = pkt_id;
+    sbuf[sp++] = (uint8_t)((tlen >> 8) & 0xFF);
+    sbuf[sp++] = (uint8_t)(tlen & 0xFF);
+    memcpy(&sbuf[sp], topic, tlen); sp += tlen;
+    sbuf[sp++] = qos;
     simClient.write(sbuf, sp);
-  }
+  };
+
+  _sub(TOPIC_SERVER_HB,        0, 1);
+  _sub(sys_state.topic_config, 1, 2);
 
   // connected state ditentukan oleh server heartbeat, bukan broker CONNACK
   return true;
@@ -159,9 +161,9 @@ static void _sim_mqtt_ping() {
 }
 
 // Drain unread bytes (PUBACK, SUBACK, PINGRESP, PUBLISH, etc.)
-// Scans payload for server heartbeat topic to update server connectivity state
+// Scans payload for heartbeat and config topics to update state
 static void _sim_mqtt_drain() {
-  uint8_t drain_buf[256];
+  uint8_t drain_buf[512];
   int n = 0;
   while (simClient.available() && n < (int)sizeof(drain_buf) - 1) {
     drain_buf[n++] = (uint8_t)simClient.read();
@@ -169,8 +171,9 @@ static void _sim_mqtt_drain() {
   while (simClient.available()) simClient.read();  // discard overflow
 
   if (n == 0) return;
+  drain_buf[n] = '\0';  // null-terminate for string scanning
 
-  // Scan buffer for heartbeat topic string (tidak perlu full MQTT parsing)
+  // Scan for heartbeat topic
   const char* hb = TOPIC_SERVER_HB;
   int hb_len = strlen(hb);
   for (int i = 0; i <= n - hb_len; i++) {
@@ -180,6 +183,28 @@ static void _sim_mqtt_drain() {
       xSemaphoreGive(state_mutex);
       state_set_connected(true);
       Serial.println("[SIM MQTT] Server heartbeat received");
+      break;
+    }
+  }
+
+  // Scan for config topic + action string
+  const char* cfg_topic = sys_state.topic_config;
+  int cfg_len = strlen(cfg_topic);
+  for (int i = 0; i <= n - cfg_len; i++) {
+    if (memcmp(&drain_buf[i], cfg_topic, cfg_len) == 0) {
+      // Topic found — scan remaining bytes for JSON action
+      char* payload = (char*)&drain_buf[i + cfg_len];
+      if (strstr(payload, "\"set_node_interval\"")) {
+        int ctrl_id = 0, port_num = 0;
+        uint32_t interval_ms = 0;
+        const char* p;
+        if ((p = strstr(payload, "\"ctrl_id\":")))    ctrl_id     = atoi(p + 10);
+        if ((p = strstr(payload, "\"port_num\":")))   port_num    = atoi(p + 11);
+        if ((p = strstr(payload, "\"interval_ms\":"))) interval_ms = (uint32_t)atoi(p + 14);
+        if (ctrl_id > 0 && port_num > 0 && interval_ms > 0) {
+          nc_set((uint8_t)ctrl_id, (uint8_t)port_num, interval_ms);
+        }
+      }
       break;
     }
   }

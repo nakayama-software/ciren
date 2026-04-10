@@ -124,3 +124,15 @@
 
 #define CTRL_TIMEOUT_MS    15000   // consider controller offline after 15s no packet
 #define MAX_CTRL_IDS       16      // max distinct ctrl_id values tracked
+
+// ── Node interval config ──────────────────────────────────────────────────────
+#define FTYPE_CONFIG        0x10  // main module → sensor controller
+#define FTYPE_CONFIG_ACK    0x11  // sensor controller → main module
+#define MAX_NODE_CONFIGS    72    // 9 ctrl × 8 ports
+#define NODE_CONFIG_ACK_MS  600   // wait this long for ACK before retry
+#define NODE_CONFIG_RETRIES 3     // max retries per config send
+
+// ── ESP-NOW fixed channel (used when WiFi is not connected / SIM mode) ────────
+// Both main module and sensor controllers must agree on this channel.
+// WiFi ch 1 is the default fallback — avoids roaming scan when unassociated.
+#define ESPNOW_FIXED_CHANNEL  1

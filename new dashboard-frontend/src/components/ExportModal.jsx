@@ -39,7 +39,8 @@ const HOUR_OPTIONS = [
   { label: '72h', value: 72 },
 ]
 
-export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) {
+export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes, t }) {
+  const tr = t?.export || {}
   const [selected, setSelected] = useState(new Set())
   const [format, setFormat] = useState('csv')
   const [hours, setHours] = useState(24)
@@ -83,9 +84,9 @@ export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) 
       } else {
         triggerDownload(JSON.stringify(allRows, null, 2), `sensor-data-${ts}.json`, 'application/json')
       }
-      setStatus({ type: 'ok', msg: `Downloaded ${allRows.length} readings.` })
+      setStatus({ type: 'ok', msg: (tr.downloaded || ((n) => `Downloaded ${n} readings.`))(allRows.length) })
     } catch (e) {
-      setStatus({ type: 'error', msg: e.message || 'Export failed.' })
+      setStatus({ type: 'error', msg: e.message || (tr.failed || 'Export failed.') })
     } finally {
       setLoading(false)
     }
@@ -96,8 +97,8 @@ export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) 
       <div className="w-full max-w-md flex flex-col rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-black/10 dark:border-white/10 bg-white dark:bg-slate-800/80">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Export Sensor Data</h2>
-            <p className="text-sm text-slate-500 dark:text-gray-400">Download readings history</p>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{tr.title || 'Export Sensor Data'}</h2>
+            <p className="text-sm text-slate-500 dark:text-gray-400">{tr.subtitle || 'Download readings history'}</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
             <X className="w-5 h-5 text-slate-500 dark:text-gray-400" />
@@ -108,9 +109,9 @@ export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) 
           {/* Sensor selection */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Sensors</p>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{tr.sensors || 'Sensors'}</p>
               <button onClick={toggleAll} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer">
-                {allSelected ? 'Deselect all' : 'Select all'}
+                {allSelected ? (tr.deselectAll || 'Deselect all') : (tr.selectAll || 'Select all')}
               </button>
             </div>
             <div className="space-y-1.5">
@@ -143,7 +144,7 @@ export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) 
 
           {/* Time range */}
           <div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Time range</p>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">{tr.timeRange || 'Time range'}</p>
             <div className="grid grid-cols-4 gap-2">
               {HOUR_OPTIONS.map((opt) => (
                 <button key={opt.value} onClick={() => setHours(opt.value)}
@@ -160,11 +161,11 @@ export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) 
 
           {/* Format */}
           <div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Format</p>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">{tr.format || 'Format'}</p>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { id: 'csv',  Icon: FileText, label: 'CSV',  sub: 'Excel / spreadsheet' },
-                { id: 'json', Icon: FileJson, label: 'JSON', sub: 'Developer friendly' },
+                { id: 'csv',  Icon: FileText, label: 'CSV',  sub: tr.csvSub  || 'Excel / spreadsheet' },
+                { id: 'json', Icon: FileJson, label: 'JSON', sub: tr.jsonSub || 'Developer friendly' },
               ].map(({ id, Icon, label, sub }) => (
                 <button key={id} onClick={() => setFormat(id)}
                   className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors text-left cursor-pointer ${
@@ -193,16 +194,18 @@ export default function ExportModal({ open, onClose, deviceId, ctrlId, nodes }) 
 
         <div className="px-6 py-4 border-t border-black/10 dark:border-white/10 flex items-center justify-between gap-3">
           <p className="text-xs text-slate-400 dark:text-gray-500">
-            {selected.size > 0 ? `${selected.size} sensor${selected.size > 1 ? 's' : ''} × ${hours}h` : 'No sensors selected'}
+            {selected.size > 0
+              ? (tr.summary || ((n, h) => `${n} sensor${n !== 1 ? 's' : ''} × ${h}h`))(selected.size, hours)
+              : (tr.noSensors || 'No sensors selected')}
           </p>
           <div className="flex gap-2">
             <button onClick={onClose}
               className="px-4 py-2 rounded-lg border border-slate-200 dark:border-white/10 text-sm text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer">
-              Close
+              {tr.close || 'Close'}
             </button>
             <button onClick={handleExport} disabled={selected.size === 0 || loading}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors cursor-pointer">
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Exporting…</> : <><Download className="w-4 h-4" /> Export</>}
+              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />{tr.exporting || 'Exporting…'}</> : <><Download className="w-4 h-4" />{tr.export || 'Export'}</>}
             </button>
           </div>
         </div>

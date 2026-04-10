@@ -57,6 +57,15 @@ static void _start_wifi_mqtt() {
 
 static void _switch_to_sim() {
   Serial.println("[ConnMgr] Switching to SIM mode");
+  // Stop any ongoing WiFi scan/connect, then pin to a fixed channel so
+  // ESP-NOW works without an AP connection. Without disconnect+pin the radio
+  // scans freely and WiFi.channel() returns random values, causing
+  // "Peer channel != home channel" ESP-NOW send failures.
+  WiFi.disconnect(false);
+  vTaskDelay(pdMS_TO_TICKS(100));
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_channel(ESPNOW_FIXED_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  Serial.printf("[ConnMgr] ESP-NOW channel pinned to %d\n", ESPNOW_FIXED_CHANNEL);
   xSemaphoreTake(state_mutex, portMAX_DELAY);
   strncpy(sys_state.conn_mode, "sim", sizeof(sys_state.conn_mode));
   xSemaphoreGive(state_mutex);
@@ -125,7 +134,7 @@ void task_conn_manager(void* param) {
         xSemaphoreGive(state_mutex);
       }
     } else {
-      // ── SIM mode: probe WiFi every 30s ─────────────────────────────────────
+      // ── SIM mode: probe WiFi every 30s (only if SSID is configured) ─────────
       if (millis() - last_wifi_probe_ms >= 30000) {
         last_wifi_probe_ms = millis();
         if (_wifi_ssid && strlen(_wifi_ssid) > 0) {
@@ -134,6 +143,12 @@ void task_conn_manager(void* param) {
             _switch_to_wifi();
           } else {
             Serial.println("[ConnMgr] WiFi still unavailable");
+            // WiFi.begin() during probe causes the radio to scan freely,
+            // which breaks the fixed ESP-NOW channel. Re-pin after failure.
+            WiFi.disconnect(false);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            esp_wifi_set_channel(ESPNOW_FIXED_CHANNEL, WIFI_SECOND_CHAN_NONE);
+            Serial.printf("[ConnMgr] ESP-NOW channel re-pinned to %d\n", ESPNOW_FIXED_CHANNEL);
           }
         }
       }

@@ -18,13 +18,14 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip,
 
 const MAX_POINTS = 30
 
-function timeAgo(ts) {
+function timeAgo(ts, t) {
   if (!ts) return null
+  const tr = t?.timeAgo || {}
   const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (diff < 5) return 'Just now'
-  if (diff < 60) return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 5) return tr.justNow || 'Just now'
+  if (diff < 60) return tr.secondsAgo ? tr.secondsAgo(diff) : `${diff}s ago`
+  if (diff < 3600) return tr.minutesAgo ? tr.minutesAgo(Math.floor(diff / 60)) : `${Math.floor(diff / 60)}m ago`
+  return tr.hoursAgo ? tr.hoursAgo(Math.floor(diff / 3600)) : `${Math.floor(diff / 3600)}h ago`
 }
 
 function fmtTime(ts) {
@@ -75,7 +76,7 @@ function buildChartOpts(isDark) {
 }
 
 // Gabungan temperature (0x01) + humidity (0x02) dari port yang sama
-export default function HumTempCard({ deviceId, ctrlId, portNum, latestData, status, now, onChartClick }) {
+export default function HumTempCard({ deviceId, ctrlId, portNum, latestData, status, now, onChartClick, t }) {
   const isDark = useIsDark()
   const chartOpts = useMemo(() => buildChartOpts(isDark), [isDark])
   const tempKey = getReadingKey(ctrlId, portNum, 0x01)
@@ -98,7 +99,7 @@ export default function HumTempCard({ deviceId, ctrlId, portNum, latestData, sta
 
   const statusColorMap = { online: 'bg-green-500', stale: 'bg-yellow-400', offline: 'bg-red-500' }
   const statusColor = statusColorMap[resolvedStatus] || 'bg-slate-400 dark:bg-gray-600'
-  const ago = lastTs ? timeAgo(lastTs) : null
+  const ago = lastTs ? timeAgo(lastTs, t) : null
 
   // ── History untuk mini chart ──────────────────────────────────────
   // Simpan pasangan {ts, temp, hum} — keyed by menit agar tidak duplikat

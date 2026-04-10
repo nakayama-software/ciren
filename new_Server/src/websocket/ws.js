@@ -6,8 +6,11 @@ const PING_INTERVAL = 30000  // ping tiap 30s untuk deteksi dead connections
 
 let wss = null
 
-function initWS(port) {
-  wss = new WebSocketServer({ port })
+function initWS(serverOrPort) {
+  const opts = typeof serverOrPort === 'number'
+    ? { port: serverOrPort }
+    : { server: serverOrPort }
+  wss = new WebSocketServer(opts)
 
   // Ping semua client secara berkala — tandai yang tidak balas sebagai dead
   const pingTimer = setInterval(() => {
@@ -43,7 +46,8 @@ function initWS(port) {
     console.log(`[WS] Client connected: ${ws.user?.username}`)
   })
 
-  console.log(`[WS] Server running on port ${port}`)
+  const portInfo = typeof serverOrPort === 'number' ? serverOrPort : (process.env.PORT || 3000)
+  console.log(`[WS] Server running on port ${portInfo}`)
   return wss
 }
 

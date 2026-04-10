@@ -105,6 +105,12 @@ void sim_manager_task(void* param) {
     Serial.println("[SIM] SIM OK");
   }
 
+  // Set network mode to auto (LTE preferred, fallback to 3G/2G)
+  // SIM7600 mode 38 = LTE+WCDMA+GSM auto. Without this the modem may
+  // stay searching when a preferred band isn't immediately available.
+  modem.setNetworkMode(38);
+  Serial.println("[SIM] Network mode: auto (LTE/3G/2G)");
+
   String op = modem.getOperator();
   xSemaphoreTake(state_mutex, portMAX_DELAY);
   sys_state.sim_modem_ok = true;
@@ -152,7 +158,7 @@ void sim_manager_task(void* param) {
       gprs_was_connected = false;
 
       Serial.println("[SIM] Waiting for network...");
-      if (!modem.waitForNetwork(30000UL)) {
+      if (!modem.waitForNetwork(90000UL)) {
         Serial.println("[SIM] Network wait failed, retry in 60s");
         vTaskDelay(pdMS_TO_TICKS(SIM_RETRY_MS));
         continue;

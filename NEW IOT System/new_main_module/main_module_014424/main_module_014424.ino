@@ -4,6 +4,7 @@
 #include "ciren_config_014424.h"
 #include "ring_buffer_014424.h"
 #include "system_state_014424.h"
+#include "task_node_config_014424.h"   // must come before espnow_rx (nc_on_ack, nc_resync_ctrl) and mqtt_sim (nc_set)
 #include "task_espnow_rx_014424.h"
 #include "task_publish_014424.h"
 #include "task_aggregator_014424.h"
@@ -108,6 +109,9 @@ void setup()
   sim_manager_init();
   mqtt_sim_init();
 
+  // Initialize node interval config (loads NVS, creates mutex)
+  nc_init();
+
   // WiFi harus STA mode sebelum esp_now_init
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
@@ -149,6 +153,7 @@ void setup()
   xTaskCreatePinnedToCore(task_aggregator,  "aggregator", STACK_AGG,      NULL, PRIO_AGG,     &h_aggregator, 1);
   xTaskCreatePinnedToCore(task_status,      "status",     STACK_STATUS,   NULL, PRIO_STATUS,  &h_status,     1);
   xTaskCreatePinnedToCore(mqtt_sim_task,    "mqtt_sim",   STACK_MQTT_SIM, NULL, PRIO_CONN,    NULL,          1);
+  xTaskCreatePinnedToCore(task_node_config, "node_cfg",   STACK_CONFIG,   NULL, PRIO_CONFIG,  NULL,          1);
 
   Serial.println("All tasks started.");
 }

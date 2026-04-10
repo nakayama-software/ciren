@@ -48,6 +48,29 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
         }
         Serial.println("[MQTT] Server heartbeat received");
       }
+      // Cek apakah ini config dari server: {"action":"set_node_interval",...}
+      else if (ev->topic_len > 0 &&
+               ev->topic_len == (int)strlen(sys_state.topic_config) &&
+               strncmp(ev->topic, sys_state.topic_config, ev->topic_len) == 0) {
+        char buf[256];
+        int plen = (ev->data_len < (int)sizeof(buf) - 1) ? ev->data_len : (int)sizeof(buf) - 1;
+        memcpy(buf, ev->data, plen);
+        buf[plen] = '\0';
+
+        if (strstr(buf, "\"set_node_interval\"")) {
+          int ctrl_id = 0, port_num = 0;
+          uint32_t interval_ms = 0;
+          const char* p;
+          if ((p = strstr(buf, "\"ctrl_id\":")))    ctrl_id     = atoi(p + 10);
+          if ((p = strstr(buf, "\"port_num\":")))   port_num    = atoi(p + 11);
+          if ((p = strstr(buf, "\"interval_ms\":"))) interval_ms = (uint32_t)atoi(p + 14);
+          if (ctrl_id > 0 && port_num > 0 && interval_ms > 0) {
+            nc_set((uint8_t)ctrl_id, (uint8_t)port_num, interval_ms);
+          } else {
+            Serial.printf("[MQTT] Bad set_node_interval payload: %s\n", buf);
+          }
+        }
+      }
       break;
     default: break;
   }

@@ -114,3 +114,15 @@ export function getHistory(id, ctrl_id, port_num, hours = 24, sensor_type) {
   }
   return apiFetch(url)
 }
+
+// ─── Node interval config ─────────────────────────
+export function getNodeConfig(deviceId) {
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/node-config`)
+}
+
+export function setNodeConfig(deviceId, ctrl_id, port_num, interval_ms) {
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/node-config`, {
+    method: 'POST',
+    body: JSON.stringify({ ctrl_id, port_num, interval_ms }),
+  })
+}

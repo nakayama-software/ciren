@@ -9,7 +9,7 @@
 
 #define MODEM_RX_PIN 16
 #define MODEM_TX_PIN 17
-#define MODEM_BAUD   115200
+#define MODEM_BAUD 115200
 
 HardwareSerial SerialAT(2);
 
@@ -17,9 +17,9 @@ TinyGsm modem(SerialAT);
 TinyGsmClient simClient(modem);
 
 // APN settings
-const char APN[]       = "ppsim.jp";
-const char GPRS_USER[] = "pp@sim";
-const char GPRS_PASS[] = "jpn";
+const char APN[] = "vmobile.jp";
+const char GPRS_USER[] = "";
+const char GPRS_PASS[] = "";
 
 // server test
 const char server[] = "example.com";
@@ -86,8 +86,7 @@ void loop() {
 
   if (!simClient.connect(server, port)) {
     Serial.println("Connection failed");
-  } 
-  else {
+  } else {
 
     Serial.println("Connected to server");
 
@@ -102,7 +101,6 @@ void loop() {
         char c = simClient.read();
         Serial.print(c);
       }
-
     }
 
     simClient.stop();
@@ -138,8 +136,7 @@ void loop() {
     Serial.print("Satellites: ");
     Serial.println(vsat);
 
-  } 
-  else {
+  } else {
 
     Serial.println("Waiting GPS signal...");
   }

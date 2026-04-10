@@ -278,7 +278,7 @@ static String build_portal_page(const String &msg = "", bool ok = false)
   // Advanced: Device ID + MQTT + SIM APN
   h += "<div style='margin:20px 0 16px;border-top:1px solid #334155;padding-top:16px'>"
        "<p class='section-label'>Advanced</p>"
-       "<div class='field'><label>Device ID <span style='color:#475569'>(kosongkan untuk pakai auto-generated)</span></label>"
+       "<div class='field'><label>Device ID <span style='color:#475569'>(leave blank for auto-generated)</span></label>"
        "<input type='text' name='device_id' value='" + html_esc(_portal_device_id) + "' "
        "placeholder='e.g. MM-A1B2C3' autocomplete='off' maxlength='31'></div>"
        "<div class='field'><label>MQTT Broker IP</label>"
@@ -290,10 +290,10 @@ static String build_portal_page(const String &msg = "", bool ok = false)
        "<div class='field'><label>APN</label>"
        "<input type='text' name='sim_apn' value='" + html_esc(_portal_sim_apn) + "' "
        "placeholder='e.g. internet' autocomplete='off'></div>"
-       "<div class='field'><label>APN Username <span style='color:#475569'>(kosongkan jika tidak ada)</span></label>"
+       "<div class='field'><label>APN Username <span style='color:#475569'>(leave blank if none)</span></label>"
        "<input type='text' name='sim_user' value='" + html_esc(_portal_sim_user) + "' "
        "placeholder='optional' autocomplete='off'></div>"
-       "<div class='field'><label>APN Password <span style='color:#475569'>(kosongkan jika tidak ada)</span></label>"
+       "<div class='field'><label>APN Password <span style='color:#475569'>(leave blank if none)</span></label>"
        "<input type='text' name='sim_pass' value='" + html_esc(_portal_sim_pass) + "' "
        "placeholder='optional' autocomplete='off'></div>"
        "</div>";
@@ -915,11 +915,7 @@ static void portal_start(Preferences *prefs)
   snprintf(suffix, sizeof(suffix), "%02X%02X", mac[4], mac[5]);
   portal_ssid = String("CIREN-") + suffix;
 
-  // Generate portal password unik dari 4 byte terakhir MAC: "xx-AABBCCDD"
-  // Tiap unit punya password berbeda — tidak bisa ditebak dari SSID
-  char portal_pass_buf[12];
-  snprintf(portal_pass_buf, sizeof(portal_pass_buf), "ci-%02X%02X%02X%02X",
-           mac[2], mac[3], mac[4], mac[5]);
+  const char* portal_pass_buf = PORTAL_PASS;
 
   WiFi.disconnect();
   delay(50);
@@ -949,14 +945,14 @@ static void portal_start(Preferences *prefs)
     ssid.trim(); ssid_m.trim(); pass.trim(); mqtt_host.trim();
     sim_apn.trim(); sim_user.trim(); sim_pass.trim(); device_id.trim();
     if (ssid.length() == 0) ssid = ssid_m;
-    if (ssid.length() == 0) {
-      portal_server.send(400, "text/html", build_portal_page("SSID empty.", false));
-      return;
-    }
+    // SSID is optional — user may run in SIM-only mode with no WiFi configured.
     if (_prefs_ptr) {
       _prefs_ptr->begin("ciren", false);
-      _prefs_ptr->putString("ssid", ssid);
-      _prefs_ptr->putString("pass", pass);
+      if (ssid.length() > 0) {
+        _prefs_ptr->putString("ssid", ssid);
+        _prefs_ptr->putString("pass", pass);
+      }
+      // If ssid is empty, leave existing ssid/pass in flash unchanged.
       if (mqtt_host.length() > 0) {
         _prefs_ptr->putString("mqtt_host", mqtt_host);
         _portal_mqtt_host = mqtt_host;

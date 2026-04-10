@@ -1,6 +1,7 @@
 const mqtt   = require('mqtt')
 const SensorReading          = require('../models/SensorReading')
 const { SensorNode, Device } = require('../models/Device')
+const NodeConfig             = require('../models/NodeConfig')
 const { broadcast }          = require('../websocket/ws')
 const { FTYPE }              = require('../utils/constants')
 
@@ -41,7 +42,7 @@ function _trackRx(key) {
 // ─── Rate limiter per device ──────────────────────
 // Batasi max MAX_MSG_PER_SEC pesan DATA per device per detik
 // Mencegah sensor hang/loop dari spam overwhelm server
-const MAX_MSG_PER_SEC  = 50   // max 50 DATA frame per detik per device
+const MAX_MSG_PER_SEC  = 500  // max 500 DATA frame per detik per device (IMU realtime)
 const _rateWindow      = {}   // { deviceId: { count, windowStart } }
 
 function _isRateLimited(deviceId) {
@@ -269,6 +270,9 @@ async function handleDeviceHello(deviceId, data) {
     device_id: deviceId, status: 'online', event: 'hello'
   })
   console.log(`[MQTT] Device online: ${deviceId}`)
+
+  // Re-send all stored node interval configs so firmware always has the latest values
+  resendNodeConfigs(deviceId)
 }
 
 // ─── Kirim config command ke main module ──────────
@@ -280,4 +284,27 @@ function sendConfig(deviceId, cmd) {
   return true
 }
 
-module.exports = { initMQTT, sendConfig }
+// ─── Kirim node interval config ke main module ────
+function sendNodeConfig(deviceId, ctrl_id, port_num, interval_ms) {
+  if (!client) return false
+  const topic   = `ciren/config/${deviceId}`
+  const payload = JSON.stringify({ action: 'set_node_interval', ctrl_id, port_num, interval_ms })
+  client.publish(topic, payload, { qos: 1 })
+  return true
+}
+
+// ─── Re-kirim semua stored node configs untuk device (dipanggil saat device HELLO) ───
+async function resendNodeConfigs(deviceId) {
+  try {
+    const configs = await NodeConfig.find({ device_id: deviceId }).lean()
+    if (configs.length === 0) return
+    for (const cfg of configs) {
+      sendNodeConfig(deviceId, cfg.ctrl_id, cfg.port_num, cfg.interval_ms)
+    }
+    console.log(`[MQTT] Resent ${configs.length} node config(s) → ${deviceId}`)
+  } catch (e) {
+    console.error('[MQTT] resendNodeConfigs error:', e.message)
+  }
+}
+
+module.exports = { initMQTT, sendConfig, sendNodeConfig }

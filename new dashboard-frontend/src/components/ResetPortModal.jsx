@@ -10,7 +10,9 @@ export default function ResetPortModal({
   portNum,
   sensorType,
   onSuccess,
+  t,
 }) {
+  const tr = t?.reset || {}
   const [loading, setLoading] = useState(true)
   const [info, setInfo] = useState(null)
   const [resetting, setResetting] = useState(false)
@@ -43,7 +45,7 @@ export default function ResetPortModal({
       const items = Array.isArray(data) ? data : []
 
       if (items.length === 0) {
-        setError('No active sensor data on this port')
+        setError(tr.errorNoData || 'No active sensor data on this port')
         return
       }
 
@@ -58,7 +60,7 @@ export default function ResetPortModal({
         duration_hours: durationMs !== null ? durationMs / (1000 * 60 * 60) : null,
       })
     } catch (err) {
-      setError(err.message || 'Failed to fetch port info')
+      setError(err.message || (tr.errorFetchFailed || 'Failed to fetch port info'))
     } finally {
       setLoading(false)
     }
@@ -81,10 +83,10 @@ export default function ResetPortModal({
         onSuccess?.({ deletedReadings: data.deleted ?? 0 })
         onClose()
       } else {
-        setError(data.error || 'Reset failed')
+        setError(data.error || (tr.errorResetFailed || 'Reset failed'))
       }
     } catch (err) {
-      setError(err.message || 'Failed to reset port')
+      setError(err.message || (tr.errorResetError || 'Failed to reset port'))
     } finally {
       setResetting(false)
     }
@@ -101,7 +103,7 @@ export default function ResetPortModal({
               <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Reset Port</h2>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{tr.title || 'Reset Port'}</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Controller {ctrlId} · Port {portNum}
               </p>
@@ -116,7 +118,7 @@ export default function ResetPortModal({
           {loading && (
             <div className="text-center py-8">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500" />
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-3">Loading port info...</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-3">{tr.loading || 'Loading port info...'}</p>
             </div>
           )}
 
@@ -130,11 +132,11 @@ export default function ResetPortModal({
             <>
               <div className="rounded-lg border border-black/10 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50 p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Current Sensor</span>
-                  <span className="px-2 py-1 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 text-xs font-medium">Active</span>
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{tr.currentSensor || 'Current Sensor'}</span>
+                  <span className="px-2 py-1 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 text-xs font-medium">{tr.active || 'Active'}</span>
                 </div>
                 <div>
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Started: </span>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">{tr.started || 'Started:'} </span>
                   <span className="text-sm font-medium text-slate-900 dark:text-white">
                     {info.started_at ? new Date(info.started_at).toLocaleString() : '—'}
                   </span>
@@ -145,7 +147,7 @@ export default function ResetPortModal({
                 <div className="rounded-lg border border-black/10 bg-white dark:border-white/10 dark:bg-slate-800 p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Activity className="w-4 h-4 text-cyan-500" />
-                    <span className="text-xs text-gray-600 dark:text-gray-400">Readings</span>
+                    <span className="text-xs text-gray-600 dark:text-gray-400">{tr.readings || 'Readings'}</span>
                   </div>
                   <div className="text-2xl font-bold text-slate-900 dark:text-white">
                     {info.total_readings.toLocaleString()}
@@ -154,7 +156,7 @@ export default function ResetPortModal({
                 <div className="rounded-lg border border-black/10 bg-white dark:border-white/10 dark:bg-slate-800 p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-4 h-4 text-indigo-500" />
-                    <span className="text-xs text-gray-600 dark:text-gray-400">Duration</span>
+                    <span className="text-xs text-gray-600 dark:text-gray-400">{tr.duration || 'Duration'}</span>
                   </div>
                   <div className="text-2xl font-bold text-slate-900 dark:text-white">
                     {typeof info.duration_hours === 'number' ? `${info.duration_hours.toFixed(1)}h` : '—'}
@@ -166,9 +168,11 @@ export default function ResetPortModal({
                 <div className="flex items-start gap-3">
                   <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-sm font-medium text-red-900 dark:text-red-200 mb-1">Data Will Be Deleted</h4>
+                    <h4 className="text-sm font-medium text-red-900 dark:text-red-200 mb-1">{tr.warningTitle || 'Data Will Be Deleted'}</h4>
                     <p className="text-sm text-red-800 dark:text-red-300">
-                      All <strong>{info.total_readings.toLocaleString()} readings</strong> from this sensor will be permanently deleted.
+                      {tr.warningBody
+                        ? tr.warningBody(info.total_readings)
+                        : <><strong>{info.total_readings.toLocaleString()} readings</strong> from this sensor will be permanently deleted.</>}
                     </p>
                   </div>
                 </div>
@@ -179,7 +183,7 @@ export default function ResetPortModal({
 
         <div className="flex items-center justify-end gap-3 p-6 border-t border-black/10 dark:border-white/10">
           <button onClick={onClose} disabled={resetting} className="px-4 py-2 rounded-lg border border-black/10 bg-white hover:bg-black/5 text-slate-900 dark:border-white/10 dark:bg-slate-800 dark:text-white dark:hover:bg-white/10 transition-colors disabled:opacity-50">
-            Cancel
+            {tr.cancel || 'Cancel'}
           </button>
           <button
             onClick={handleConfirmReset}
@@ -189,12 +193,12 @@ export default function ResetPortModal({
             {resetting ? (
               <>
                 <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                <span>Resetting...</span>
+                <span>{tr.resetting || 'Resetting...'}</span>
               </>
             ) : (
               <>
                 <Trash2 className="w-4 h-4" />
-                <span>Delete & Reset</span>
+                <span>{tr.deleteReset || 'Delete & Reset'}</span>
               </>
             )}
           </button>

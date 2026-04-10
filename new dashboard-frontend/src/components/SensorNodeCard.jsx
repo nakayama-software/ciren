@@ -11,13 +11,14 @@ import InfraredCard from './sensors/InfraredCard'
 import RotaryCard from './sensors/RotaryCard'
 import GenericCard from './sensors/GenericCard'
 
-function timeAgo(ts) {
+export function timeAgo(ts, t) {
   if (!ts) return null
+  const tr = t?.timeAgo || {}
   const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (diff < 5) return 'Just now'
-  if (diff < 60) return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 5) return tr.justNow || 'Just now'
+  if (diff < 60) return tr.secondsAgo ? tr.secondsAgo(diff) : `${diff}s ago`
+  if (diff < 3600) return tr.minutesAgo ? tr.minutesAgo(Math.floor(diff / 60)) : `${Math.floor(diff / 60)}m ago`
+  return tr.hoursAgo ? tr.hoursAgo(Math.floor(diff / 3600)) : `${Math.floor(diff / 3600)}h ago`
 }
 
 export default function SensorNodeCard({
@@ -32,6 +33,7 @@ export default function SensorNodeCard({
   isHumTemp,
   onChartClick,
   onIMU3DClick,
+  t,
 }) {
   const nowMs = now || Date.now()
   const st = Number(sensorType)
@@ -46,7 +48,7 @@ export default function SensorNodeCard({
       >
         <div className="flex-1"><IMUCard ctrlId={ctrlId} portNum={portNum} latestData={latestData} /></div>
         <div className="mt-3 pt-3 border-t border-black/10 dark:border-white/10">
-          <p className="text-[10px] text-center text-violet-600 dark:text-violet-400">Click to open 3D view</p>
+          <p className="text-[10px] text-center text-violet-600 dark:text-violet-400">{t?.imu?.open3D || 'Click to open 3D view'}</p>
         </div>
       </div>
     )
@@ -63,11 +65,12 @@ export default function SensorNodeCard({
         status={status}
         now={nowMs}
         onChartClick={onChartClick}
+        t={t}
       />
     )
   }
 
-  const sharedProps = { portNum, reading, status, onChartClick }
+  const sharedProps = { portNum, reading, status, onChartClick, t }
 
   // Standalone temperature (1-Wire DS18B20 or 0x01 without humidity)
   if (st === 0x0A || st === 0x01) return <TemperatureCard {...sharedProps} />
@@ -80,5 +83,5 @@ export default function SensorNodeCard({
   if (st === 0x13) return <RotaryCard {...sharedProps} />
 
   // Vibration and unknown types
-  return <GenericCard portNum={portNum} sensorType={sensorType} reading={reading} status={status} onChartClick={onChartClick} />
+  return <GenericCard portNum={portNum} sensorType={sensorType} reading={reading} status={status} onChartClick={onChartClick} t={t} />
 }

@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { Cpu, ArrowLeft, Download, Zap, AlertTriangle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Cpu, ArrowLeft, Download, Zap, AlertTriangle, Timer } from 'lucide-react'
 import { getNodeKey, getReadingKey, isIMUSensor } from '../utils/sensors'
 import { getThreshold, isOutOfRange } from '../utils/thresholds'
+import { getNodeConfig } from '../lib/api'
 import SensorNodeCard from './SensorNodeCard'
 import LineChartModal from './charts/LineChartModal'
 import IMU3DModal from './charts/IMU3DModal'
@@ -12,6 +13,7 @@ import AliasInlineEdit from './AliasInlineEdit'
 import LabelManager from './LabelManager'
 import MultiSensorView from './MultiSensorView'
 import ThresholdModal from './ThresholdModal'
+import NodeIntervalModal from './NodeIntervalModal'
 
 export default function ControllerDetailView({
   ctrlId,
@@ -29,8 +31,21 @@ export default function ControllerDetailView({
   const [rotaryTarget, setRotaryTarget]       = useState(null)  // { ctrlId, portNum }
   const [resetTarget, setResetTarget]         = useState(null)  // { ctrlId, portNum, sensorType }
   const [thresholdTarget, setThresholdTarget] = useState(null)  // { ctrlId, portNum, sensorType }
+  const [intervalTarget, setIntervalTarget]   = useState(null)  // { ctrlId, portNum }
   const [showExport, setShowExport]           = useState(false)
   const [openLabel, setOpenLabel]             = useState(null)  // label object for MultiSensorView
+  // Stored interval config: key = `${ctrlId}_${portNum}` → interval_ms
+  const [nodeIntervals, setNodeIntervals]     = useState({})
+
+  useEffect(() => {
+    getNodeConfig(deviceId)
+      .then(configs => {
+        const map = {}
+        configs.forEach(c => { map[`${c.ctrl_id}_${c.port_num}`] = c.interval_ms })
+        setNodeIntervals(map)
+      })
+      .catch(() => {})
+  }, [deviceId])
 
   const ctrlNodes = nodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
   const nowMs = now || Date.now()
@@ -82,9 +97,14 @@ export default function ControllerDetailView({
     }
   }
 
-  const tBack        = t?.controllerDetail?.back        || 'Back'
-  const tSensorNodes = t?.controllerDetail?.sensorNodes || 'Active Nodes'
-  const tNoNode      = t?.controllerDetail?.noNode      || 'No node connected.'
+  const tBack        = t?.controllerDetail?.back           || 'Back'
+  const tSensorNodes = t?.controllerDetail?.sensorNodes    || 'Active Nodes'
+  const tNoNode      = t?.controllerDetail?.noNode         || 'No node connected.'
+  const tActiveNow   = t?.controllerDetail?.activeNow      || 'active now'
+  const tSNTitle     = t?.controllerDetail?.sensorNodesTitle|| 'Sensor Nodes'
+  const tOutOfRange  = t?.controllerDetail?.outOfRange     || 'Out of range'
+  const tExport      = t?.controllerDetail?.export         || 'Export'
+  const tNodesReg    = t?.controllerDetail?.nodesRegistered || ((n) => `${n} node${n !== 1 ? 's' : ''} registered`)
 
   return (
     <div className="rounded-2xl border border-black/10 bg-white/80 p-6 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm">
@@ -102,7 +122,7 @@ export default function ControllerDetailView({
               textClass="text-xl font-semibold text-slate-900 dark:text-white"
             />
             <p className="text-xs text-slate-500 dark:text-gray-400">
-              {ctrlNodes.length} node{ctrlNodes.length !== 1 ? 's' : ''} registered
+              {tNodesReg(ctrlNodes.length)}
             </p>
           </div>
         </div>
@@ -113,7 +133,7 @@ export default function ControllerDetailView({
             className="inline-flex items-center gap-2 border border-black/10 dark:border-white/10 px-3 py-2 rounded-lg text-sm text-slate-700 dark:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline">{tExport}</span>
           </button>
           <button
             onClick={onBack}
@@ -131,12 +151,12 @@ export default function ControllerDetailView({
           <Zap className="w-4 h-4 text-cyan-500" />
           <span className="text-xs text-gray-600 dark:text-gray-400">{tSensorNodes}:</span>
           <span className="text-xl font-semibold text-slate-900 dark:text-white">{activeCount}</span>
-          <span className="text-xs text-slate-400 dark:text-gray-500">active now</span>
+          <span className="text-xs text-slate-400 dark:text-gray-500">{tActiveNow}</span>
         </div>
       </div>
 
       {/* Sensor grid */}
-      <h3 className="text-base font-medium mb-4 text-slate-900 dark:text-white">Sensor Nodes</h3>
+      <h3 className="text-base font-medium mb-4 text-slate-900 dark:text-white">{tSNTitle}</h3>
 
       {displayNodes.length === 0 ? (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-800 dark:text-yellow-200">
@@ -170,7 +190,7 @@ export default function ControllerDetailView({
                 {alert && (
                   <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md bg-red-500 px-1.5 py-0.5 text-[10px] font-medium text-white pointer-events-none">
                     <AlertTriangle className="w-3 h-3" />
-                    Out of range
+                    {tOutOfRange}
                   </div>
                 )}
                 <SensorNodeCard
@@ -185,9 +205,17 @@ export default function ControllerDetailView({
                   isHumTemp={isHumTemp}
                   onChartClick={() => handleChartClick(node)}
                   onIMU3DClick={() => setImu3DTarget({ ctrlId: node.ctrl_id, portNum: node.port_num })}
+                  t={t}
                 />
                 {/* Hover action buttons */}
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setIntervalTarget({ ctrlId: node.ctrl_id, portNum: node.port_num }) }}
+                    title="Set upload interval"
+                    className="p-1 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400"
+                  >
+                    <Timer className="w-3 h-3" />
+                  </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); setThresholdTarget({ ctrlId: node.ctrl_id, portNum: node.port_num, sensorType: node.sensor_type }) }}
                     title="Set threshold"
@@ -249,6 +277,7 @@ export default function ControllerDetailView({
         portNum={resetTarget?.portNum}
         sensorType={resetTarget?.sensorType}
         onSuccess={() => setResetTarget(null)}
+        t={t}
       />
 
       <ExportModal
@@ -257,6 +286,7 @@ export default function ControllerDetailView({
         deviceId={deviceId}
         ctrlId={ctrlId}
         nodes={ctrlNodes}
+        t={t}
       />
 
       <ThresholdModal
@@ -266,6 +296,23 @@ export default function ControllerDetailView({
         ctrlId={thresholdTarget?.ctrlId}
         portNum={thresholdTarget?.portNum}
         sensorType={thresholdTarget?.sensorType}
+        t={t}
+      />
+
+      <NodeIntervalModal
+        open={!!intervalTarget}
+        onClose={(savedMs) => {
+          if (savedMs != null) {
+            const key = `${intervalTarget.ctrlId}_${intervalTarget.portNum}`
+            setNodeIntervals(prev => ({ ...prev, [key]: savedMs }))
+          }
+          setIntervalTarget(null)
+        }}
+        deviceId={deviceId}
+        ctrlId={intervalTarget?.ctrlId}
+        portNum={intervalTarget?.portNum}
+        currentIntervalMs={intervalTarget ? nodeIntervals[`${intervalTarget.ctrlId}_${intervalTarget.portNum}`] : null}
+        t={t}
       />
 
       <MultiSensorView
@@ -294,6 +341,7 @@ export default function ControllerDetailView({
         ctrlId={ctrlId}
         displayNodes={displayNodes}
         onOpenLabel={setOpenLabel}
+        t={t}
       />
     </div>
   )

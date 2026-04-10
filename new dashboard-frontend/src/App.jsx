@@ -24,15 +24,15 @@ import RegisterPage from './pages/RegisterPage'
 import DeviceManagementPage from './pages/DeviceManagementPage'
 
 // Build WebSocket URL from env or derive from VITE_API_BASE
+// WS now shares the same port as the HTTP server
 function buildWsUrl() {
   const wsUrl = import.meta.env.VITE_WS_URL
-  // VITE_WS_URL: konversi http→ws, port apapun→3001
-  if (wsUrl) return wsUrl.replace(/^https?/, 'ws').replace(/:\d+/, ':3001')
+  if (wsUrl) return wsUrl.replace(/^http/, 'ws')  // http→ws, https→wss
 
   const apiBase = import.meta.env.VITE_API_BASE
-  if (apiBase) return apiBase.replace(/^https?/, 'ws').replace(/:\d+/, ':3001')
+  if (apiBase) return apiBase.replace(/^http/, 'ws')
 
-  return 'ws://localhost:3001'
+  return 'ws://localhost:3000'
 }
 
 const WS_URL = buildWsUrl()
@@ -106,6 +106,7 @@ export default function App() {
 
   // ---------- dashboard data ----------
   const [devices, setDevices] = useState({})
+  useEffect(() => { devicesRef.current = devices }, [devices])
   // latestData: { [deviceId]: { [getReadingKey(ctrl_id, port_num, sensor_type)]: reading } }
   const [latestData, setLatestData] = useState({})
   const [nodeStatus, setNodeStatus] = useState({})
@@ -117,6 +118,8 @@ export default function App() {
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
   const mountedRef = useRef(true)
+  const nodeRefreshTimers = useRef({})
+  const devicesRef = useRef({})
 
   // ---------- load devices from user account ----------
   async function loadUserDevices() {
@@ -223,6 +226,31 @@ export default function App() {
             ...prev,
             [device_id]: { ...(prev[device_id] || {}), [nKey]: 'online' },
           }))
+          // ctrl_id baru terdeteksi dari DATA (tanpa HELLO) — misal saat ctrl_id ganti tanpa unplug
+          const currentNodes = devicesRef.current[device_id]?.nodes || []
+          const nodeKnown = currentNodes.some(
+            (n) => String(n.ctrl_id) === String(ctrl_id) && String(n.port_num) === String(port_num)
+          )
+          if (!nodeKnown) {
+            clearTimeout(nodeRefreshTimers.current[device_id])
+            nodeRefreshTimers.current[device_id] = setTimeout(async () => {
+              if (!mountedRef.current) return
+              try {
+                const { nodes, ...deviceFields } = await getDevice(device_id)
+                setDevices((prev) => {
+                  if (!prev[device_id]) return prev
+                  return {
+                    ...prev,
+                    [device_id]: {
+                      ...prev[device_id],
+                      device: { ...prev[device_id].device, ...deviceFields },
+                      nodes: nodes || [],
+                    },
+                  }
+                })
+              } catch { /* ignore */ }
+            }, 1000)
+          }
         } else if (type === 'device_status') {
           const { device_id, ...rest } = payload
           setDevices((prev) => {
@@ -236,12 +264,34 @@ export default function App() {
             }
           })
         } else if (type === 'node_status') {
-          const { device_id, ctrl_id, port_num, status } = payload
+          const { device_id, ctrl_id, port_num, status, event } = payload
           const key = getNodeKey(ctrl_id, port_num)
           setNodeStatus((prev) => ({
             ...prev,
             [device_id]: { ...(prev[device_id] || {}), [key]: status },
           }))
+          // Saat HELLO: debounce refresh nodes dari API (tunggu 1s semua HELLO selesai)
+          // Ini handle: node baru, ctrl_id ganti, node pindah port
+          if (event === 'hello') {
+            clearTimeout(nodeRefreshTimers.current[device_id])
+            nodeRefreshTimers.current[device_id] = setTimeout(async () => {
+              if (!mountedRef.current) return
+              try {
+                const { nodes, ...deviceFields } = await getDevice(device_id)
+                setDevices((prev) => {
+                  if (!prev[device_id]) return prev
+                  return {
+                    ...prev,
+                    [device_id]: {
+                      ...prev[device_id],
+                      device: { ...prev[device_id].device, ...deviceFields },
+                      nodes: nodes || [],
+                    },
+                  }
+                })
+              } catch { /* ignore */ }
+            }, 1000)
+          }
         }
       } catch {
         // ignore malformed

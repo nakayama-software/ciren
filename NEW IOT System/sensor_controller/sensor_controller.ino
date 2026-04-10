@@ -56,6 +56,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <esp_wifi.h>
+#include <Preferences.h>
 
 typedef struct {
   uint8_t type;
@@ -122,13 +123,23 @@ const int RX_P8 = 19; // can
 #define FRAME_END        0x55
 #define FRAME_SIZE       12
 #define FRAME_SIZE_TYPED 13
-#define FTYPE_DATA       0x01
-#define FTYPE_HELLO      0x02
-#define FTYPE_HEARTBEAT  0x03
-#define FTYPE_DATA_TYPED 0x04
-#define FTYPE_HB_TYPED   0x05
-#define FTYPE_ERROR      0xFF
-#define FTYPE_STALE      0xFE
+#define FTYPE_DATA        0x01
+#define FTYPE_HELLO       0x02
+#define FTYPE_HEARTBEAT   0x03
+#define FTYPE_DATA_TYPED  0x04
+#define FTYPE_HB_TYPED    0x05
+#define FTYPE_ERROR       0xFF
+#define FTYPE_STALE       0xFE
+#define FTYPE_CONFIG      0x10  // main module → sensor controller: set interval
+#define FTYPE_CONFIG_ACK  0x11  // sensor controller → main module: config applied
+
+// Default forward intervals by sensor category (ms)
+#define INTERVAL_IMU_MS   100    // IMU: 10 Hz
+#define INTERVAL_ENV_MS   10000  // temp/humidity: 10 s
+#define INTERVAL_OTHER_MS 5000   // everything else: 5 s
+
+// Max sensor types tracked per port (IMU has up to 9)
+#define MAX_STYPES_PER_PORT 10
 #define STYPE_TEMPERATURE 0x01
 #define STYPE_HUMIDITY    0x02
 #define STYPE_ACCEL_X     0x03
@@ -141,6 +152,92 @@ const int RX_P8 = 19; // can
 #define STYPE_ROLL        0x11
 #define STYPE_YAW         0x12
 
+// ─── Per-port config + data buffer ───────────────────
+struct PortBufEntry {
+  uint8_t  stype;
+  float    value;
+  uint32_t ts;
+  uint8_t  ftype;
+  bool     pending;
+};
+
+struct PortConfig {
+  uint8_t      last_stype;       // stype of last HELLO — detect sensor swap
+  uint32_t     interval_ms;      // configured forward interval
+  uint32_t     last_forward_ms;  // millis() of last forward
+  PortBufEntry buf[MAX_STYPES_PER_PORT];
+  uint8_t      n_buf;            // number of tracked stypes
+};
+
+PortConfig port_cfg[PORT_MAX];
+Preferences portPrefs;
+
+// ─────────────────────────────────────────────────────
+uint32_t default_interval_for(uint8_t stype) {
+  if ((stype >= 0x03 && stype <= 0x08) ||
+      (stype >= 0x10 && stype <= 0x12)) return INTERVAL_IMU_MS;
+  if (stype == 0x01 || stype == 0x02)   return INTERVAL_ENV_MS;
+  return INTERVAL_OTHER_MS;
+}
+
+void save_port_cfg(int idx) {
+  char key[8];
+  snprintf(key, sizeof(key), "p%d_ms", idx + 1);
+  portPrefs.begin("portcfg", false);
+  portPrefs.putUInt(key, port_cfg[idx].interval_ms);
+  portPrefs.end();
+}
+
+void load_port_configs() {
+  portPrefs.begin("portcfg", true);
+  for (int i = 0; i < PORT_MAX; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "p%d_ms", i + 1);
+    uint32_t stored = portPrefs.getUInt(key, 0);
+    port_cfg[i].interval_ms     = (stored > 0) ? stored : INTERVAL_OTHER_MS;
+    port_cfg[i].last_forward_ms = 0;
+    port_cfg[i].last_stype      = 0;
+    port_cfg[i].n_buf           = 0;
+  }
+  portPrefs.end();
+}
+
+// Find or create buffer entry for (port_idx, stype)
+PortBufEntry* get_buf(int port_idx, uint8_t stype) {
+  PortConfig& cfg = port_cfg[port_idx];
+  for (int j = 0; j < cfg.n_buf; j++) {
+    if (cfg.buf[j].stype == stype) return &cfg.buf[j];
+  }
+  if (cfg.n_buf < MAX_STYPES_PER_PORT) {
+    PortBufEntry* e = &cfg.buf[cfg.n_buf++];
+    e->stype   = stype;
+    e->pending = false;
+    return e;
+  }
+  return nullptr;
+}
+
+// Forward all pending buffered readings for all ports
+void flush_port_buffers() {
+  if (!macValid || !channel_synced) return;
+  uint32_t now = millis();
+  for (int i = 0; i < PORT_ACTIVE; i++) {
+    if (!nodeOnline[i]) continue;
+    PortConfig& cfg = port_cfg[i];
+    if (now - cfg.last_forward_ms < cfg.interval_ms) continue;
+    bool sent_any = false;
+    for (int j = 0; j < cfg.n_buf; j++) {
+      if (!cfg.buf[j].pending) continue;
+      send_to_main(i + 1, cfg.buf[j].ftype, cfg.buf[j].stype,
+                   cfg.buf[j].value, cfg.buf[j].ts);
+      cfg.buf[j].pending = false;
+      sent_any = true;
+    }
+    if (sent_any) cfg.last_forward_ms = now;
+  }
+}
+
+// ─────────────────────────────────────────────────────
 bool is_valid_ftype(uint8_t ft) {
   return ft == FTYPE_DATA || ft == FTYPE_HELLO || ft == FTYPE_HEARTBEAT
       || ft == FTYPE_DATA_TYPED || ft == FTYPE_HB_TYPED || ft == FTYPE_ERROR;
@@ -265,6 +362,33 @@ void on_data_sent(const uint8_t* mac, esp_now_send_status_t status) {
 }
 
 void on_data_recv(const uint8_t* mac, const uint8_t* data, int len) {
+  // ── ConfigPacket from main module ────────────────────
+  if (len == sizeof(EspNowPacket)) {
+    EspNowPacket pkt;
+    memcpy(&pkt, data, sizeof(pkt));
+    if (pkt.ftype == FTYPE_CONFIG) {
+      uint8_t  target_port = pkt.port_num;   // 0 = all ports
+      uint32_t new_ms      = (uint32_t)pkt.value;
+      if (new_ms == 0) new_ms = INTERVAL_OTHER_MS;  // guard
+
+      if (target_port == 0) {
+        for (int i = 0; i < PORT_MAX; i++) {
+          port_cfg[i].interval_ms = new_ms;
+          save_port_cfg(i);
+        }
+        Serial.printf("[CFG] All ports → %lu ms\n", new_ms);
+      } else if (target_port >= 1 && target_port <= PORT_MAX) {
+        port_cfg[target_port - 1].interval_ms = new_ms;
+        save_port_cfg(target_port - 1);
+        Serial.printf("[CFG] Port %d → %lu ms\n", target_port, new_ms);
+      }
+      // Send ACK back to main module
+      send_to_main(target_port, FTYPE_CONFIG_ACK, 0, pkt.value, millis());
+    }
+    return;
+  }
+
+  // ── HelloAck from main module ────────────────────────
   if (len != sizeof(HelloAck)) return;
 
   HelloAck ack;
@@ -381,6 +505,20 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
 
   if (ftype == FTYPE_HELLO) {
     uint8_t announced = (uint8_t)value;
+
+    // ── Detect sensor swap: reset interval if sensor_type changed ──
+    PortConfig& pcfg = port_cfg[idx];
+    if (pcfg.last_stype != 0 && pcfg.last_stype != announced) {
+      // Different sensor plugged in — reset to type-appropriate default
+      uint32_t new_default = default_interval_for(announced);
+      pcfg.interval_ms     = new_default;
+      pcfg.n_buf           = 0;  // clear stale stype buffers
+      save_port_cfg(idx);
+      Serial.printf("[CFG] P%d sensor changed 0x%02X→0x%02X, interval reset to %lu ms\n",
+                    port.port_num, pcfg.last_stype, announced, new_default);
+    }
+    pcfg.last_stype = announced;
+
     if (!port.active) {
       port.sensor_type = announced;
       port.active      = true;
@@ -393,6 +531,7 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
     Serial.printf("[P%d] HELLO stype=0x%02X (%s)\n",
                   port.port_num, announced, stype_str(announced));
 #endif
+    // HELLO always forwarded immediately (registration critical)
     send_to_main(port.port_num, FTYPE_HELLO, announced, (float)announced, millis());
     return;
   }
@@ -411,7 +550,14 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
                 port.port_num, ftype_str(ftype), stype_str(stype), value);
 #endif
 
-  send_to_main(port.port_num, ftype, stype, value, ts);
+  // ── Buffer latest reading, forward at configured interval ──
+  PortBufEntry* entry = get_buf(idx, stype);
+  if (entry) {
+    entry->value   = value;
+    entry->ts      = ts;
+    entry->ftype   = ftype;
+    entry->pending = true;
+  }
 }
 
 void parse_byte(SensorPort& port, uint8_t b) {
@@ -777,6 +923,7 @@ void setup() {
     Serial.println("[HELLO] Sent to main module");
   }
 
+  load_port_configs();
   Serial.println("CIREN Sensor Controller ready.");
 }
 
@@ -903,6 +1050,9 @@ void loop() {
       parse_byte(ports[i], b);
     }
   }
+
+  // ── Forward buffered sensor data at configured intervals ─
+  flush_port_buffers();
 
   // ── Watchdog node timeout ─────────────────────────
   watchdog_check();

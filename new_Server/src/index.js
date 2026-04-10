@@ -15,7 +15,6 @@ const handleStats   = require('./api/stats')
 
 const app  = express()
 const PORT = process.env.PORT || 3000
-const WS_PORT = process.env.WS_PORT || 3001
 
 // ─── Middleware ───────────────────────────────────
 app.use(cors())
@@ -40,16 +39,15 @@ async function start() {
     // 1. MongoDB
     await connectMongo()
 
-    // 2. WebSocket server (realtime ke dashboard)
-    initWS(WS_PORT)
+    // 2. WebSocket server — akan di-attach ke HTTP server setelah listen
 
     // 3. MQTT subscriber (terima data dari main module)
     initMQTT()
 
-    // 4. HTTP server
-    app.listen(PORT, () => {
+    // 4. HTTP server (WebSocket shares same port via server attachment)
+    const server = app.listen(PORT, () => {
       console.log(`[HTTP] Server running on port ${PORT}`)
-      console.log(`[WS]   WebSocket on port ${WS_PORT}`)
+      console.log(`[WS]   WebSocket on port ${PORT} (shared)`)
       console.log('')
       console.log('API endpoints:')
       console.log(`  GET  /api/health`)
@@ -61,6 +59,9 @@ async function start() {
       console.log(`  GET  /api/devices/:id/data/history`)
       console.log(`  POST /api/devices/:id/config`)
     })
+
+    // 5. Attach WebSocket ke HTTP server (share port)
+    initWS(server)
   } catch (err) {
     console.error('Startup error:', err)
     process.exit(1)
