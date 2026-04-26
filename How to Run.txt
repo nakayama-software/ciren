@@ -1,7 +1,7 @@
 FRONTEND SYSTEM
-cd dashboard-frontend
+cd frontend
 npm run dev
 
 BACKEND SYSTEM
-cd SERVER
+cd backend
 npm run dev

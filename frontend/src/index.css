@@ -1,2 +1,7 @@
 @import "tailwindcss";
-@custom-variant dark (&:where(.dark, .dark *));
+@import "leaflet/dist/leaflet.css";
+
+/* Enable class-based dark mode (Tailwind v4).
+   Without this, dark: variants respond to OS prefers-color-scheme only,
+   and the JavaScript toggle (adding .dark on <html>) has no effect. */
+@variant dark (&:where(.dark, .dark *));

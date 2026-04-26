@@ -1,3 +1,25 @@
 **/node_modules/
-.env
-dist/
+.DS_Store
+**/.DS_Store
+
+# Legacy directories (archived / replaced)
+SERVER/
+dashboard-frontend/
+mock-server/
+raspi/
+IOT System/esp_main_module/
+IOT System/new_esp_main_module/
+IOT System/sensor_controller_Hardcode_MAC/
+
+# Deployment secrets
+.cloudflared/
+.claude.zip
+**/.env
+**/.env.production
+**/.env.local
+
+Caddyfile
+
+# Build output
+**/dist/
+**/*.zip

@@ -1,418 +1,278 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
-import { Move3d, Thermometer } from "lucide-react";
-import { socket } from "../../lib/socket";
+import { useEffect, useRef, useState } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { OrbitControls } from '@react-three/drei'
+import { Move3d } from 'lucide-react'
+import { buildIMUFromLatest } from '../../utils/sensors'
 
-function parseIMUValue(valueStr) {
-  if (!valueStr || typeof valueStr !== "string") return null;
-  const parts = valueStr.split("|").map((x) => x.trim()).filter(Boolean);
-  if (parts.length < 2) return null;
-  const [accStr, gyrStr, tempStr] = parts;
-  const acc = accStr.split(",").map((n) => Number(n.trim()));
-  const gyr = gyrStr.split(",").map((n) => Number(n.trim()));
-  const temp = tempStr != null ? Number(tempStr.trim()) : null;
-  if (acc.length !== 3 || gyr.length !== 3) return null;
-  if (acc.some((v) => Number.isNaN(v)) || gyr.some((v) => Number.isNaN(v))) return null;
-  return {
-    accelerometer: { x: acc[0], y: acc[1], z: acc[2] },
-    gyroscope:     { x: gyr[0], y: gyr[1], z: gyr[2] },
-    temperature:   temp !== null && !Number.isNaN(temp) ? temp : null,
-  };
-}
-
-function parseIMUPayloadLegacy(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  const s = raw.trim();
-  const idx = s.indexOf("VAL=");
-  let payload = s;
-  if (idx >= 0) {
-    payload = s.slice(idx + 4).trim();
-  } else if (/^\d/.test(s)) {
-    const i1 = s.indexOf("-");
-    if (i1 >= 0) {
-      const i2 = s.indexOf("-", i1 + 1);
-      if (i2 >= 0) payload = s.slice(i2 + 1).trim();
-    }
-  }
-  return parseIMUValue(payload);
-}
-
-function getReadingValue(node, key) {
-  const readings = Array.isArray(node?.readings) ? node.readings : [];
-  const hit = readings.find((r) => r?.key === key);
-  return typeof hit?.value === "number" && !Number.isNaN(hit.value) ? hit.value : null;
-}
-
-function buildIMUFromNode(node) {
-  const imu = node?.parsed?.imu;
-  if (imu?.accel && imu?.gyro) {
-    return {
-      accelerometer: imu.accel,
-      gyroscope:     imu.gyro,
-      temperature:   typeof imu.tempC === "number" ? imu.tempC : null,
-    };
-  }
-
-  const ax = getReadingValue(node, "ax"), ay = getReadingValue(node, "ay"), az = getReadingValue(node, "az");
-  const gx = getReadingValue(node, "gx"), gy = getReadingValue(node, "gy"), gz = getReadingValue(node, "gz");
-  const temp = getReadingValue(node, "temp");
-  if (ax != null && ay != null && az != null && gx != null && gy != null && gz != null) {
-    return { accelerometer: { x: ax, y: ay, z: az }, gyroscope: { x: gx, y: gy, z: gz }, temperature: temp };
-  }
-
-  if (typeof node?.value === "string" && node.value) {
-    return parseIMUValue(node.value);
-  }
-
-  if (typeof node?.sensor_data === "string" && node.sensor_data) {
-    return parseIMUPayloadLegacy(node.sensor_data);
-  }
-
-  return null;
-}
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-
-function normalizeVec3(x, y, z) {
-  const mag = Math.sqrt(x * x + y * y + z * z);
-  if (!mag || !Number.isFinite(mag)) return { x: 0, y: 0, z: 0 };
-  return { x: x / mag, y: y / mag, z: z / mag };
-}
-
-function eulerFromAccel(acc) {
-  const g = normalizeVec3(acc.x, acc.y, acc.z);
-  const roll  = Math.atan2(g.y, g.z);
-  const pitch = Math.atan2(-g.x, Math.sqrt(g.y * g.y + g.z * g.z));
-  return { roll, pitch };
-}
+const DEG2RAD = Math.PI / 180
 
 function fmt(n, d = 2) {
-  if (n === null || n === undefined || Number.isNaN(n)) return "--";
-  return Number(n).toFixed(d);
+  if (n === null || n === undefined || Number.isNaN(n)) return '--'
+  return Number(n).toFixed(d)
 }
 
-function normalizeSensorType(s) {
-  return String(s || "").toLowerCase().trim();
-}
+// orientRef: { pitch, roll, yaw } in degrees (from node)
+// offsetRef: { pitch, roll, yaw } for recenter
+function IMUObject({ orientRef, offsetRef }) {
+  const meshRef = useRef(null)
 
-function getPortFromNode(n) {
-  const pn = Number(n?.port_number);
-  if (Number.isFinite(pn) && pn > 0) return pn;
-  const id = String(n?.node_id || "");
-  const m = id.match(/^p(\d+)$/i);
-  return m ? Number(m[1]) : null;
-}
-
-function pickNodeByPort(nodeOrNodes, portId) {
-  const p = Number(portId);
-  if (!Number.isFinite(p)) return null;
-  if (Array.isArray(nodeOrNodes)) {
-    return nodeOrNodes.find((n) => getPortFromNode(n) === p) || null;
-  }
-  if (nodeOrNodes && typeof nodeOrNodes === "object") {
-    const pn = getPortFromNode(nodeOrNodes);
-    if (pn === p) return nodeOrNodes;
-  }
-  return null;
-}
-
-function IMUObject({ imuRef, filterRef }) {
-  const meshRef = useRef(null);
-
-  useFrame((_, delta) => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    const imu = imuRef.current;
-    if (!imu) return;
-
-    const dt = clamp(delta, 0, 0.05);
-    const gx = imu.gyroscope?.x ?? 0;
-    const gy = imu.gyroscope?.y ?? 0;
-    const gz = imu.gyroscope?.z ?? 0;
-
-    const filter = filterRef.current;
-    const rollGyro  = filter.roll  + gx * dt;
-    const pitchGyro = filter.pitch + gy * dt;
-    const yawGyro   = filter.yaw   + gz * dt;
-
-    if (filter.useComplementary) {
-      const { roll: rollAcc, pitch: pitchAcc } = eulerFromAccel(imu.accelerometer);
-      const a = clamp(filter.alpha, 0, 1);
-      filter.roll  = a * rollGyro  + (1 - a) * rollAcc;
-      filter.pitch = a * pitchGyro + (1 - a) * pitchAcc;
-      filter.yaw   = yawGyro;
-    } else {
-      filter.roll  = rollGyro;
-      filter.pitch = pitchGyro;
-      filter.yaw   = yawGyro;
-    }
-
-    mesh.rotation.set(filter.roll, filter.pitch, filter.yaw, "XYZ");
-  });
+  useFrame(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    const o = orientRef.current
+    const off = offsetRef.current
+    // Apply Euler angles directly (node already ran complementary filter)
+    // Three.js rotation.set uses radians, order XYZ
+    mesh.rotation.set(
+      (o.pitch - off.pitch) * DEG2RAD,
+      (o.yaw   - off.yaw)   * DEG2RAD,
+      (o.roll  - off.roll)  * DEG2RAD,
+      'XYZ'
+    )
+  })
 
   return (
     <group>
+      {/* PCB body */}
       <mesh ref={meshRef} castShadow receiveShadow>
         <boxGeometry args={[1.4, 0.2, 0.9]} />
-        <meshStandardMaterial roughness={0.35} metalness={0.2} />
+        <meshStandardMaterial color="#1e40af" roughness={0.35} metalness={0.3} />
       </mesh>
-      <mesh position={[0, 0.14, 0]} castShadow receiveShadow>
+      {/* Connector nub */}
+      <mesh position={[0, 0.14, 0]}>
         <boxGeometry args={[0.15, 0.06, 0.12]} />
-        <meshStandardMaterial roughness={0.4} metalness={0.1} />
+        <meshStandardMaterial color="#94a3b8" roughness={0.4} metalness={0.1} />
       </mesh>
-      <gridHelper args={[10, 10]} />
-      <axesHelper args={[2]} />
+      <gridHelper args={[10, 10, '#334155', '#1e293b']} />
+      <axesHelper args={[1.5]} />
     </group>
-  );
+  )
 }
 
-export default function IMU3DModal({
-  open, onClose,
-  raspiId, hubId, portId, sensorTypeHint, node,
-}) {
-  // console.log("IMU3DModal props: ", { open, raspiId, hubId, portId, sensorTypeHint, node });
+// wsRef: { current: WebSocket | null }
+export default function IMU3DModal({ open, onClose, deviceId, ctrlId, portNum, latestData, wsRef }) {
+  // Orientation state — updated by WS
+  const orientRef = useRef({ pitch: 0, roll: 0, yaw: 0 })
+  const offsetRef = useRef({ pitch: 0, roll: 0, yaw: 0 })
 
-  const raspiKey  = useMemo(() => String(raspiId || "").toLowerCase().trim(), [raspiId]);
-  const hubKey    = useMemo(() => String(hubId || "").trim(), [hubId]);
-  const portKey   = useMemo(() => Number(portId), [portId]);
-  const sensorKey = useMemo(() => normalizeSensorType(sensorTypeHint || "imu"), [sensorTypeHint]);
+  // Display values (updated at ~10Hz to avoid excess re-renders)
+  const [display, setDisplay] = useState({ pitch: 0, roll: 0, yaw: 0 })
 
-  const baseNode = useMemo(() => pickNodeByPort(node, portKey), [node, portKey]);
-
-  const [imu, setImu] = useState(() => buildIMUFromNode(baseNode));
-  const imuRef = useRef(null);
-
-  const filterRef = useRef({
-    roll: 0, pitch: 0, yaw: 0,
-    alpha: 0.98,
-    useComplementary: true,
-  });
-
-  const [alphaUi, setAlphaUi] = useState(0.98);
-  const [useComp, setUseComp] = useState(true);
-  const [ori, setOri] = useState({ roll: 0, pitch: 0, yaw: 0 });
-
-  useEffect(() => { filterRef.current.alpha = alphaUi; }, [alphaUi]);
-  useEffect(() => { filterRef.current.useComplementary = useComp; }, [useComp]);
-  useEffect(() => { imuRef.current = imu || null; }, [imu]);
-
+  // Seed from latestData on open — intentionally excludes latestData from deps
+  // so that incoming WS readings don't reset offsetRef (which would break Recenter)
   useEffect(() => {
-    if (!open) return;
-    filterRef.current.roll = 0;
-    filterRef.current.pitch = 0;
-    filterRef.current.yaw = 0;
-  }, [open, raspiKey, hubKey, portKey, sensorKey]);
+    if (!open) return
+    const imu = latestData ? buildIMUFromLatest(ctrlId, portNum, latestData) : null
+    const euler = imu?.euler
+    // Fallback: estimasi pitch/roll dari accel jika euler tidak tersedia
+    let initPitch = euler?.pitch ?? null
+    let initRoll  = euler?.roll  ?? null
+    if (initPitch === null && imu?.accelerometer) {
+      const { x: ax, y: ay, z: az } = imu.accelerometer
+      if (ax !== null && ay !== null && az !== null) {
+        initPitch = Math.atan2(ay, Math.sqrt(ax * ax + az * az)) * 180 / Math.PI
+        initRoll  = Math.atan2(-ax, az) * 180 / Math.PI
+      }
+    }
+    orientRef.current = {
+      pitch: initPitch ?? 0,
+      roll:  initRoll  ?? 0,
+      yaw:   euler?.yaw ?? 0,
+    }
+    offsetRef.current = { pitch: 0, roll: 0, yaw: 0 }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, ctrlId, portNum])  // latestData excluded — only re-seed when modal opens or port changes
 
+  // Display refresh timer
   useEffect(() => {
-    if (!open) return;
-    setImu(buildIMUFromNode(baseNode));
-  }, [open, baseNode]);
-
-  useEffect(() => {
-    if (!open) return;
+    if (!open) return
     const id = setInterval(() => {
-      const f = filterRef.current;
-      setOri({ roll: f.roll, pitch: f.pitch, yaw: f.yaw });
-    }, 120);
-    return () => clearInterval(id);
-  }, [open]);
+      const o = orientRef.current
+      const off = offsetRef.current
+      setDisplay({
+        pitch: o.pitch - off.pitch,
+        roll:  o.roll  - off.roll,
+        yaw:   o.yaw   - off.yaw,
+      })
+    }, 100)
+    return () => clearInterval(id)
+  }, [open])
 
+  // Subscribe to WS for live Euler angle updates (0x10/0x11/0x12)
   useEffect(() => {
-    if (!open) return;
+    if (!open || !wsRef?.current) return
+    const ws = wsRef.current
 
-    const handler = (p) => {
-      // console.log("2222");
-      
-      if (!p) return;
-      const pRaspi = String(p.raspberry_serial_id || p.raspi_serial_id || "").toLowerCase().trim();
-      const pHub   = String(p.module_id || p.hub_id || "").trim();
-      const pPort  = Number(p.port_number ?? p.port_id);
-      const pType  = normalizeSensorType(p.sensor_type);
+    const handler = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data)
+        if (msg.type !== 'sensor_data') return
+        const p = msg.payload
 
-      if (raspiKey && pRaspi && pRaspi !== raspiKey) return;
-      if (hubKey   && pHub   && pHub   !== hubKey)   return;
-      if (Number.isFinite(portKey) && Number.isFinite(pPort) && pPort !== portKey) return;
-      if (sensorKey && pType && pType !== sensorKey) return;
-      if (sensorKey && !pType && sensorKey !== "imu") return;
+        if (p.device_id !== deviceId)             return
+        if (Number(p.ctrl_id) !== Number(ctrlId)) return
+        // Port tidak dicek secara ketat — data diterima dari port manapun untuk ctrl ini
+        // Ini handle kasus port mismatch antara registrasi MongoDB dan port aktual
 
-      const virtualNode = {
-        ...p,
-        parsed:      p.parsed,
-        readings:    p.readings,
-        sensor_data: p.sensor_data,
-        value:       p.value,
-        sensor_type: p.sensor_type || sensorKey,
-      };
+        const st = Number(p.sensor_type)
+        const v  = Number(p.value)
+        if (!Number.isFinite(v)) return
 
-      const next = buildIMUFromNode(virtualNode);
-      if (!next) return;
-      setImu(next);
-    };
+        // Euler angles dari firmware baru (node_mpu6050 dengan complementary filter)
+        if      (st === 0x10) orientRef.current = { ...orientRef.current, pitch: v }
+        else if (st === 0x11) orientRef.current = { ...orientRef.current, roll:  v }
+        else if (st === 0x12) orientRef.current = { ...orientRef.current, yaw:   v }
+        // Raw accel dari firmware lama — estimasi pitch/roll (noisy, no yaw)
+        else if (st >= 0x03 && st <= 0x05) {
+          // Kumpulkan accel, hitung orientation saat semua 3 axis terupdate
+          const cur = orientRef.current
+          const _ax = st === 0x03 ? v : (cur._ax ?? 0)
+          const _ay = st === 0x04 ? v : (cur._ay ?? 0)
+          const _az = st === 0x05 ? v : (cur._az ?? 0)
+          const pitch = Math.atan2(_ay, Math.sqrt(_ax * _ax + _az * _az)) * 180 / Math.PI
+          const roll  = Math.atan2(-_ax, _az) * 180 / Math.PI
+          orientRef.current = { ...cur, _ax, _ay, _az, pitch, roll }
+        }
+      } catch {}
+    }
 
-    socket.on("node-sample",    handler);
-    socket.on("sensor-reading", handler);
-    return () => {
-      socket.off("node-sample",    handler);
-      socket.off("sensor-reading", handler);
-    };
-  }, [open, raspiKey, hubKey, portKey, sensorKey]);
+    ws.addEventListener('message', handler)
+    return () => ws.removeEventListener('message', handler)
+  }, [open, wsRef, deviceId, ctrlId])
 
-  if (!open) return null;
+  function handleRecenter() {
+    offsetRef.current = { ...orientRef.current }
+  }
 
-  const acc  = imu?.accelerometer || null;
-  const gyr  = imu?.gyroscope     || null;
-  const temp = imu?.temperature   ?? null;
-
-  const headerNodeId = baseNode?.node_id || `P${portKey}`;
-  const headerType   = normalizeSensorType(baseNode?.sensor_type || sensorKey || "imu") || "imu";
-
-  // console.log("acc gyr temp ", acc,gyr,temp);
-  
+  if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-[min(1100px,94vw)] rounded-2xl border border-white/10 bg-slate-950 max-h-[calc(100dvh-16px)] sm:max-h-[calc(100dvh-32px)] flex flex-col overflow-hidden">
 
-      <div className="relative w-[min(1100px,94vw)] rounded-2xl border border-white/10 bg-slate-950 p-4">
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 pt-4 pb-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="rounded-lg bg-indigo-500/10 border border-indigo-400/20 p-2">
+            <div className="rounded-lg bg-indigo-500/10 border border-indigo-400/20 p-2 shrink-0">
               <Move3d className="w-5 h-5 text-indigo-300" />
             </div>
             <div className="min-w-0">
               <p className="text-white font-semibold">IMU 3D View</p>
-              <p className="text-xs text-gray-400 truncate">
-                {hubId ?? "-"} • {headerNodeId} • {headerType}
-              </p>
+              <p className="text-xs text-gray-400 truncate">Ctrl {ctrlId} · Port {portNum} · MPU6050</p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-full bg-amber-400/10 border border-amber-300/20 px-2.5 py-1">
-              <Thermometer className="w-4 h-4 text-amber-300" />
-              <span className="text-xs font-mono text-white tabular-nums">
-                {temp == null ? "--" : `${fmt(temp, 2)} °C`}
-              </span>
-            </div>
-            <button onClick={onClose}
-              className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200">
-              Close
-            </button>
-          </div>
+          <button onClick={onClose}
+            className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200 cursor-pointer whitespace-nowrap shrink-0">
+            Close
+          </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Body — scrollable */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          {/* 3D Canvas */}
           <div className="lg:col-span-2 rounded-xl border border-white/10 bg-black/30 overflow-hidden">
-            <div className="h-[420px]">
+            <div className="h-[220px] sm:h-[320px] lg:h-[420px]">
               <Canvas camera={{ position: [2.6, 1.6, 2.6], fov: 50 }}>
-                <ambientLight intensity={0.6} />
+                <ambientLight intensity={0.5} />
                 <directionalLight position={[4, 6, 2]} intensity={1.0} castShadow />
-                <IMUObject imuRef={imuRef} filterRef={filterRef} />
+                <IMUObject orientRef={orientRef} offsetRef={offsetRef} />
                 <OrbitControls enablePan enableRotate enableZoom />
               </Canvas>
             </div>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-white font-semibold">Live Values</p>
-              <span className="text-[11px] text-gray-400">MPU6050</span>
+          {/* Live Values Panel */}
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-white font-semibold text-sm">Orientation</p>
+              <span className="text-[11px] text-gray-400 truncate">Complementary filter on-node</span>
             </div>
 
-            <div className="mt-3 space-y-3">
-              <div className="rounded-xl bg-black/20 border border-white/10 p-3">
-                <p className="text-[11px] text-gray-400">Accelerometer</p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {["x", "y", "z"].map((k) => (
-                    <div key={k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2">
-                      <p className="text-[10px] text-gray-400">{k.toUpperCase()}</p>
-                      <p className="mt-0.5 text-sm font-mono text-white tabular-nums">
-                        {acc ? fmt(acc[k], 2) : "--"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-black/20 border border-white/10 p-3">
-                <p className="text-[11px] text-gray-400">Gyroscope</p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {["x", "y", "z"].map((k) => (
-                    <div key={k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2">
-                      <p className="text-[10px] text-gray-400">{k.toUpperCase()}</p>
-                      <p className="mt-0.5 text-sm font-mono text-white tabular-nums">
-                        {gyr ? fmt(gyr[k], 3) : "--"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-black/20 border border-white/10 p-3">
-                <p className="text-[11px] text-gray-400">Stabilization</p>
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <label className="text-xs text-gray-300 flex items-center gap-2">
-                    <input type="checkbox" checked={useComp}
-                      onChange={(e) => setUseComp(e.target.checked)}
-                      className="accent-indigo-400" />
-                    Complementary filter
-                  </label>
-                  <button
-                    onClick={() => {
-                      filterRef.current.roll = 0;
-                      filterRef.current.pitch = 0;
-                      filterRef.current.yaw = 0;
-                    }}
-                    className="text-xs rounded-md border px-2.5 py-1.5 hover:bg-white/5 border-white/10 text-gray-200">
-                    Recenter
-                  </button>
-                </div>
-                <div className="mt-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-gray-400">Alpha</span>
-                    <span className="text-[11px] text-gray-300 font-mono tabular-nums">{fmt(alphaUi, 2)}</span>
+            {/* Euler angles */}
+            <div className="rounded-xl bg-black/20 border border-white/10 p-3">
+              <p className="text-[11px] text-gray-400 mb-2">Euler Angles (°)</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { k: 'Pitch', v: display.pitch, color: 'text-cyan-400' },
+                  { k: 'Roll',  v: display.roll,  color: 'text-violet-400' },
+                  { k: 'Yaw',   v: display.yaw,   color: 'text-emerald-400' },
+                ].map((it) => (
+                  <div key={it.k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2 text-center">
+                    <p className="text-[10px] text-gray-400">{it.k}</p>
+                    <p className={`mt-0.5 text-sm font-mono tabular-nums ${it.color}`}>
+                      {fmt(it.v, 1)}°
+                    </p>
                   </div>
-                  <input type="range" min="0.85" max="0.995" step="0.001"
-                    value={alphaUi} onChange={(e) => setAlphaUi(Number(e.target.value))}
-                    className="w-full mt-2" disabled={!useComp} />
-                </div>
+                ))}
               </div>
-
-              <div className="rounded-xl bg-black/20 border border-white/10 p-3">
-                <p className="text-[11px] text-gray-400">Orientation (rad)</p>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {[
-                    { k: "Roll",  v: ori.roll  },
-                    { k: "Pitch", v: ori.pitch },
-                    { k: "Yaw",   v: ori.yaw   },
-                  ].map((it) => (
-                    <div key={it.k} className="rounded-lg bg-white/5 border border-white/10 px-2 py-2">
-                      <p className="text-[10px] text-gray-400">{it.k}</p>
-                      <p className="mt-0.5 text-sm font-mono text-white tabular-nums">{fmt(it.v, 3)}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {!imu && (
-                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3">
-                  <p className="text-xs text-red-200">Invalid IMU payload</p>
-                </div>
-              )}
             </div>
+
+            {/* Visual orientation bars */}
+            <div className="rounded-xl bg-black/20 border border-white/10 p-3 space-y-3">
+              <p className="text-[11px] text-gray-400">Visual</p>
+              {[
+                { k: 'Pitch', v: display.pitch, range: 90,  color: 'bg-cyan-500' },
+                { k: 'Roll',  v: display.roll,  range: 180, color: 'bg-violet-500' },
+                { k: 'Yaw',   v: display.yaw,   range: 180, color: 'bg-emerald-500' },
+              ].map((it) => {
+                const pct = Math.min(100, Math.max(0, ((it.v + it.range) / (it.range * 2)) * 100))
+                return (
+                  <div key={it.k}>
+                    <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                      <span>{it.k}</span>
+                      <span className="font-mono">{fmt(it.v, 1)}°</span>
+                    </div>
+                    <div className="relative h-2 rounded-full bg-white/10 overflow-hidden">
+                      {/* Center mark */}
+                      <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/20" />
+                      {/* Value indicator */}
+                      <div
+                        className={`absolute top-0 bottom-0 w-1.5 rounded-full ${it.color}`}
+                        style={{ left: `calc(${pct}% - 3px)`, transition: 'left 0.08s linear' }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Controls */}
+            <div className="rounded-xl bg-black/20 border border-white/10 p-3">
+              <p className="text-[11px] text-gray-400 mb-2">Controls</p>
+              <button
+                onClick={handleRecenter}
+                className="w-full text-xs rounded-md border px-2.5 py-2 hover:bg-white/10 border-white/10 text-gray-200 cursor-pointer transition-colors">
+                ⊕ Recenter (zero current position)
+              </button>
+              <p className="mt-2 text-[10px] text-gray-500 text-center">
+                Drag to orbit · Scroll to zoom
+              </p>
+            </div>
+
+            {/* Waiting state */}
+            {display.pitch === 0 && display.roll === 0 && display.yaw === 0 && (
+              <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/10 p-3">
+                <p className="text-xs text-yellow-200">Waiting for IMU data…</p>
+                <p className="text-[10px] text-yellow-300/60 mt-1">
+                  Expecting sensor_type 0x10/0x11/0x12
+                </p>
+              </div>
+            )}
           </div>
         </div>
+        </div>{/* end scrollable body */}
 
-        <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-end">
+        {/* Footer — hidden on mobile (header already has Close) */}
+        <div className="hidden sm:flex pt-3 pb-4 px-4 border-t border-white/10 items-center justify-end shrink-0">
           <button onClick={onClose}
-            className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200">
+            className="text-xs rounded-md border px-3 py-1.5 hover:bg-white/5 border-white/10 text-gray-200 cursor-pointer">
             Close
           </button>
         </div>
       </div>
     </div>
-  );
+  )
 }

@@ -1,1 +1,0 @@
-Directory purpose for function or module testing
