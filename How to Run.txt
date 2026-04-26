@@ -4,4 +4,4 @@ npm run dev
 
 BACKEND SYSTEM
 cd backend
-npm run dev
+$env:NODE_ENV="production"; node src/index.js             
