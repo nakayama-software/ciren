@@ -23,3 +23,9 @@ Caddyfile
 # Build output
 **/dist/
 **/*.zip
+
+# Claude Code
+.claude
+config/
+dev.config
+temporary files/
