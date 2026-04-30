@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Cpu, Plus, Trash2, Check, X, LogOut, LayoutDashboard,
-  Globe, Sun, Moon, Wifi, ChevronRight, AlertTriangle, Menu,
+  Sun, Moon, Wifi, ChevronRight, AlertTriangle, Menu,
 } from 'lucide-react'
 import { getUserDevices, addUserDevice, removeUserDevice } from '../lib/api'
 
@@ -104,18 +104,15 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
   }
 
   const LangSwitch = () => (
-    <div className="flex items-center gap-2">
-      <Globe className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-      <div className="inline-flex rounded-md bg-black/5 p-1 border border-black/10 dark:border-white/10 dark:bg-white/10">
-        {['ja', 'en'].map((lang) => (
-          <button key={lang} type="button" onClick={() => setLanguage(lang)}
-            className={`px-3 py-1 text-xs rounded cursor-pointer ${language === lang
-              ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
-              : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'}`}>
-            {lang === 'ja' ? '日本語' : 'EN'}
-          </button>
-        ))}
-      </div>
+    <div className="inline-flex rounded-md bg-black/5 p-0.5 border border-black/10 dark:border-white/10 dark:bg-white/10">
+      {['ja', 'en'].map((lang) => (
+        <button key={lang} type="button" onClick={() => setLanguage(lang)}
+          className={`px-2.5 py-1 text-xs rounded cursor-pointer transition-colors ${language === lang
+            ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+            : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'}`}>
+          {lang === 'ja' ? 'JP' : 'EN'}
+        </button>
+      ))}
     </div>
   )
 
@@ -131,8 +128,8 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
             </div>
             <div className="min-w-0">
               <h1 className="text-sm sm:text-xl font-semibold tracking-tight whitespace-nowrap">{t.title}</h1>
-              <p className="hidden sm:block text-xs text-gray-600 dark:text-gray-400 truncate">
-                {username} · {t.subtitle}
+              <p className="hidden sm:block text-xs text-gray-500 dark:text-gray-400 truncate">
+                {t.subtitle}
               </p>
             </div>
           </div>
