@@ -178,8 +178,9 @@ export default function App() {
     }
   }
 
-  function handleGoToDashboard() {
+  function handleGoToDashboard(deviceId) {
     setSelectedCtrlId(null)
+    if (deviceId) setSelectedDeviceId(deviceId)
     setPage(PAGE_DASH)
     loadUserDevices()
   }

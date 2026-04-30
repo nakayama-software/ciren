@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
-  Cpu, Plus, Trash2, Check, X, LogOut, LayoutDashboard,
+  Cpu, Plus, Trash2, Check, X, LogOut,
   Sun, Moon, Wifi, ChevronRight, AlertTriangle, Menu,
 } from 'lucide-react'
 import { getUserDevices, addUserDevice, removeUserDevice } from '../lib/api'
@@ -137,20 +137,14 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
           {/* Desktop nav (≥640px) */}
           <div className="hidden sm:flex items-center gap-2 shrink-0">
             <button type="button" onClick={toggleTheme}
-              className="inline-flex items-center gap-2 rounded-md border border-black/10 bg-black/5 px-3 py-1 text-xs text-gray-700 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20 cursor-pointer">
+              className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 cursor-pointer">
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              <span className="hidden lg:inline">{theme === 'dark' ? (language === 'ja' ? 'ライト' : 'Light') : (language === 'ja' ? 'ダーク' : 'Dark')}</span>
             </button>
             <LangSwitch />
-            <button type="button" onClick={onGoToDashboard}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-gray-100 cursor-pointer">
-              <LayoutDashboard className="w-4 h-4" />
-              <span className="hidden md:inline">{t.goToDashboard}</span>
-            </button>
             <button type="button" onClick={onLogout}
-              className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-transparent px-3 py-1.5 text-xs font-medium text-slate-900 hover:bg-black/5 dark:border-white/10 dark:text-white dark:hover:bg-white/10 cursor-pointer">
-              <LogOut className="w-4 h-4" />
-              <span className="hidden lg:inline">{t.logout}</span>
+              className="inline-flex items-center gap-1.5 rounded-md border border-black/10 bg-black/5 px-3 py-1.5 text-xs text-gray-700 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20 cursor-pointer">
+              <LogOut className="w-3.5 h-3.5" />
+              <span>{t.logout}</span>
             </button>
           </div>
 
@@ -175,9 +169,8 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
                     {theme === 'dark' ? (language === 'ja' ? 'ライトモード' : 'Light mode') : (language === 'ja' ? 'ダークモード' : 'Dark mode')}
                   </button>
                   {/* Language */}
-                  <div className="px-4 py-3 flex items-center gap-2 border-b border-black/5 dark:border-white/5">
-                    <Globe className="w-4 h-4 text-gray-400 shrink-0" />
-                    <span className="text-sm text-slate-700 dark:text-gray-200 mr-auto">{language === 'ja' ? '言語' : 'Language'}</span>
+                  <div className="px-4 py-3 flex items-center justify-between border-b border-black/5 dark:border-white/5">
+                    <span className="text-sm text-slate-700 dark:text-gray-200">{language === 'ja' ? '言語' : 'Language'}</span>
                     <div className="flex gap-1">
                       {['ja', 'en'].map((lang) => (
                         <button key={lang} type="button" onClick={() => { setLanguage(lang); setMobileMenuOpen(false) }}
@@ -189,12 +182,6 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
                       ))}
                     </div>
                   </div>
-                  {/* Dashboard */}
-                  <button type="button" onClick={() => { onGoToDashboard(); setMobileMenuOpen(false) }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-black/5 dark:text-gray-200 dark:hover:bg-white/10 transition-colors cursor-pointer border-b border-black/5 dark:border-white/5">
-                    <LayoutDashboard className="w-4 h-4 text-gray-400 shrink-0" />
-                    {t.goToDashboard}
-                  </button>
                   {/* Logout */}
                   <button type="button" onClick={() => { onLogout(); setMobileMenuOpen(false) }}
                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 transition-colors cursor-pointer">
@@ -283,7 +270,7 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
                       <p className="text-xs text-gray-500 dark:text-gray-400">{t.deviceId}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={onGoToDashboard} title={t.goToDashboard}
+                      <button onClick={() => onGoToDashboard(id)} title={t.goToDashboard}
                         className="p-2 rounded-lg border border-black/10 text-cyan-600 hover:bg-cyan-500/10 dark:border-white/10 dark:text-cyan-400 cursor-pointer">
                         <ChevronRight className="w-4 h-4" />
                       </button>
