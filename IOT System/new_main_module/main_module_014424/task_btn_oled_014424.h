@@ -426,10 +426,10 @@ static void _draw_gateway()
   y += 22;
 
   tft.setTextSize(1);
-  tft.setTextColor(C_WHITE, C_BG);
+  tft.setTextColor(C_GRAY, C_BG);
   tft.setCursor(PAD, y);
   tft.print("MAC: ");
-  tft.setTextColor(C_ACCENT, C_BG);
+  tft.setTextColor(C_WHITE, C_BG);
   tft.print(WiFi.macAddress().c_str());
   y += 18;
 
