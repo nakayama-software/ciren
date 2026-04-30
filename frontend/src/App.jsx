@@ -447,41 +447,33 @@ export default function App() {
               </div>
 
               {/* ── Desktop nav (≥640px) ── */}
-              <div className="hidden sm:flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2">
                 {/* WS status */}
-                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mr-1">
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${wsColors[wsStatus]}`} />
-                  <span>{wsLabels[wsStatus]}</span>
+                  <span className="hidden lg:inline">{wsLabels[wsStatus]}</span>
                 </div>
-                {/* Clock */}
-                <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums hidden lg:inline">
-                  {currentTime.toLocaleTimeString()}
-                </span>
-                {/* Theme */}
+                {/* Theme — icon only */}
                 <button onClick={toggleTheme} aria-label="Toggle theme"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-black/10 bg-black/5 px-3 py-1.5 text-xs text-gray-700 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20 transition-colors cursor-pointer">
-                  {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
-                  <span>{theme === 'dark' ? (lang === 'ja' ? 'ライト' : 'Light') : (lang === 'ja' ? 'ダーク' : 'Dark')}</span>
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
+                  {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
                 </button>
                 {/* Language */}
-                <div className="flex items-center gap-1.5">
-                  <Globe size={14} className="text-gray-400" />
-                  <div className="inline-flex rounded-md bg-black/5 p-0.5 border border-black/10 dark:border-white/10 dark:bg-white/10">
-                    {['ja', 'en'].map((l) => (
-                      <button key={l} onClick={() => setLang(l)}
-                        className={`px-2.5 py-1 text-xs rounded cursor-pointer transition-colors ${lang === l
-                          ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
-                          : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
-                        }`}>
-                        {l === 'ja' ? '日本語' : 'EN'}
-                      </button>
-                    ))}
-                  </div>
+                <div className="inline-flex rounded-md bg-black/5 p-0.5 border border-black/10 dark:border-white/10 dark:bg-white/10">
+                  {['ja', 'en'].map((l) => (
+                    <button key={l} onClick={() => setLang(l)}
+                      className={`px-2.5 py-1 text-xs rounded cursor-pointer transition-colors ${lang === l
+                        ? (theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+                        : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
+                      }`}>
+                      {l === 'ja' ? 'JP' : 'EN'}
+                    </button>
+                  ))}
                 </div>
-                {/* Devices */}
-                <button onClick={() => setPage(PAGE_DEVICES)}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-black/10 bg-black/5 px-3 py-1.5 text-xs text-gray-700 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/20 transition-colors cursor-pointer">
-                  <Settings size={13} /><span>Devices</span>
+                {/* Devices — icon only */}
+                <button onClick={() => setPage(PAGE_DEVICES)} aria-label="Devices"
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
+                  <Settings size={14} />
                 </button>
                 {/* Logout */}
                 <button onClick={handleLogout}
