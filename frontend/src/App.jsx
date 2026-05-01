@@ -24,7 +24,7 @@ import ControllerDetailView from './components/ControllerDetailView'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DeviceManagementPage from './pages/DeviceManagementPage'
-import OnboardingTour, { isTourDone, resetTour } from './components/OnboardingTour'
+import OnboardingTour, { getStage, setStage } from './components/OnboardingTour'
 
 // Build WebSocket URL from env or derive from VITE_API_BASE
 // WS now shares the same port as the HTTP server
@@ -74,7 +74,6 @@ export default function App() {
 
   // ---------- onboarding tour ----------
   const [tourActive, setTourActive] = useState(false)
-  const tourTriggeredRef = useRef(false)
 
   // ---------- language ----------
   const [lang, setLang] = useState(() => localStorage.getItem('ciren-lang') || 'ja')
@@ -202,11 +201,10 @@ export default function App() {
 
   // Auto-start tour on first visit to dashboard
   useEffect(() => {
-    if (devicesLoading || !selectedDevice || tourTriggeredRef.current || isTourDone()) return
-    tourTriggeredRef.current = true
-    const timer = setTimeout(() => setTourActive(true), 700)
+    if (page !== PAGE_DASH || getStage() !== 'dashboard') return
+    const timer = setTimeout(() => setTourActive(true), 1500)
     return () => clearTimeout(timer)
-  }, [devicesLoading, selectedDevice])
+  }, [page])
 
   // ---------- WebSocket ----------
   const connect = useCallback(() => {
@@ -492,7 +490,7 @@ export default function App() {
                 </button>
                 {/* Help / tour */}
                 <button
-                  onClick={() => { resetTour(); setTourActive(false); setTimeout(() => setTourActive(true), 50) }}
+                  onClick={() => { setStage('dashboard'); setTourActive(false); setTimeout(() => setTourActive(true), 50) }}
                   aria-label={lang === 'ja' ? 'ツアーを再開' : 'Start tour'}
                   title={lang === 'ja' ? 'ツアーを再開' : 'Start tour'}
                   className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
@@ -873,6 +871,7 @@ export default function App() {
           </div>
 
           <OnboardingTour
+            page="dashboard"
             active={tourActive}
             lang={lang}
             onDone={() => setTourActive(false)}

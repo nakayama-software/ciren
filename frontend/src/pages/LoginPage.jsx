@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Wifi, ArrowRight, User, UserPlus, Globe, Sun, Moon, Eye, EyeOff } from 'lucide-react'
 import { login, setToken, setUsername, getPublicStats } from '../lib/api'
+import OnboardingTour, { getStage } from '../components/OnboardingTour'
 
 const translations = {
   en: {
@@ -60,6 +61,7 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
   const t = translations[language]
 
   const [showLoginForm, setShowLoginForm] = useState(false)
+  const [tourActive, setTourActive] = useState(() => getStage() === null)
   const [username, setUsernameState] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -199,7 +201,7 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
                       <StatCard label={t.stats.uptime}        value={stats.uptime} />
                     </div>
                     <div className="mt-4 sm:mt-8 flex flex-col gap-2 sm:flex-row">
-                      <button type="button" onClick={() => setShowLoginForm(true)}
+                      <button data-tour="login-btn" type="button" onClick={() => setShowLoginForm(true)}
                         className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 focus:ring-2 focus:ring-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-700 cursor-pointer">
                         <User className="h-4 w-4" />
                         <span>{t.buttons.login}</span>
@@ -239,7 +241,7 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
                       <label htmlFor="login-username" className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
                         {t.loginForm.usernameLabel}
                       </label>
-                      <input id="login-username" type="text" value={username}
+                      <input data-tour="login-username" id="login-username" type="text" value={username}
                         onChange={(e) => setUsernameState(e.target.value)}
                         placeholder={t.loginForm.usernamePlaceholder}
                         autoComplete="username"
@@ -249,7 +251,7 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
                       <label htmlFor="login-password" className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
                         {t.loginForm.passwordLabel}
                       </label>
-                      <div className="relative">
+                      <div data-tour="login-password" className="relative">
                         <input id="login-password" type={showPassword ? 'text' : 'password'} value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           placeholder={t.loginForm.passwordPlaceholder}
@@ -267,7 +269,7 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
                       </div>
                     )}
                     <div className="mt-4 flex items-center gap-2">
-                      <button type="submit" disabled={loading}
+                      <button data-tour="login-submit" type="submit" disabled={loading}
                         className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 cursor-pointer">
                         {loading ? (language === 'ja' ? '確認中...' : 'Signing in...') : t.buttons.submitLogin}
                         {!loading && <ArrowRight className="h-4 w-4" />}
@@ -288,6 +290,14 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
           {t.footer}
         </footer>
       </div>
+
+      <OnboardingTour
+        page="login"
+        lang={language}
+        active={tourActive}
+        onDone={() => setTourActive(false)}
+        openLoginForm={() => setShowLoginForm(true)}
+      />
     </div>
   )
 }

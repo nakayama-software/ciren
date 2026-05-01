@@ -4,6 +4,7 @@ import {
   Sun, Moon, Wifi, ChevronRight, AlertTriangle, Menu,
 } from 'lucide-react'
 import { getUserDevices, addUserDevice, removeUserDevice } from '../lib/api'
+import OnboardingTour, { getStage } from '../components/OnboardingTour'
 
 const translations = {
   en: {
@@ -52,6 +53,7 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
   const [language, setLanguage] = useState('ja')
   const t = useMemo(() => translations[language], [language])
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [tourActive, setTourActive] = useState(() => getStage() === 'devices')
 
   const [devices, setDevices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -195,7 +197,7 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
         </header>
 
         {/* Add Device Form */}
-        <div className="rounded-2xl border border-black/10 bg-white/80 p-4 sm:p-5 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm mb-6">
+        <div data-tour="devices-add" className="rounded-2xl border border-black/10 bg-white/80 p-4 sm:p-5 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm mb-6">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2 mb-3 sm:mb-4">
             <Plus className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
             {t.addTitle}
@@ -225,6 +227,7 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
         </div>
 
         {/* Device List */}
+        <div data-tour="devices-list">
         {loading ? (
           <div className="text-center py-12 text-sm text-gray-500 dark:text-gray-400">
             {language === 'ja' ? '読み込み中...' : 'Loading...'}
@@ -285,7 +288,15 @@ export default function DeviceManagementPage({ username, onGoToDashboard, onLogo
             ))}
           </div>
         )}
+        </div>
       </div>
+
+      <OnboardingTour
+        page="devices"
+        lang={language}
+        active={tourActive}
+        onDone={() => setTourActive(false)}
+      />
     </div>
   )
 }

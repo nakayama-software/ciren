@@ -2,24 +2,184 @@ import { useEffect, useRef } from 'react'
 import { driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
 
-const TOUR_KEY = 'ciren-tour-done'
+// ─── Stage management ────────────────────────────────────────────────────────
+// null        → brand new user, login tour pending
+// 'devices'   → login done, devices tour pending
+// 'dashboard' → devices done, dashboard tour pending
+// 'done'      → all tours complete
 
-export function isTourDone() {
-  return localStorage.getItem(TOUR_KEY) === 'true'
+const STAGE_KEY = 'ciren-onboarding'
+const NEXT_STAGE = { login: 'devices', devices: 'dashboard', dashboard: 'done' }
+
+export const getStage = () => {
+  const s = localStorage.getItem(STAGE_KEY)
+  // migrate from old key
+  if (!s && localStorage.getItem('ciren-tour-done') === 'true') return 'done'
+  return s
+}
+export const setStage  = (s) => localStorage.setItem(STAGE_KEY, s)
+export const resetAll  = () => localStorage.removeItem(STAGE_KEY)
+export const isTourDone = () => getStage() === 'done'
+export const resetTour  = resetAll  // backward compat
+
+// ─── Step definitions ────────────────────────────────────────────────────────
+
+const loginSteps = {
+  en: [
+    {
+      popover: {
+        title: 'Welcome to CIREN',
+        description:
+          'CIREN is a real-time IoT sensor monitoring dashboard. This short guide will walk you through getting started.',
+      },
+    },
+    {
+      element: '[data-tour="login-btn"]',
+      popover: {
+        title: 'Log In',
+        description:
+          'Click <b>Login</b> to open the sign-in form. Use the username and password provided with your device.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-username"]',
+      popover: {
+        title: 'Username',
+        description: 'Enter the username provided by your administrator.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-password"]',
+      popover: {
+        title: 'Password',
+        description:
+          'Enter your password. Click the eye icon on the right to show or hide it.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-submit"]',
+      popover: {
+        title: "You're ready!",
+        description:
+          'Enter your credentials above and click <b>Sign In</b> to start monitoring your sensors.',
+        side: 'top',
+      },
+    },
+  ],
+  ja: [
+    {
+      popover: {
+        title: 'CIRENへようこそ',
+        description:
+          'CIRENはIoTセンサーのデータをリアルタイムで監視するダッシュボードです。以下の手順に沿ってご利用を開始しましょう。',
+      },
+    },
+    {
+      element: '[data-tour="login-btn"]',
+      popover: {
+        title: 'ログイン',
+        description:
+          '<b>ログイン</b>ボタンをクリックすると入力フォームが表示されます。製品に同梱のユーザー名とパスワードをご使用ください。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-username"]',
+      popover: {
+        title: 'ユーザー名',
+        description: '管理者から提供されたユーザー名を入力してください。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-password"]',
+      popover: {
+        title: 'パスワード',
+        description:
+          'パスワードを入力してください。右側のアイコンで表示／非表示を切り替えられます。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-submit"]',
+      popover: {
+        title: 'ログインしましょう',
+        description:
+          'ユーザー名とパスワードを入力したら、<b>ログイン</b>ボタンを押してください。',
+        side: 'top',
+      },
+    },
+  ],
 }
 
-export function resetTour() {
-  localStorage.removeItem(TOUR_KEY)
+const devicesSteps = {
+  en: [
+    {
+      popover: {
+        title: 'Device Management',
+        description:
+          'This page lists all your registered IoT devices. You can add or remove devices here.',
+      },
+    },
+    {
+      element: '[data-tour="devices-add"]',
+      popover: {
+        title: 'Add Your Device',
+        description:
+          'Enter the Device ID printed on the label of your CIREN main module, then click <b>Add Device</b>.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="devices-list"]',
+      popover: {
+        title: 'Open the Dashboard',
+        description:
+          'Once your device appears here, click the <b>→</b> button to open the live sensor monitoring dashboard.',
+        side: 'top',
+      },
+    },
+  ],
+  ja: [
+    {
+      popover: {
+        title: 'デバイス管理',
+        description:
+          'こちらは登録済みIoTデバイスの管理画面です。デバイスの追加・削除ができます。',
+      },
+    },
+    {
+      element: '[data-tour="devices-add"]',
+      popover: {
+        title: 'デバイスを追加する',
+        description:
+          'CIRENメインモジュールのラベルに記載されているデバイスIDを入力し、<b>デバイスを追加</b>をクリックしてください。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="devices-list"]',
+      popover: {
+        title: 'ダッシュボードを開く',
+        description:
+          'デバイスが一覧に表示されたら、<b>→</b>ボタンをクリックするとリアルタイムの監視ダッシュボードが開きます。',
+        side: 'top',
+      },
+    },
+  ],
 }
 
-const steps = {
+const dashboardSteps = {
   en: [
     {
       element: '[data-tour="controller-cards"]',
       popover: {
         title: 'Sensor Controllers',
         description:
-          'Each card is a sensor hub that can connect up to 8 sensors. Click <b>View Details</b> to see live readings from each sensor.',
+          'Each card is a sensor hub that can connect up to 8 sensors. Click <b>View Details</b> to see live readings.',
         side: 'bottom',
         align: 'start',
       },
@@ -133,38 +293,63 @@ const steps = {
   ],
 }
 
-export default function OnboardingTour({ active, lang, onDone }) {
+const ALL_STEPS = { login: loginSteps, devices: devicesSteps, dashboard: dashboardSteps }
+
+// ─── Component ───────────────────────────────────────────────────────────────
+// page: 'login' | 'devices' | 'dashboard'
+// openLoginForm: () => void — called at login step 1 Next click to reveal the form
+export default function OnboardingTour({ page, lang, active, onDone, openLoginForm }) {
   const driverRef = useRef(null)
 
   useEffect(() => {
     if (!active) return
 
-    const tourSteps = steps[lang] || steps.en
+    const stepsMap = ALL_STEPS[page] || ALL_STEPS.dashboard
+    const tourSteps = stepsMap[lang] || stepsMap.ja
     const isJa = lang === 'ja'
 
-    driverRef.current = driver({
-      showProgress: true,
-      animate: true,
-      smoothScroll: true,
-      allowClose: true,
-      stagePadding: 10,
-      stageRadius: 12,
-      nextBtnText: isJa ? '次へ →' : 'Next →',
-      prevBtnText: isJa ? '← 戻る' : '← Back',
-      doneBtnText: isJa ? '完了' : 'Done',
-      steps: tourSteps,
-      onDestroyStarted: () => {
-        localStorage.setItem(TOUR_KEY, 'true')
-        driverRef.current?.destroy()
-        onDone?.()
-      },
-    })
-
-    driverRef.current.drive()
-
-    return () => {
+    const finish = () => {
+      setStage(NEXT_STAGE[page] || 'done')
       driverRef.current?.destroy()
+      onDone?.()
     }
+
+    try {
+      const config = {
+        showProgress: true,
+        animate: true,
+        smoothScroll: true,
+        allowClose: true,
+        stagePadding: 10,
+        stageRadius: 12,
+        nextBtnText: isJa ? '次へ →' : 'Next →',
+        prevBtnText: isJa ? '← 戻る' : '← Back',
+        doneBtnText: isJa ? '完了' : 'Done',
+        steps: tourSteps,
+        onDestroyStarted: finish,
+      }
+
+      // At login step index 1 (login button), clicking Next opens the form
+      if (page === 'login' && openLoginForm) {
+        config.onNextClick = (el, step, { state }) => {
+          if (state.activeIndex === 1) {
+            openLoginForm()
+            setTimeout(() => driverRef.current?.moveNext(), 400)
+          } else {
+            driverRef.current?.moveNext()
+          }
+        }
+      }
+
+      driverRef.current = driver(config)
+      driverRef.current.drive()
+    } catch (err) {
+      console.error('[OnboardingTour] failed to start:', err)
+      setStage(NEXT_STAGE[page] || 'done')
+      onDone?.()
+    }
+
+    return () => { driverRef.current?.destroy() }
   }, [active])
 
   return null
