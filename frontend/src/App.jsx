@@ -13,6 +13,7 @@ import {
   Battery,
   Menu,
   X,
+  HelpCircle,
 } from 'lucide-react'
 import {
   getDevice, getLatest, getUserDevices, clearToken, getToken,
@@ -23,6 +24,7 @@ import ControllerDetailView from './components/ControllerDetailView'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DeviceManagementPage from './pages/DeviceManagementPage'
+import OnboardingTour, { isTourDone, resetTour } from './components/OnboardingTour'
 
 // Build WebSocket URL from env or derive from VITE_API_BASE
 // WS now shares the same port as the HTTP server
@@ -69,6 +71,10 @@ export default function App() {
   function toggleTheme() { setTheme((t) => (t === 'dark' ? 'light' : 'dark')) }
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  // ---------- onboarding tour ----------
+  const [tourActive, setTourActive] = useState(false)
+  const tourTriggeredRef = useRef(false)
 
   // ---------- language ----------
   const [lang, setLang] = useState(() => localStorage.getItem('ciren-lang') || 'ja')
@@ -193,6 +199,14 @@ export default function App() {
       return () => { mountedRef.current = false }
     }
   }, [page])
+
+  // Auto-start tour on first visit to dashboard
+  useEffect(() => {
+    if (devicesLoading || !selectedDevice || tourTriggeredRef.current || isTourDone()) return
+    tourTriggeredRef.current = true
+    const timer = setTimeout(() => setTourActive(true), 700)
+    return () => clearTimeout(timer)
+  }, [devicesLoading, selectedDevice])
 
   // ---------- WebSocket ----------
   const connect = useCallback(() => {
@@ -450,17 +464,17 @@ export default function App() {
               {/* ── Desktop nav (≥640px) ── */}
               <div className="hidden sm:flex items-center gap-2">
                 {/* WS status */}
-                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mr-1">
+                <div data-tour="header-ws" className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mr-1">
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${wsColors[wsStatus]}`} />
                   <span className="hidden lg:inline">{wsLabels[wsStatus]}</span>
                 </div>
                 {/* Theme — icon only */}
-                <button onClick={toggleTheme} aria-label="Toggle theme"
+                <button data-tour="header-theme" onClick={toggleTheme} aria-label="Toggle theme"
                   className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
                   {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
                 </button>
                 {/* Language */}
-                <div className="inline-flex rounded-md bg-black/5 p-0.5 border border-black/10 dark:border-white/10 dark:bg-white/10">
+                <div data-tour="header-lang" className="inline-flex rounded-md bg-black/5 p-0.5 border border-black/10 dark:border-white/10 dark:bg-white/10">
                   {['ja', 'en'].map((l) => (
                     <button key={l} onClick={() => setLang(l)}
                       className={`px-2.5 py-1 text-xs rounded cursor-pointer transition-colors ${lang === l
@@ -472,9 +486,17 @@ export default function App() {
                   ))}
                 </div>
                 {/* Devices — icon only */}
-                <button onClick={() => setPage(PAGE_DEVICES)} aria-label="Devices"
+                <button data-tour="header-devices" onClick={() => setPage(PAGE_DEVICES)} aria-label="Devices"
                   className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
                   <Settings size={14} />
+                </button>
+                {/* Help / tour */}
+                <button
+                  onClick={() => { resetTour(); setTourActive(false); setTimeout(() => setTourActive(true), 50) }}
+                  aria-label={lang === 'ja' ? 'ツアーを再開' : 'Start tour'}
+                  title={lang === 'ja' ? 'ツアーを再開' : 'Start tour'}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
+                  <HelpCircle size={14} />
                 </button>
                 {/* Logout */}
                 <button onClick={handleLogout}
@@ -652,7 +674,7 @@ export default function App() {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
 
             {/* Controller cards — 3/4 width */}
-            <div className="lg:col-span-3 order-2 lg:order-1">
+            <div data-tour="controller-cards" className="lg:col-span-3 order-2 lg:order-1">
               <h3 className="text-base font-semibold mb-3 text-slate-900 dark:text-white">
                 {t.dashboard?.sensorControllers || 'Sensor Controllers'}
               </h3>
@@ -740,7 +762,7 @@ export default function App() {
             </div>
 
             {/* Main Module Status — compact right sidebar */}
-            <div className="lg:col-span-1 order-1 lg:order-2">
+            <div data-tour="main-module-status" className="lg:col-span-1 order-1 lg:order-2">
               <h3 className="text-base font-semibold mb-3 text-slate-900 dark:text-white">
                 {t.dashboard?.mainModuleStatus || 'Main Module Status'}
               </h3>
@@ -849,6 +871,12 @@ export default function App() {
           <div className="text-center text-[11px] text-slate-400 dark:text-gray-600 pb-2">
             {t.dashboard?.footer || '© 2025 CIREN Dashboard'}
           </div>
+
+          <OnboardingTour
+            active={tourActive}
+            lang={lang}
+            onDone={() => setTourActive(false)}
+          />
         </>
       )}
     </main>,
