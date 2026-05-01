@@ -3,13 +3,21 @@ import { driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
 
 // ─── Stage management ────────────────────────────────────────────────────────
-// null        → brand new user, login tour pending
-// 'devices'   → login done, devices tour pending
-// 'dashboard' → devices done, dashboard tour pending
-// 'done'      → all tours complete
+// null           → brand new user, login-landing tour pending
+// 'register'     → landing done, register form tour pending
+// 'login-form'   → register done, login form tour pending
+// 'devices'      → login done, devices tour pending
+// 'dashboard'    → devices done, dashboard tour pending
+// 'done'         → all tours complete
 
 const STAGE_KEY = 'ciren-onboarding'
-const NEXT_STAGE = { login: 'devices', devices: 'dashboard', dashboard: 'done' }
+const NEXT_STAGE = {
+  'login-landing': 'register',
+  'register':      'login-form',
+  'login-form':    'devices',
+  'devices':       'dashboard',
+  'dashboard':     'done',
+}
 
 export const getStage = () => {
   const s = localStorage.getItem(STAGE_KEY)
@@ -24,48 +32,23 @@ export const resetTour  = resetAll  // backward compat
 
 // ─── Step definitions ────────────────────────────────────────────────────────
 
-const loginSteps = {
+// Login landing page — highlight the Register button
+const loginLandingSteps = {
   en: [
     {
       popover: {
         title: 'Welcome to CIREN',
         description:
-          'CIREN is a real-time IoT sensor monitoring dashboard. This short guide will walk you through getting started.',
+          'CIREN is a real-time IoT sensor monitoring dashboard. Let\'s get you set up in a few steps.',
       },
     },
     {
-      element: '[data-tour="login-btn"]',
+      element: '[data-tour="register-btn"]',
       popover: {
-        title: 'Log In',
+        title: 'Create Your Account',
         description:
-          'Click <b>Login</b> to open the sign-in form. Use the username and password provided with your device.',
+          'Since this is your first time, click <b>Create account</b> to register. You will need a username and password.',
         side: 'bottom',
-      },
-    },
-    {
-      element: '[data-tour="login-username"]',
-      popover: {
-        title: 'Username',
-        description: 'Enter the username provided by your administrator.',
-        side: 'bottom',
-      },
-    },
-    {
-      element: '[data-tour="login-password"]',
-      popover: {
-        title: 'Password',
-        description:
-          'Enter your password. Click the eye icon on the right to show or hide it.',
-        side: 'bottom',
-      },
-    },
-    {
-      element: '[data-tour="login-submit"]',
-      popover: {
-        title: "You're ready!",
-        description:
-          'Enter your credentials above and click <b>Sign In</b> to start monitoring your sensors.',
-        side: 'top',
       },
     },
   ],
@@ -74,23 +57,155 @@ const loginSteps = {
       popover: {
         title: 'CIRENへようこそ',
         description:
-          'CIRENはIoTセンサーのデータをリアルタイムで監視するダッシュボードです。以下の手順に沿ってご利用を開始しましょう。',
+          'CIRENはIoTセンサーのデータをリアルタイムで監視するダッシュボードです。以下の手順に沿って初期設定を進めましょう。',
       },
     },
     {
-      element: '[data-tour="login-btn"]',
+      element: '[data-tour="register-btn"]',
       popover: {
-        title: 'ログイン',
+        title: 'アカウントを作成する',
         description:
-          '<b>ログイン</b>ボタンをクリックすると入力フォームが表示されます。製品に同梱のユーザー名とパスワードをご使用ください。',
+          '初めてご利用の方は、<b>新規登録</b>ボタンをクリックしてアカウントを作成してください。ユーザー名とパスワードを設定します。',
         side: 'bottom',
+      },
+    },
+  ],
+}
+
+// Register form tour
+const registerSteps = {
+  en: [
+    {
+      popover: {
+        title: 'Create Your Account',
+        description: 'Fill in the form below to create your CIREN account.',
+      },
+    },
+    {
+      element: '[data-tour="reg-username"]',
+      popover: {
+        title: 'Username',
+        description: 'Choose a username for your account. You will use this to log in.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="reg-password"]',
+      popover: {
+        title: 'Password',
+        description: 'Choose a secure password (minimum 6 characters).',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="reg-confirm"]',
+      popover: {
+        title: 'Confirm Password',
+        description: 'Re-enter your password to confirm it matches.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="reg-submit"]',
+      popover: {
+        title: 'Create Account',
+        description:
+          'Click <b>Create Account</b> to finish registration. You will then be redirected to sign in.',
+        side: 'top',
+      },
+    },
+  ],
+  ja: [
+    {
+      popover: {
+        title: 'アカウント作成',
+        description: '以下のフォームに入力してCIRENアカウントを作成します。',
+      },
+    },
+    {
+      element: '[data-tour="reg-username"]',
+      popover: {
+        title: 'ユーザー名',
+        description: 'ログイン時に使用するユーザー名を入力してください。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="reg-password"]',
+      popover: {
+        title: 'パスワード',
+        description: '6文字以上のパスワードを設定してください。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="reg-confirm"]',
+      popover: {
+        title: 'パスワード（確認）',
+        description: 'パスワードを再入力して確認します。',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="reg-submit"]',
+      popover: {
+        title: 'アカウントを作成する',
+        description:
+          '<b>アカウント作成</b>ボタンをクリックして登録を完了します。その後、ログイン画面に移動します。',
+        side: 'top',
+      },
+    },
+  ],
+}
+
+// Login form tour — shown after registration
+const loginFormSteps = {
+  en: [
+    {
+      popover: {
+        title: 'Account Created!',
+        description:
+          'Your account is ready. Now sign in with the username and password you just created.',
+      },
+    },
+    {
+      element: '[data-tour="login-username"]',
+      popover: {
+        title: 'Username',
+        description: 'Enter the username you just registered.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-password"]',
+      popover: {
+        title: 'Password',
+        description: 'Enter your password. Click the eye icon to show or hide it.',
+        side: 'bottom',
+      },
+    },
+    {
+      element: '[data-tour="login-submit"]',
+      popover: {
+        title: "Let's Go!",
+        description: 'Click <b>Sign In</b> to access your dashboard.',
+        side: 'top',
+      },
+    },
+  ],
+  ja: [
+    {
+      popover: {
+        title: 'アカウント作成完了！',
+        description:
+          'アカウントが作成されました。登録したユーザー名とパスワードでログインしてください。',
       },
     },
     {
       element: '[data-tour="login-username"]',
       popover: {
         title: 'ユーザー名',
-        description: '管理者から提供されたユーザー名を入力してください。',
+        description: '先ほど登録したユーザー名を入力してください。',
         side: 'bottom',
       },
     },
@@ -98,8 +213,7 @@ const loginSteps = {
       element: '[data-tour="login-password"]',
       popover: {
         title: 'パスワード',
-        description:
-          'パスワードを入力してください。右側のアイコンで表示／非表示を切り替えられます。',
+        description: 'パスワードを入力してください。右のアイコンで表示切り替えができます。',
         side: 'bottom',
       },
     },
@@ -107,8 +221,7 @@ const loginSteps = {
       element: '[data-tour="login-submit"]',
       popover: {
         title: 'ログインしましょう',
-        description:
-          'ユーザー名とパスワードを入力したら、<b>ログイン</b>ボタンを押してください。',
+        description: '<b>ログイン</b>ボタンをクリックしてダッシュボードへ進みます。',
         side: 'top',
       },
     },
@@ -293,12 +406,17 @@ const dashboardSteps = {
   ],
 }
 
-const ALL_STEPS = { login: loginSteps, devices: devicesSteps, dashboard: dashboardSteps }
+const ALL_STEPS = {
+  'login-landing': loginLandingSteps,
+  'register':      registerSteps,
+  'login-form':    loginFormSteps,
+  'devices':       devicesSteps,
+  'dashboard':     dashboardSteps,
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
-// page: 'login' | 'devices' | 'dashboard'
-// openLoginForm: () => void — called at login step 1 Next click to reveal the form
-export default function OnboardingTour({ page, lang, active, onDone, openLoginForm }) {
+// page: 'login-landing' | 'register' | 'login-form' | 'devices' | 'dashboard'
+export default function OnboardingTour({ page, lang, active, onDone }) {
   const driverRef = useRef(null)
 
   useEffect(() => {
@@ -315,7 +433,7 @@ export default function OnboardingTour({ page, lang, active, onDone, openLoginFo
     }
 
     try {
-      const config = {
+      driverRef.current = driver({
         showProgress: true,
         animate: true,
         smoothScroll: true,
@@ -327,21 +445,7 @@ export default function OnboardingTour({ page, lang, active, onDone, openLoginFo
         doneBtnText: isJa ? '完了' : 'Done',
         steps: tourSteps,
         onDestroyStarted: finish,
-      }
-
-      // At login step index 1 (login button), clicking Next opens the form
-      if (page === 'login' && openLoginForm) {
-        config.onNextClick = (el, step, { state }) => {
-          if (state.activeIndex === 1) {
-            openLoginForm()
-            setTimeout(() => driverRef.current?.moveNext(), 400)
-          } else {
-            driverRef.current?.moveNext()
-          }
-        }
-      }
-
-      driverRef.current = driver(config)
+      })
       driverRef.current.drive()
     } catch (err) {
       console.error('[OnboardingTour] failed to start:', err)

@@ -61,7 +61,25 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
   const t = translations[language]
 
   const [showLoginForm, setShowLoginForm] = useState(false)
-  const [tourActive, setTourActive] = useState(() => getStage() === null)
+
+  // Determine which tour to show based on current onboarding stage
+  const initStage = getStage()
+  const [tourPage] = useState(() => {
+    if (initStage === null) return 'login-landing'
+    if (initStage === 'login-form') return 'login-form'
+    return null
+  })
+  const [tourActive, setTourActive] = useState(false)
+
+  useEffect(() => {
+    if (!tourPage) return
+    if (tourPage === 'login-form') {
+      setShowLoginForm(true)
+      const t = setTimeout(() => setTourActive(true), 400)
+      return () => clearTimeout(t)
+    }
+    setTourActive(true)
+  }, [])
   const [username, setUsernameState] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -207,7 +225,7 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
                         <span>{t.buttons.login}</span>
                         <ArrowRight className="h-4 w-4" />
                       </button>
-                      <button type="button" onClick={onGoRegister}
+                      <button data-tour="register-btn" type="button" onClick={onGoRegister}
                         className="inline-flex items-center justify-center gap-2 rounded-lg border border-black/15 bg-transparent px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 focus:ring-2 focus:ring-emerald-500 dark:border-white/15 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
                         <UserPlus className="h-4 w-4" />
                         <span>{t.buttons.register}</span>
@@ -291,13 +309,14 @@ export default function LoginPage({ onLogin, onGoRegister, theme, toggleTheme })
         </footer>
       </div>
 
-      <OnboardingTour
-        page="login"
-        lang={language}
-        active={tourActive}
-        onDone={() => setTourActive(false)}
-        openLoginForm={() => setShowLoginForm(true)}
-      />
+      {tourPage && (
+        <OnboardingTour
+          page={tourPage}
+          lang={language}
+          active={tourActive}
+          onDone={() => setTourActive(false)}
+        />
+      )}
     </div>
   )
 }
