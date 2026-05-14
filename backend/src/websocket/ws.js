@@ -25,18 +25,23 @@ function initWS(serverOrPort) {
   wss.on('close', () => clearInterval(pingTimer))
 
   wss.on('connection', (ws, req) => {
-    // ── Auth: ambil token dari query string ?token=xxx ──
-    const url    = new URL(req.url, 'ws://localhost')
-    const token  = url.searchParams.get('token')
+    // ── Auth: JWT token atau demo key ──
+    const url       = new URL(req.url, 'ws://localhost')
+    const token     = url.searchParams.get('token')
+    const demoKey   = url.searchParams.get('demo')
+    const DEMO_SECRET = process.env.DEMO_SECRET || 'ciren-demo'
 
-    if (!token) {
+    if (demoKey === DEMO_SECRET) {
+      ws.user = { username: 'demo', role: 'viewer' }
+    } else if (token) {
+      try {
+        ws.user = jwt.verify(token, JWT_SECRET)
+      } catch {
+        ws.close(4001, 'Invalid token')
+        return
+      }
+    } else {
       ws.close(4001, 'No token')
-      return
-    }
-    try {
-      ws.user = jwt.verify(token, JWT_SECRET)
-    } catch {
-      ws.close(4001, 'Invalid token')
       return
     }
 
