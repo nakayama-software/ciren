@@ -276,6 +276,19 @@ router.post('/devices/:deviceId/node-config', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// DELETE /api/devices/:deviceId/node-config
+// Hapus semua stored NodeConfig untuk device ini (reset ke firmware defaults)
+// Query: ?ctrl_id=1&port_num=3 untuk hapus port spesifik
+router.delete('/devices/:deviceId/node-config', async (req, res) => {
+  try {
+    const filter = { device_id: req.params.deviceId }
+    if (req.query.ctrl_id)  filter.ctrl_id  = Number(req.query.ctrl_id)
+    if (req.query.port_num) filter.port_num = Number(req.query.port_num)
+    const result = await NodeConfig.deleteMany(filter)
+    res.json({ ok: true, deleted: result.deletedCount })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // ══════════════════════════════════════════════════
 //  INTERVAL VERIFICATION
 // ══════════════════════════════════════════════════

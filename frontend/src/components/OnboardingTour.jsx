@@ -26,7 +26,10 @@ export const getStage = () => {
   return s
 }
 export const setStage  = (s) => localStorage.setItem(STAGE_KEY, s)
-export const resetAll  = () => localStorage.removeItem(STAGE_KEY)
+export const resetAll  = () => {
+  localStorage.removeItem(STAGE_KEY)
+  localStorage.removeItem('ciren-tour-done')  // clear old key
+}
 export const isTourDone = () => getStage() === 'done'
 export const resetTour  = resetAll  // backward compat
 

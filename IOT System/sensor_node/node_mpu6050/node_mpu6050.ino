@@ -33,7 +33,7 @@
 
 // ─── Config ───────────────────────────────────────
 #define SAMPLE_INTERVAL_US   10000  // 10ms = 100Hz (filter rate)
-#define SEND_INTERVAL_MS        50  // 50ms = 20Hz  (MQTT/UART send rate)
+#define SEND_INTERVAL_MS        100  // 50ms = 20Hz  (MQTT/UART send rate)
 #define HEARTBEAT_INTERVAL_MS 5000
 // Complementary filter alpha: 0.96 = 96% gyro, 4% accel
 // Naikkan alpha untuk lebih smooth (lebih percaya gyro)
@@ -162,7 +162,9 @@ void loop() {
     // UART 115200, 13 bytes = ~1.1ms per frame, 3 frame = ~3.3ms
     uint32_t shared_ts = millis();
     ciren_data_typed_ts(STYPE_PITCH, pitch, shared_ts);
+    delay(2);
     ciren_data_typed_ts(STYPE_ROLL,  roll,  shared_ts);
+    delay(2);
     ciren_data_typed_ts(STYPE_YAW,   yaw,   shared_ts);
   } else if (now_ms - last_hb_ms >= HEARTBEAT_INTERVAL_MS) {
     // Heartbeat: kirim nilai terakhir sebagai HB_TYPED agar controller tahu node masih hidup
@@ -170,7 +172,9 @@ void loop() {
     last_hb_ms = now_ms;
     uint32_t shared_ts = millis();
     ciren_heartbeat_typed_ts(STYPE_PITCH, pitch, shared_ts);
+    delay(2);
     ciren_heartbeat_typed_ts(STYPE_ROLL,  roll,  shared_ts);
+    delay(2);
     ciren_heartbeat_typed_ts(STYPE_YAW,   yaw,   shared_ts);
 #ifdef DEBUG
     Serial.println("[HB] heartbeat sent");
@@ -185,7 +189,9 @@ void loop() {
   // Print max 10Hz di debug supaya Serial tidak bottleneck
   if (now_ms - last_print_ms >= 100) {
     last_print_ms = now_ms;
-    Serial.printf("P:%.1f R:%.1f Y:%.1f\n", pitch, roll, yaw);
+    Serial.print("P:"); Serial.print(pitch, 1);
+    Serial.print(" R:"); Serial.print(roll, 1);
+    Serial.print(" Y:"); Serial.println(yaw, 1);
   }
 #endif
 }

@@ -27,10 +27,10 @@
 #include "ciren_frame.h"
 
 // ─── Config ───────────────────────────────────────
-#define SAMPLE_INTERVAL_MS    1000
+#define SAMPLE_INTERVAL_MS    500    // demo: 2Hz
 #define HEARTBEAT_INTERVAL_MS 5000
-#define TEMP_THRESHOLD        0.1f   // degC
-#define HUM_THRESHOLD         0.5f   // %RH
+#define TEMP_THRESHOLD        0.0f   // demo: always send
+#define HUM_THRESHOLD         0.0f   // demo: always send
 
 DHT20 dht;  // DHT20 library by Tillaart — address 0x38 sudah default
 
@@ -56,6 +56,7 @@ void setup() {
 
   // Beritahu controller: node ini punya 2 tipe data
   ciren_hello(STYPE_TEMPERATURE);
+  delay(2);
   ciren_hello(STYPE_HUMIDITY);
 
 #ifdef DEBUG
@@ -93,9 +94,9 @@ void loop() {
   bool hum_changed  = fabsf(hum  - last_hum)  >= HUM_THRESHOLD;
 
   if (temp_changed || hum_changed) {
-    uint32_t shared_ts = millis();
-    ciren_data_typed_ts(STYPE_TEMPERATURE, temp, shared_ts);
-    ciren_data_typed_ts(STYPE_HUMIDITY, hum, shared_ts);
+    ciren_data_typed(STYPE_TEMPERATURE, temp);
+    delay(2);
+    ciren_data_typed(STYPE_HUMIDITY, hum);
     last_temp  = temp;
     last_hum   = hum;
     last_hb_ms = now;
@@ -107,9 +108,9 @@ void loop() {
 #endif
 
   } else if (now - last_hb_ms >= HEARTBEAT_INTERVAL_MS) {
-    uint32_t shared_ts = millis();
-    ciren_heartbeat_typed_ts(STYPE_TEMPERATURE, temp, shared_ts);
-    ciren_heartbeat_typed_ts(STYPE_HUMIDITY, hum, shared_ts);
+    ciren_heartbeat_typed(STYPE_TEMPERATURE, temp);
+    delay(2);
+    ciren_heartbeat_typed(STYPE_HUMIDITY, hum);
     last_hb_ms = now;
 
 #ifdef DEBUG

@@ -29,3 +29,10 @@ Caddyfile
 config/
 dev.config
 temporary files/
+
+# Project documents (local only)
+CIREN_DOCUMENT.txt
+CIREN_SPECIFICATION.txt
+CIREN_USER_SPECIFICATION.txt
+CIREN_仕様書.txt
+CIREN_VIDEO_SCENARIO.txt

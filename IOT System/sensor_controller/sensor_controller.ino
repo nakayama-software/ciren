@@ -63,12 +63,12 @@ typedef struct {
   uint8_t channel;
 } __attribute__((packed)) HelloAck;
 
-uint8_t active_channel  = 0;
-bool    channel_synced  = false;
+uint8_t active_channel = 0;
+bool channel_synced = false;
 
-uint8_t  scan_channel      = 0;
-uint32_t last_scan_switch  = 0;
-#define  CHANNEL_SCAN_INTERVAL 300
+uint8_t scan_channel = 0;
+uint32_t last_scan_switch = 0;
+#define CHANNEL_SCAN_INTERVAL 300
 
 // ─── Fail-streak re-sync ──────────────────────────
 int espnow_fail_streak = 0;
@@ -80,27 +80,27 @@ HardwareSerial U1(1);  // Port 2
 SoftwareSerial U3, U4, U5, U6, U7, U8;
 
 // ─── Pin RX mapping ───────────────────────────────
-const int RX_P1 = 16; //can
-const int RX_P2 = 13; // can
-const int RX_P3 = 4; // can
-const int RX_P4 = 32; // can
-const int RX_P5 = 15; // can
-const int RX_P6 = 17; // can
-const int RX_P7 = 18; // can 
-const int RX_P8 = 19; // can
+const int RX_P1 = 16;  //can
+const int RX_P2 = 25;  //13; // can
+const int RX_P3 = 4;   // can
+const int RX_P4 = 27;//32;  // can
+const int RX_P5 = 34;//15;  // can
+const int RX_P6 = 26;//17;  // can
+const int RX_P7 = 33;//18;  // can
+const int RX_P8 = 35;//19;  // can
 
 // ─── Config ───────────────────────────────────────
-#define CTRL_ID_DEFAULT    1
-#define MAX_SENDER_ID      9
-#define NODE_BAUD          115200
-#define SW_BAUD            115200
-#define PORT_ACTIVE        8
-#define PORT_MAX           8
+#define CTRL_ID_DEFAULT 1
+#define MAX_SENDER_ID 9
+#define NODE_BAUD 115200
+#define SW_BAUD 115200
+#define PORT_ACTIVE 8
+#define PORT_MAX 8
 #define OFFLINE_TIMEOUT_MS 10000UL
-#define SEND_INTERVAL_MS   200UL
+#define SEND_INTERVAL_MS 200UL
 
 // ─── EEPROM ───────────────────────────────────────
-#define EEPROM_SIZE    7
+#define EEPROM_SIZE 7
 #define EEPROM_ID_ADDR 6
 
 // ─── OLED ─────────────────────────────────────────
@@ -112,68 +112,68 @@ const int RX_P8 = 19; // can
 
 // ─── Buttons ──────────────────────────────────────
 #define BUTTON_NEXT 12
-#define BUTTON_INC  14
+#define BUTTON_INC 14
 
 // ─── Pages ────────────────────────────────────────
-#define PAGE_MAIN       0
+#define PAGE_MAIN 0
 #define PAGE_NODESTATUS 1
 
 // ─── Frame protocol ───────────────────────────────
-#define FRAME_START      0xAA
-#define FRAME_END        0x55
-#define FRAME_SIZE       12
+#define FRAME_START 0xAA
+#define FRAME_END 0x55
+#define FRAME_SIZE 12
 #define FRAME_SIZE_TYPED 13
-#define FTYPE_DATA        0x01
-#define FTYPE_HELLO       0x02
-#define FTYPE_HEARTBEAT   0x03
-#define FTYPE_DATA_TYPED  0x04
-#define FTYPE_HB_TYPED    0x05
-#define FTYPE_ERROR       0xFF
-#define FTYPE_STALE       0xFE
-#define FTYPE_CONFIG      0x10  // main module → sensor controller: set interval
-#define FTYPE_CONFIG_ACK  0x11  // sensor controller → main module: config applied
+#define FTYPE_DATA 0x01
+#define FTYPE_HELLO 0x02
+#define FTYPE_HEARTBEAT 0x03
+#define FTYPE_DATA_TYPED 0x04
+#define FTYPE_HB_TYPED 0x05
+#define FTYPE_ERROR 0xFF
+#define FTYPE_STALE 0xFE
+#define FTYPE_CONFIG 0x10      // main module → sensor controller: set interval
+#define FTYPE_CONFIG_ACK 0x11  // sensor controller → main module: config applied
 
 // Default forward intervals by sensor category (ms)
-#define INTERVAL_IMU_MS   100    // IMU: 10 Hz
-#define INTERVAL_ENV_MS   10000  // temp/humidity: 10 s
-#define INTERVAL_OTHER_MS 5000   // everything else: 5 s
+#define INTERVAL_IMU_MS 50      // IMU: 20 Hz
+#define INTERVAL_ENV_MS 500     // demo: 2 Hz
+#define INTERVAL_OTHER_MS 500   // demo: 2 Hz
 
 // Heartbeat forward interval — independent of data interval
 // Sensor controller always sends HB every 15s so dashboard can detect online/offline
 // regardless of how long the data upload interval is (e.g., 30 minutes)
-#define HB_INTERVAL_MS    15000
+#define HB_INTERVAL_MS 15000
 
 // Max sensor types tracked per port (IMU has up to 9)
 #define MAX_STYPES_PER_PORT 10
 #define STYPE_TEMPERATURE 0x01
-#define STYPE_HUMIDITY    0x02
-#define STYPE_ACCEL_X     0x03
-#define STYPE_ACCEL_Y     0x04
-#define STYPE_ACCEL_Z     0x05
-#define STYPE_GYRO_X      0x06
-#define STYPE_GYRO_Y      0x07
-#define STYPE_GYRO_Z      0x08
-#define STYPE_PITCH       0x10
-#define STYPE_ROLL        0x11
-#define STYPE_YAW         0x12
+#define STYPE_HUMIDITY 0x02
+#define STYPE_ACCEL_X 0x03
+#define STYPE_ACCEL_Y 0x04
+#define STYPE_ACCEL_Z 0x05
+#define STYPE_GYRO_X 0x06
+#define STYPE_GYRO_Y 0x07
+#define STYPE_GYRO_Z 0x08
+#define STYPE_PITCH 0x10
+#define STYPE_ROLL 0x11
+#define STYPE_YAW 0x12
 
 // ─── Per-port config + data buffer ───────────────────
 struct PortBufEntry {
-  uint8_t  stype;
-  float    value;
+  uint8_t stype;
+  float value;
   uint32_t ts;
-  uint8_t  ftype;
-  bool     pending;
+  uint8_t ftype;
+  bool pending;
 };
 
 struct PortConfig {
-  uint8_t      known_stypes[10]; // stypes seen via HELLO (max 10: covers IMU 9-axis + HumTemp)
-  uint8_t      n_known;          // how many known stypes
-  uint32_t     interval_ms;      // configured forward interval
-  uint32_t     last_forward_ms;  // millis() of last data forward
-  uint32_t     last_hb_ms;       // millis() of last heartbeat forward
+  uint8_t known_stypes[10];  // stypes seen via HELLO (max 10: covers IMU 9-axis + HumTemp)
+  uint8_t n_known;           // how many known stypes
+  uint32_t interval_ms;      // configured forward interval
+  uint32_t last_forward_ms;  // millis() of last data forward
+  uint32_t last_hb_ms;       // millis() of last heartbeat forward
   PortBufEntry buf[MAX_STYPES_PER_PORT];
-  uint8_t      n_buf;            // number of tracked stypes
+  uint8_t n_buf;  // number of tracked stypes
 };
 
 PortConfig port_cfg[PORT_MAX];
@@ -181,9 +181,8 @@ Preferences portPrefs;
 
 // ─────────────────────────────────────────────────────
 uint32_t default_interval_for(uint8_t stype) {
-  if ((stype >= 0x03 && stype <= 0x08) ||
-      (stype >= 0x10 && stype <= 0x12)) return INTERVAL_IMU_MS;
-  if (stype == 0x01 || stype == 0x02)   return INTERVAL_ENV_MS;
+  if ((stype >= 0x03 && stype <= 0x08) || (stype >= 0x10 && stype <= 0x12)) return INTERVAL_IMU_MS;
+  if (stype == 0x01 || stype == 0x02) return INTERVAL_ENV_MS;
   return INTERVAL_OTHER_MS;
 }
 
@@ -196,16 +195,21 @@ void save_port_cfg(int idx) {
 }
 
 void load_port_configs() {
-  portPrefs.begin("portcfg", true);
+  portPrefs.begin("portcfg", false);
   for (int i = 0; i < PORT_MAX; i++) {
     char key[8];
     snprintf(key, sizeof(key), "p%d_ms", i + 1);
     uint32_t stored = portPrefs.getUInt(key, 0);
-    port_cfg[i].interval_ms     = (stored > 0) ? stored : INTERVAL_OTHER_MS;
+    // Cap stored value to demo maximum — prevents stale slow intervals from NVS
+    if (stored > 500 && stored != INTERVAL_IMU_MS) {
+      stored = INTERVAL_OTHER_MS;
+      portPrefs.putUInt(key, stored);
+    }
+    port_cfg[i].interval_ms = (stored > 0) ? stored : INTERVAL_OTHER_MS;
     port_cfg[i].last_forward_ms = 0;
-    port_cfg[i].last_hb_ms      = 0;
-    port_cfg[i].n_known         = 0;
-    port_cfg[i].n_buf           = 0;
+    port_cfg[i].last_hb_ms = 0;
+    port_cfg[i].n_known = 0;
+    port_cfg[i].n_buf = 0;
   }
   portPrefs.end();
 }
@@ -241,7 +245,7 @@ PortBufEntry* get_buf(int port_idx, uint8_t stype) {
   }
   if (cfg.n_buf < MAX_STYPES_PER_PORT) {
     PortBufEntry* e = &cfg.buf[cfg.n_buf++];
-    e->stype   = stype;
+    e->stype = stype;
     e->pending = false;
     return e;
   }
@@ -251,7 +255,7 @@ PortBufEntry* get_buf(int port_idx, uint8_t stype) {
 // ─────────────────────────────────────────────────────
 bool is_valid_ftype(uint8_t ft) {
   return ft == FTYPE_DATA || ft == FTYPE_HELLO || ft == FTYPE_HEARTBEAT
-      || ft == FTYPE_DATA_TYPED || ft == FTYPE_HB_TYPED || ft == FTYPE_ERROR;
+         || ft == FTYPE_DATA_TYPED || ft == FTYPE_HB_TYPED || ft == FTYPE_ERROR;
 }
 
 uint8_t crc8(const uint8_t* data, uint8_t len) {
@@ -266,47 +270,47 @@ uint8_t crc8(const uint8_t* data, uint8_t len) {
 
 // ─── ESP-NOW payload ──────────────────────────────
 typedef struct {
-  uint8_t  ctrl_id;
-  uint8_t  port_num;
-  uint8_t  sensor_type;
-  float    value;
+  uint8_t ctrl_id;
+  uint8_t port_num;
+  uint8_t sensor_type;
+  float value;
   uint32_t timestamp_ms;
-  uint8_t  ftype;
+  uint8_t ftype;
 } __attribute__((packed)) EspNowPacket;
 
 // ─── Port state ───────────────────────────────────
 struct SensorPort {
-  uint8_t  port_num;
-  Stream*  stream;
-  uint8_t  rx_buf[FRAME_SIZE_TYPED];
-  uint8_t  rx_pos;
-  uint8_t  sensor_type;
-  float    last_value;
+  uint8_t port_num;
+  Stream* stream;
+  uint8_t rx_buf[FRAME_SIZE_TYPED];
+  uint8_t rx_pos;
+  uint8_t sensor_type;
+  float last_value;
   uint32_t last_rx_ms;
-  bool     active;
-  bool     enabled;
+  bool active;
+  bool enabled;
 };
 
 SensorPort ports[PORT_MAX];
 
 // ─── Global state ─────────────────────────────────
-int    senderID       = CTRL_ID_DEFAULT;
-bool   macValid       = false;
-bool   inputConfirmed = false;
+int senderID = CTRL_ID_DEFAULT;
+bool macValid = false;
+bool inputConfirmed = false;
 uint8_t currentMac[6];
-char   macStr[13]    = "000000000000";
-int    macCursor     = 0;
+char macStr[13] = "000000000000";
+int macCursor = 0;
 
-bool     nodeOnline[8]  = { false };
-uint32_t lastSeenMs[8]  = { 0 };
-int      onlineCount    = 0;
-bool     statusChanged  = false;
+bool nodeOnline[8] = { false };
+uint32_t lastSeenMs[8] = { 0 };
+int onlineCount = 0;
+bool statusChanged = false;
 
-int      displayPage = PAGE_MAIN;
-uint32_t lastSendMs  = 0;
+int displayPage = PAGE_MAIN;
+uint32_t lastSendMs = 0;
 
 // ─── OLED ─────────────────────────────────────────
-TwoWire        WireOLED = TwoWire(1);
+TwoWire WireOLED = TwoWire(1);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &WireOLED, -1);
 
 // ─── Forward declarations ─────────────────────────
@@ -328,11 +332,11 @@ void saveMAC(uint8_t* mac, int id);
 void loadMAC(uint8_t* mac);
 bool isValidMAC(uint8_t* mac);
 void resetEEPROM();
-int  loadSenderID();
+int loadSenderID();
 void saveSenderID(int id);
 void recalcOnlineCount();
 void addPeer(uint8_t* mac);
-void reset_peer_channel();   // ← FIX: deklarasi baru
+void reset_peer_channel();  // ← FIX: deklarasi baru
 
 // Forward buffered readings for all ports.
 // Two independent timers per port:
@@ -345,7 +349,7 @@ void flush_port_buffers() {
     if (!nodeOnline[i] || port_cfg[i].n_buf == 0) continue;
     PortConfig& cfg = port_cfg[i];
 
-    bool time_for_hb   = (now - cfg.last_hb_ms)     >= HB_INTERVAL_MS;
+    bool time_for_hb = (now - cfg.last_hb_ms) >= HB_INTERVAL_MS;
     bool time_for_data = (now - cfg.last_forward_ms) >= cfg.interval_ms;
 
     if (!time_for_hb && !time_for_data) continue;
@@ -439,7 +443,7 @@ void reset_peer_channel() {
   if (!esp_now_is_peer_exist(currentMac)) return;
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, currentMac, 6);
-  peer.channel = 0;   // ikuti channel radio
+  peer.channel = 0;  // ikuti channel radio
   peer.encrypt = false;
   esp_now_mod_peer(&peer);
 #ifdef DEBUG
@@ -458,7 +462,7 @@ void on_data_sent(const uint8_t* mac, esp_now_send_status_t status) {
       Serial.println("[ESPNOW] too many failures — re-syncing channel");
       channel_synced = false;
       espnow_fail_streak = 0;
-      reset_peer_channel();   // ← peer ikut channel radio, bukan channel lama
+      reset_peer_channel();  // ← peer ikut channel radio, bukan channel lama
     }
   } else {
     espnow_fail_streak = 0;
@@ -477,9 +481,10 @@ void on_data_recv(const uint8_t* mac, const uint8_t* data, int len) {
         return;
       }
 
-      uint8_t  target_port = pkt.port_num;   // 0 = all ports
-      uint32_t new_ms      = (uint32_t)pkt.value;
+      uint8_t target_port = pkt.port_num;  // 0 = all ports
+      uint32_t new_ms = (uint32_t)pkt.value;
       if (new_ms == 0) new_ms = INTERVAL_OTHER_MS;  // guard
+      if (new_ms > 60000) new_ms = INTERVAL_OTHER_MS;  // cap: reject stale/huge values
 
       if (target_port == 0) {
         for (int i = 0; i < PORT_MAX; i++) {
@@ -510,7 +515,7 @@ void on_data_recv(const uint8_t* mac, const uint8_t* data, int len) {
 
   active_channel = ack.channel;
   channel_synced = true;
-  espnow_fail_streak = 0;   // reset streak saat sync berhasil
+  espnow_fail_streak = 0;  // reset streak saat sync berhasil
 
   // Lock ke channel yang diterima dari main module
   esp_wifi_set_promiscuous(true);
@@ -541,23 +546,23 @@ void on_data_recv(const uint8_t* mac, const uint8_t* data, int len) {
  */
 void send_to_main(uint8_t port_num, uint8_t ftype,
                   uint8_t stype, float value, uint32_t ts) {
-  if (!macValid)       return;
-  if (!channel_synced) return;   // ← jangan kirim saat sedang re-sync
+  if (!macValid) return;
+  if (!channel_synced) return;  // ← jangan kirim saat sedang re-sync
 
   EspNowPacket pkt;
-  pkt.ctrl_id      = senderID;
-  pkt.port_num     = port_num;
-  pkt.sensor_type  = stype;
-  pkt.value        = value;
+  pkt.ctrl_id = senderID;
+  pkt.port_num = port_num;
+  pkt.sensor_type = stype;
+  pkt.value = value;
   pkt.timestamp_ms = ts;
-  pkt.ftype        = ftype;
+  pkt.ftype = ftype;
   esp_now_send(currentMac, (uint8_t*)&pkt, sizeof(pkt));
 }
 
 void addPeer(uint8_t* mac) {
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, mac, 6);
-  peer.channel = 0;   // channel=0: ikuti radio saat scan
+  peer.channel = 0;  // channel=0: ikuti radio saat scan
   peer.encrypt = false;
   if (esp_now_add_peer(&peer) != ESP_OK)
     Serial.println("[ESPNOW] add peer failed");
@@ -568,29 +573,29 @@ void addPeer(uint8_t* mac) {
 const char* stype_str(uint8_t s) {
   switch (s) {
     case STYPE_TEMPERATURE: return "TEMP";
-    case STYPE_HUMIDITY:    return "HUM";
-    case STYPE_ACCEL_X:     return "AX";
-    case STYPE_ACCEL_Y:     return "AY";
-    case STYPE_ACCEL_Z:     return "AZ";
-    case STYPE_GYRO_X:      return "GX";
-    case STYPE_GYRO_Y:      return "GY";
-    case STYPE_GYRO_Z:      return "GZ";
-    case STYPE_PITCH:       return "PITCH";
-    case STYPE_ROLL:        return "ROLL";
-    case STYPE_YAW:         return "YAW";
-    default:                return "??";
+    case STYPE_HUMIDITY: return "HUM";
+    case STYPE_ACCEL_X: return "AX";
+    case STYPE_ACCEL_Y: return "AY";
+    case STYPE_ACCEL_Z: return "AZ";
+    case STYPE_GYRO_X: return "GX";
+    case STYPE_GYRO_Y: return "GY";
+    case STYPE_GYRO_Z: return "GZ";
+    case STYPE_PITCH: return "PITCH";
+    case STYPE_ROLL: return "ROLL";
+    case STYPE_YAW: return "YAW";
+    default: return "??";
   }
 }
 const char* ftype_str(uint8_t f) {
   switch (f) {
-    case FTYPE_DATA:       return "DATA";
-    case FTYPE_HELLO:      return "HELLO";
-    case FTYPE_HEARTBEAT:  return "HB";
+    case FTYPE_DATA: return "DATA";
+    case FTYPE_HELLO: return "HELLO";
+    case FTYPE_HEARTBEAT: return "HB";
     case FTYPE_DATA_TYPED: return "DATA";
-    case FTYPE_HB_TYPED:   return "HB";
-    case FTYPE_ERROR:      return "ERR";
-    case FTYPE_STALE:      return "STALE";
-    default:               return "??";
+    case FTYPE_HB_TYPED: return "HB";
+    case FTYPE_ERROR: return "ERR";
+    case FTYPE_STALE: return "STALE";
+    default: return "??";
   }
 }
 #endif
@@ -598,23 +603,23 @@ const char* ftype_str(uint8_t f) {
 // ─── Frame processing ─────────────────────────────
 void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
   uint8_t ftype = buf[1];
-  float   value;
+  float value;
   uint32_t ts;
-  uint8_t stype   = 0;
-  bool is_typed   = (ftype == FTYPE_DATA_TYPED || ftype == FTYPE_HB_TYPED);
+  uint8_t stype = 0;
+  bool is_typed = (ftype == FTYPE_DATA_TYPED || ftype == FTYPE_HB_TYPED);
 
   if (is_typed && len == FRAME_SIZE_TYPED) {
     stype = buf[2];
     memcpy(&value, &buf[3], 4);
-    memcpy(&ts,    &buf[7], 4);
+    memcpy(&ts, &buf[7], 4);
   } else if (!is_typed && len == FRAME_SIZE) {
     memcpy(&value, &buf[2], 4);
-    memcpy(&ts,    &buf[6], 4);
+    memcpy(&ts, &buf[6], 4);
   } else return;
 
   int idx = port.port_num - 1;
-  lastSeenMs[idx]   = millis();
-  port.last_rx_ms   = millis();
+  lastSeenMs[idx] = millis();
+  port.last_rx_ms = millis();
 
   if (ftype == FTYPE_HELLO) {
     uint8_t announced = (uint8_t)value;
@@ -644,8 +649,7 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
       // Otherwise, treat as sensor swap: reset interval and clear buffers.
       bool is_companion = false;
       // HumTemp pair (DHT20: temp ↔ humidity)
-      if ((announced == 0x01 && is_known_stype(idx, 0x02)) ||
-          (announced == 0x02 && is_known_stype(idx, 0x01))) {
+      if ((announced == 0x01 && is_known_stype(idx, 0x02)) || (announced == 0x02 && is_known_stype(idx, 0x01))) {
         is_companion = true;
       }
       // IMU companion: multiple axes on same port (e.g. pitch+roll+yaw, accel+gyro)
@@ -665,9 +669,9 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
       } else {
         // Genuine sensor swap — reset to type-appropriate default
         uint32_t new_default = default_interval_for(announced);
-        pcfg.interval_ms     = new_default;
-        pcfg.n_buf           = 0;  // clear stale stype buffers
-        pcfg.n_known         = 0;  // reset known types
+        pcfg.interval_ms = new_default;
+        pcfg.n_buf = 0;    // clear stale stype buffers
+        pcfg.n_known = 0;  // reset known types
         save_port_cfg(idx);
         Serial.printf("[CFG] P%d sensor swapped → 0x%02X, interval reset to %lu ms\n",
                       port.port_num, announced, new_default);
@@ -677,11 +681,11 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
 
     if (!port.active) {
       port.sensor_type = announced;
-      port.active      = true;
+      port.active = true;
     }
     if (!nodeOnline[idx]) {
       nodeOnline[idx] = true;
-      statusChanged   = true;
+      statusChanged = true;
     }
 #ifdef DEBUG
     Serial.printf("[P%d] HELLO stype=0x%02X (%s)\n",
@@ -698,18 +702,18 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
   // doesn't broadcast — making the dashboard show only one value updating.
   if (ftype == FTYPE_ERROR) {
     if (is_typed) port.sensor_type = stype;
-    else          stype = port.sensor_type;
+    else stype = port.sensor_type;
     send_to_main(port.port_num, FTYPE_ERROR, stype, value, ts);
     return;
   }
 
   if (!nodeOnline[idx]) {
     nodeOnline[idx] = true;
-    statusChanged   = true;
+    statusChanged = true;
   }
 
   if (is_typed) port.sensor_type = stype;
-  else          stype            = port.sensor_type;
+  else stype = port.sensor_type;
   port.last_value = value;
 
 #ifdef DEBUG
@@ -720,9 +724,9 @@ void process_frame(SensorPort& port, uint8_t* buf, uint8_t len) {
   // ── Buffer latest reading, forward at configured interval ──
   PortBufEntry* entry = get_buf(idx, stype);
   if (entry) {
-    entry->value   = value;
-    entry->ts      = ts;
-    entry->ftype   = ftype;
+    entry->value = value;
+    entry->ts = ts;
+    entry->ftype = ftype;
     entry->pending = true;
   }
 }
@@ -731,7 +735,7 @@ void parse_byte(SensorPort& port, uint8_t b) {
   if (port.rx_pos == 0) {
     if (b != FRAME_START) return;
     port.rx_buf[0] = b;
-    port.rx_pos    = 1;
+    port.rx_pos = 1;
     return;
   }
   if (port.rx_pos == 1) {
@@ -739,12 +743,12 @@ void parse_byte(SensorPort& port, uint8_t b) {
       port.rx_pos = 0;
       if (b == FRAME_START) {
         port.rx_buf[0] = b;
-        port.rx_pos    = 1;
+        port.rx_pos = 1;
       }
       return;
     }
     port.rx_buf[1] = b;
-    port.rx_pos    = 2;
+    port.rx_pos = 2;
     return;
   }
   port.rx_buf[port.rx_pos++] = b;
@@ -776,14 +780,14 @@ void parse_byte(SensorPort& port, uint8_t b) {
 
 // ─── Port & node management ───────────────────────
 void init_port(int idx, Stream* stream) {
-  ports[idx].port_num    = idx + 1;
-  ports[idx].stream      = stream;
-  ports[idx].rx_pos      = 0;
+  ports[idx].port_num = idx + 1;
+  ports[idx].stream = stream;
+  ports[idx].rx_pos = 0;
   ports[idx].sensor_type = 0;
-  ports[idx].last_value  = 0;
-  ports[idx].last_rx_ms  = millis();
-  ports[idx].active      = false;
-  ports[idx].enabled     = (stream != nullptr) && (idx < PORT_ACTIVE);
+  ports[idx].last_value = 0;
+  ports[idx].last_rx_ms = millis();
+  ports[idx].active = false;
+  ports[idx].enabled = (stream != nullptr) && (idx < PORT_ACTIVE);
 }
 
 void recalcOnlineCount() {
@@ -802,8 +806,8 @@ void watchdog_check() {
     if (!nodeOnline[i]) continue;
     uint32_t idle = millis() - lastSeenMs[i];
     if (idle > OFFLINE_TIMEOUT_MS) {
-      nodeOnline[i]  = false;
-      statusChanged  = true;
+      nodeOnline[i] = false;
+      statusChanged = true;
 #ifdef DEBUG
       Serial.printf("[P%d] OFFLINE (timeout %lums)\n", i + 1, idle);
 #endif
@@ -843,7 +847,7 @@ void saveSenderID(int id) {
 // ─── Button helpers ───────────────────────────────
 char nextHexChar(char c) {
   if (c >= '0' && c < '9') return c + 1;
-  if (c == '9')             return 'A';
+  if (c == '9') return 'A';
   if (c >= 'A' && c < 'F') return c + 1;
   return '0';
 }
@@ -921,10 +925,10 @@ void printMacFormatted(const char* raw, int cursorIdx) {
   display.print(line2);
 
   if (cursorIdx >= 0 && cursorIdx < 12) {
-    int nibble      = cursorIdx;
-    int pairIdx     = nibble / 2;
-    int nibbleInPair= nibble % 2;
-    bool topRow     = (pairIdx < 3);
+    int nibble = cursorIdx;
+    int pairIdx = nibble / 2;
+    int nibbleInPair = nibble % 2;
+    bool topRow = (pairIdx < 3);
     int charPosInLine = (pairIdx % 3) * 3 + nibbleInPair;
     int x = x0 + charPosInLine * charW;
     int y = topRow ? y1 : y2;
@@ -1006,13 +1010,14 @@ void setup() {
 
   // ── Buttons ──
   pinMode(BUTTON_NEXT, INPUT_PULLUP);
-  pinMode(BUTTON_INC,  INPUT_PULLUP);
+  pinMode(BUTTON_INC, INPUT_PULLUP);
 
   // ── OLED ──
   WireOLED.begin(OLED_SDA, OLED_SCL, 400000);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("OLED failed");
-    while (1);
+    while (1)
+      ;
   }
   display.setTextSize(1);
   display.setTextWrap(false);
@@ -1025,7 +1030,8 @@ void setup() {
 
   if (esp_now_init() != ESP_OK) {
     showMessage("ESP-NOW", "Init FAILED!");
-    while (1);
+    while (1)
+      ;
   }
 
   esp_wifi_set_promiscuous(true);
@@ -1062,10 +1068,10 @@ void setup() {
 
   if (isValidMAC(storedMac)) {
     memcpy(currentMac, storedMac, 6);
-    addPeer(currentMac);   // channel=0 dulu, update setelah sync
-    senderID      = loadSenderID();
-    macValid      = true;
-    inputConfirmed= true;
+    addPeer(currentMac);  // channel=0 dulu, update setelah sync
+    senderID = loadSenderID();
+    macValid = true;
+    inputConfirmed = true;
     recalcOnlineCount();
     drawMainScreen();
     Serial.print("Loaded MAC: ");
@@ -1080,12 +1086,12 @@ void setup() {
 
   if (macValid) {
     EspNowPacket hello_pkt;
-    hello_pkt.ctrl_id      = senderID;
-    hello_pkt.port_num     = 0;
-    hello_pkt.sensor_type  = 0;
-    hello_pkt.value        = (float)senderID;
+    hello_pkt.ctrl_id = senderID;
+    hello_pkt.port_num = 0;
+    hello_pkt.sensor_type = 0;
+    hello_pkt.value = (float)senderID;
     hello_pkt.timestamp_ms = millis();
-    hello_pkt.ftype        = FTYPE_HELLO;
+    hello_pkt.ftype = FTYPE_HELLO;
     esp_now_send(currentMac, (uint8_t*)&hello_pkt, sizeof(hello_pkt));
     Serial.println("[HELLO] Sent to main module");
   }
@@ -1121,12 +1127,12 @@ void loop() {
       last_hello_ms = millis();
 
       EspNowPacket hello_pkt;
-      hello_pkt.ctrl_id      = senderID;
-      hello_pkt.port_num     = 0;
-      hello_pkt.sensor_type  = 0;
-      hello_pkt.value        = (float)senderID;
+      hello_pkt.ctrl_id = senderID;
+      hello_pkt.port_num = 0;
+      hello_pkt.sensor_type = 0;
+      hello_pkt.value = (float)senderID;
       hello_pkt.timestamp_ms = millis();
-      hello_pkt.ftype        = FTYPE_HELLO;
+      hello_pkt.ftype = FTYPE_HELLO;
       esp_now_send(currentMac, (uint8_t*)&hello_pkt, sizeof(hello_pkt));
 
       Serial.println("[HELLO] Scanning...");
@@ -1142,17 +1148,17 @@ void loop() {
       saveMAC(mac, senderID);
       saveSenderID(senderID);
       addPeer(mac);
-      macValid      = true;
-      inputConfirmed= true;
+      macValid = true;
+      inputConfirmed = true;
       drawMainScreen();
 
       EspNowPacket hello_pkt;
-      hello_pkt.ctrl_id      = senderID;
-      hello_pkt.port_num     = 0;
-      hello_pkt.sensor_type  = 0;
-      hello_pkt.value        = (float)senderID;
+      hello_pkt.ctrl_id = senderID;
+      hello_pkt.port_num = 0;
+      hello_pkt.sensor_type = 0;
+      hello_pkt.value = (float)senderID;
       hello_pkt.timestamp_ms = millis();
-      hello_pkt.ftype        = FTYPE_HELLO;
+      hello_pkt.ftype = FTYPE_HELLO;
       esp_now_send(currentMac, (uint8_t*)&hello_pkt, sizeof(hello_pkt));
       Serial.println("[HELLO] Sent after MAC confirmed");
 
@@ -1185,7 +1191,7 @@ void loop() {
   static uint32_t nextPressMs = 0;
   int curNext = digitalRead(BUTTON_NEXT);
   if (prevNext == HIGH && curNext == LOW) nextPressMs = millis();
-  if (prevNext == LOW  && curNext == HIGH) {
+  if (prevNext == LOW && curNext == HIGH) {
     if (millis() - nextPressMs < 800) {
       displayPage = (displayPage == PAGE_MAIN) ? PAGE_NODESTATUS : PAGE_MAIN;
       (displayPage == PAGE_MAIN) ? drawMainScreen() : drawNodeStatusPage();
