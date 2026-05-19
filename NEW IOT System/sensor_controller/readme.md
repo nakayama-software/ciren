@@ -1,1 +1,0 @@
-Directory purpose for NEW sensor controller

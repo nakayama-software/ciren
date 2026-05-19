@@ -1,1 +1,0 @@
-Directory to handle code of sensor node. contained some kind of sensors

@@ -1,7 +1,7 @@
 FRONTEND SYSTEM
-cd dashboard-frontend
+cd frontend
 npm run dev
 
 BACKEND SYSTEM
-cd SERVER
-npm run dev
+cd backend
+$env:NODE_ENV="production"; node src/index.js             

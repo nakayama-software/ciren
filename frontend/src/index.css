@@ -1,0 +1,77 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* Enable class-based dark mode (Tailwind v4).
+   Without this, dark: variants respond to OS prefers-color-scheme only,
+   and the JavaScript toggle (adding .dark on <html>) has no effect. */
+@variant dark (&:where(.dark, .dark *));
+
+/* ── driver.js popover overrides ── */
+.driver-popover {
+  background: #1e293b !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;
+  max-width: 300px !important;
+  font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', system-ui, sans-serif !important;
+}
+.driver-popover-title {
+  color: #f1f5f9 !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+.driver-popover-description {
+  color: #94a3b8 !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+}
+.driver-popover-description b {
+  color: #67e8f9 !important;
+  font-weight: 600 !important;
+}
+.driver-popover-progress-text {
+  color: #64748b !important;
+  font-size: 11px !important;
+}
+.driver-popover-footer button {
+  font-size: 12px !important;
+  border-radius: 7px !important;
+  padding: 5px 12px !important;
+  cursor: pointer !important;
+}
+.driver-popover-next-btn {
+  background: #0f172a !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+}
+.driver-popover-next-btn:hover {
+  background: #1e293b !important;
+}
+.driver-popover-prev-btn {
+  background: transparent !important;
+  color: #94a3b8 !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+}
+.driver-popover-prev-btn:hover {
+  color: #f1f5f9 !important;
+}
+.driver-popover-close-btn {
+  color: #64748b !important;
+  font-size: 18px !important;
+}
+.driver-popover-close-btn:hover {
+  color: #94a3b8 !important;
+}
+.driver-popover-arrow-side-left.driver-popover-arrow {
+  border-left-color: #1e293b !important;
+}
+.driver-popover-arrow-side-right.driver-popover-arrow {
+  border-right-color: #1e293b !important;
+}
+.driver-popover-arrow-side-top.driver-popover-arrow {
+  border-top-color: #1e293b !important;
+}
+.driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-bottom-color: #1e293b !important;
+}
