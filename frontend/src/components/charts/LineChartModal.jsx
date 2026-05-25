@@ -38,24 +38,35 @@ const RANGE_OPTIONS = [
 ]
 
 // ── Table view component ─────────────────────────────────────────────────────
-function DataTableSection({ label, labelColor, rows, unit, isDark }) {
-  const sorted = useMemo(() => [...rows].reverse(), [rows])
+const PAGE_SIZE = 200
 
-  // Show date column when readings span multiple calendar days
-  const multiDay = useMemo(() => {
-    if (rows.length < 2) return false
-    const first = new Date(rows[0].ts).toDateString()
-    const last  = new Date(rows[rows.length - 1].ts).toDateString()
-    return first !== last
+function DataTableSection({ label, labelColor, rows, unit, isDark }) {
+  const [page, setPage] = useState(0)
+
+  // Reset to first page when the dataset changes (new range / new fetch)
+  useEffect(() => { setPage(0) }, [rows])
+
+  // Single pass: detect multiDay + reverse + pre-format all timestamps
+  // Avoids calling toLocaleTimeString() 15,000× per render
+  const { sorted, multiDay } = useMemo(() => {
+    if (rows.length === 0) return { sorted: [], multiDay: false }
+    const isMultiDay = rows.length >= 2 &&
+      new Date(rows[0].ts).toDateString() !== new Date(rows[rows.length - 1].ts).toDateString()
+    const rev = [...rows].reverse()
+    const formatted = rev.map(r => {
+      const d = new Date(r.ts)
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const fmtTs = isMultiDay
+        ? `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}  ${time}`
+        : time
+      return { value: r.value, fmtTs }
+    })
+    return { sorted: formatted, multiDay: isMultiDay }
   }, [rows])
 
-  const fmtCell = (ts) => {
-    const d = new Date(ts)
-    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    if (!multiDay) return time
-    const date = d.toLocaleDateString([], { day: 'numeric', month: 'short' })
-    return `${date}  ${time}`
-  }
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
+  const offset = page * PAGE_SIZE
+  const displayRows = sorted.slice(offset, offset + PAGE_SIZE)
 
   const thCls = 'px-3 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider sticky top-0 z-[1]'
   const thBg  = isDark ? 'bg-slate-800 text-gray-400' : 'bg-gray-50 text-gray-500'
@@ -68,24 +79,49 @@ function DataTableSection({ label, labelColor, rows, unit, isDark }) {
       <div className="flex-1 min-h-0 overflow-auto rounded-md border border-black/10 dark:border-white/10">
         <table className="w-full border-collapse">
           <thead>
-            <tr className={`${thCls} ${thBg} border-b border-black/10 dark:border-white/10`}>
+            <tr>
               <th className={`${thCls} ${thBg} w-10`}>#</th>
               <th className={`${thCls} ${thBg}`}>{multiDay ? 'Date & Time' : 'Time'}</th>
               <th className={`${thCls} ${thBg} text-right`}>Value</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r, i) => (
-              <tr key={i} className={`border-b border-black/5 dark:border-white/5 ${i % 2 === 1 ? tdAlt : ''}`}>
-                <td className={`${tdCls} text-gray-400 dark:text-gray-500`}>{i + 1}</td>
-                <td className={`${tdCls} font-mono`}>{fmtCell(r.ts)}</td>
-                <td className={`${tdCls} text-right font-mono`}>{formatValue(r.value)} {unit}</td>
-              </tr>
-            ))}
+            {displayRows.map((r, i) => {
+              const globalIdx = offset + i
+              return (
+                <tr key={globalIdx} className={`border-b border-black/5 dark:border-white/5 ${globalIdx % 2 === 1 ? tdAlt : ''}`}>
+                  <td className={`${tdCls} text-gray-400 dark:text-gray-500`}>{globalIdx + 1}</td>
+                  <td className={`${tdCls} font-mono`}>{r.fmtTs}</td>
+                  <td className={`${tdCls} text-right font-mono`}>{formatValue(r.value)} {unit}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
-      <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">{rows.length} rows</div>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="text-[10px] text-gray-400 dark:text-gray-500">
+          {rows.length.toLocaleString()} rows
+          {sorted.length > PAGE_SIZE && ` · ${offset + 1}–${Math.min(offset + PAGE_SIZE, sorted.length)}`}
+        </span>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              disabled={page === 0}
+              onClick={() => setPage(p => p - 1)}
+              className="px-2 py-0.5 text-[10px] rounded border border-black/10 dark:border-white/10 disabled:opacity-30 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer disabled:cursor-default transition-colors"
+            >‹ Prev</button>
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(p => p + 1)}
+              className="px-2 py-0.5 text-[10px] rounded border border-black/10 dark:border-white/10 disabled:opacity-30 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer disabled:cursor-default transition-colors"
+            >Next ›</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

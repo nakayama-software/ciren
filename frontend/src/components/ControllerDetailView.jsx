@@ -61,6 +61,7 @@ export default function ControllerDetailView({
   nodes,
   latestData,
   nodeStatus,
+  isOnline,
   now,
   onBack,
   onPortReset,
@@ -243,6 +244,14 @@ export default function ControllerDetailView({
           <span className="text-xs text-slate-400 dark:text-gray-500 shrink-0">{tActiveNow}</span>
         </div>
       </div>
+
+      {/* Offline notice */}
+      {!isOnline && displayNodes.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-4 text-xs text-amber-700 dark:text-amber-300">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span>{t?.controllerDetail?.offlineNotice || 'Device offline — showing last known data'}</span>
+        </div>
+      )}
 
       {/* Sensor grid */}
       <h3 className="text-base font-medium mb-4 text-slate-900 dark:text-white">{tSNTitle}</h3>

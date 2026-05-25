@@ -20,6 +20,8 @@ export const translations = {
       footer: '© 2025 CIREN Dashboard',
       noNode: 'No node connected',
       noHubDetected: 'No sensor controllers detected for',
+      deviceLabel: 'Device Name',
+      offline: 'Offline',
     },
     controllerDetail: {
       back: 'Back',
@@ -33,6 +35,7 @@ export const translations = {
       nodesRegistered: (n) => `${n} node${n !== 1 ? 's' : ''} registered`,
       outOfRange: 'Out of range',
       export: 'Export',
+      offlineNotice: 'Device offline — showing last known data',
     },
     export: {
       title: 'Export Sensor Data',
@@ -146,6 +149,8 @@ export const translations = {
       footer: '© 2025 CIREN ダッシュボード',
       noNode: '接続されたノードはありません',
       noHubDetected: 'センサーコントローラーが検出されていません',
+      deviceLabel: 'デバイス名',
+      offline: 'オフライン',
     },
     controllerDetail: {
       back: 'ダッシュボードに戻る',
@@ -159,6 +164,7 @@ export const translations = {
       nodesRegistered: (n) => `${n} ノード登録済み`,
       outOfRange: '範囲外',
       export: 'エクスポート',
+      offlineNotice: 'デバイスオフライン — 最後に受信したデータを表示中',
     },
     export: {
       title: 'センサーデータのエクスポート',

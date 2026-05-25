@@ -21,6 +21,7 @@ import {
 import { getNodeKey, getReadingKey, isIMUSensor, countDisplayNodes } from './utils/sensors'
 import { translations } from './utils/translation'
 import ControllerDetailView from './components/ControllerDetailView'
+import AliasInlineEdit, { getAlias } from './components/AliasInlineEdit'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DeviceManagementPage from './pages/DeviceManagementPage'
@@ -454,7 +455,9 @@ export default function App() {
                 <div>
                   <p className="text-sm sm:text-base font-semibold tracking-tight text-slate-900 dark:text-white leading-none">CIREN</p>
                   <p className="hidden sm:block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {selectedDevice ? selectedDevice.device_id : (t.dashboard?.subtitle || 'IoT Monitoring')}
+                    {selectedDevice
+                      ? (getAlias(selectedDeviceId) || selectedDevice.device_id)
+                      : (t.dashboard?.subtitle || 'IoT Monitoring')}
                   </p>
                 </div>
               </div>
@@ -633,7 +636,7 @@ export default function App() {
                   }`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${devices[id]?.device?.status === 'online' ? 'bg-green-400' : 'bg-slate-400'}`} />
-                {id}
+                {getAlias(id) || id}
               </button>
             )
           })}
@@ -689,7 +692,8 @@ export default function App() {
                     const isSelected = selectedCtrlId === String(ctrlId)
                     const ctrlNodes = selectedNodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
                     const activeNodes = ctrlNodes.filter((n) => n.status === 'online')
-                    const displayCount = countDisplayNodes(activeNodes)
+                    // Show registered node count when offline so user sees what was last there
+                    const displayCount = online ? countDisplayNodes(activeNodes) : countDisplayNodes(ctrlNodes)
 
                     const hbKey = `${selectedDeviceId}_${ctrlId}`
                     const lastSeenMs = Math.max(
@@ -698,15 +702,16 @@ export default function App() {
                       0
                     )
 
-                    if (!online && lastSeenMs > 0 && (now - lastSeenMs) > 24 * 60 * 60 * 1000) return null
-                    if (!online && lastSeenMs === 0) return null
+                    // Only hide if truly unregistered: no nodes in DB and never seen
+                    if (!online && lastSeenMs === 0 && ctrlNodes.length === 0) return null
 
                     const lastSeenLabel = lastSeenMs > 0
                       ? (() => {
                           const diff = Math.floor((now - lastSeenMs) / 1000)
-                          if (diff < 60)   return `${diff}s ago`
-                          if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-                          return `${Math.floor(diff / 3600)}h ago`
+                          if (diff < 60)       return `${diff}s ago`
+                          if (diff < 3600)     return `${Math.floor(diff / 60)}m ago`
+                          if (diff < 86400)    return `${Math.floor(diff / 3600)}h ago`
+                          return `${Math.floor(diff / 86400)}d ago`
                         })()
                       : null
 
@@ -724,7 +729,12 @@ export default function App() {
                             <Cpu className={`w-4 h-4 ${online ? 'text-white' : 'text-slate-400 dark:text-slate-500'}`} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-slate-900 dark:text-white truncate text-sm">Controller {ctrlId}</p>
+                            <AliasInlineEdit
+                              deviceId={selectedDeviceId}
+                              ctrlId={ctrlId}
+                              originalName={`Controller ${ctrlId}`}
+                              textClass="font-semibold text-slate-900 dark:text-white text-sm"
+                            />
                             <p className="text-xs text-slate-500 dark:text-gray-400">
                               {displayCount} node{displayCount !== 1 ? 's' : ''}
                               {!online && lastSeenLabel && <span className="ml-1">· {lastSeenLabel}</span>}
@@ -765,6 +775,20 @@ export default function App() {
                 {t.dashboard?.mainModuleStatus || 'Main Module Status'}
               </h3>
               <div className="rounded-2xl border border-black/10 bg-white/80 p-3 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm divide-y divide-black/5 dark:divide-white/5">
+
+                {/* Device label */}
+                <div className="flex items-center gap-2 py-2 first:pt-0">
+                  <Activity size={13} className="text-cyan-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-slate-400 dark:text-gray-500 leading-none mb-0.5">{t.dashboard?.deviceLabel || 'Device Name'}</p>
+                    <AliasInlineEdit
+                      deviceId={selectedDeviceId}
+                      ctrlId={null}
+                      originalName={selectedDevice.device_id}
+                      textClass="text-[11px] font-semibold text-slate-900 dark:text-white truncate"
+                    />
+                  </div>
+                </div>
 
                 {/* Online status */}
                 <div className="flex items-center justify-between py-2 first:pt-0">
@@ -856,6 +880,7 @@ export default function App() {
                 nodes={selectedNodes}
                 latestData={selectedLatest}
                 nodeStatus={selectedNodeStatus}
+                isOnline={isCtrlOnline(selectedCtrlId)}
                 now={now}
                 onBack={() => setSelectedCtrlId(null)}
                 onPortReset={handlePortReset}
