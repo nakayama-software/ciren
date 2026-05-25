@@ -1,5 +1,5 @@
-const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
-require('dotenv').config({ path: require('path').resolve(__dirname, '..', envFile) })
+// Load from root .config (shared across backend + frontend)
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', '..', '.config') })
 const express  = require('express')
 const cors     = require('cors')
 const mongoose = require('mongoose')
@@ -14,7 +14,7 @@ const handleStats   = require('./api/stats')
 
 
 const app  = express()
-const PORT = process.env.PORT || 3000
+const PORT = process.env.BACKEND_PORT || process.env.PORT || 3000
 
 // ─── Middleware ───────────────────────────────────
 app.use(cors())

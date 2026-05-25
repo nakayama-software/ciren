@@ -51,7 +51,7 @@ function initWS(serverOrPort) {
     console.log(`[WS] Client connected: ${ws.user?.username}`)
   })
 
-  const portInfo = typeof serverOrPort === 'number' ? serverOrPort : (process.env.PORT || 3000)
+  const portInfo = typeof serverOrPort === 'number' ? serverOrPort : (process.env.BACKEND_PORT || process.env.PORT || 3000)
   console.log(`[WS] Server running on port ${portInfo}`)
   return wss
 }
