@@ -10,7 +10,7 @@ const sensorReadingSchema = new mongoose.Schema({
   value:       { type: Number, required: true },
   ftype:       { type: Number, required: true },
   device_ts:   { type: Number },
-  server_ts:   { type: Date, default: Date.now, index: true },
+  server_ts:   { type: Date, default: Date.now },
 }, { versionKey: false })
 
 // Compound index untuk query dashboard dan history
