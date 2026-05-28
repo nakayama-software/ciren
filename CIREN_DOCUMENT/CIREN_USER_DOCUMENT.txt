@@ -1,0 +1,506 @@
+================================================================================
+CIREN — USER SPECIFICATION
+Real-Time IoT Monitoring System
+================================================================================
+Date    : 2026-05-28
+Version : 1.3
+================================================================================
+
+
+1. WHAT IS CIREN?
+--------------------------------------------------------------------------------
+CIREN is a plug-and-play real-time IoT monitoring system designed for industrial
+and commercial environments. It lets you:
+  - Connect multiple sensors to a central cloud dashboard
+  - Monitor sensor data live from any browser, anywhere
+  - Set custom alert thresholds per sensor
+  - View historical data and export it
+  - Configure sensor upload intervals remotely
+  - Track device last-seen status and connection mode
+  - Expand to any sensor type — the platform is open and extensible
+
+
+2. SYSTEM OVERVIEW
+--------------------------------------------------------------------------------
+
+  Architecture: 3-Layer Hierarchical
+
+    [Sensor Node] ──UART──► [Sensor Controller] ──ESP-NOW──► [Main Module]
+                                                                   │
+                                                         WiFi / LTE-M (fallback)
+                                                                   │
+                                                            [Backend Server]
+                                                                   │
+                                                             [Dashboard]
+
+  Overall System Capacity:
+    - Sensor nodes per controller      : Up to 8
+    - Controllers per main module      : Up to 20
+    - Total sensor nodes per system    : Up to 160
+    - Simultaneous dashboard users     : Multiple (no hard limit)
+
+  Overall Safe Operating Temperature   : -40°C to +80°C
+  (upper limit from DHT20 sensor; ESP32-S3 and SIM7080G support down to -40°C)
+
+
+3. HARDWARE COMPONENTS
+--------------------------------------------------------------------------------
+
+3.1 SENSOR NODE
+  MCU               : Seeeduino XIAO SAMD21
+  Sensors supported : 1 sensor per node (see Section 4 for sensor specs)
+
+  Available nodes (currently in production):
+    - node_dht20    : DHT20 — Temperature + Humidity
+    - node_mpu6050  : MPU6050 — Accelerometer + Gyroscope + Euler Angles
+
+  Extensibility:
+    The sensor node design is open and sensor-agnostic. Any sensor communicating
+    over I2C, SPI, UART, or analog can be integrated into a new node type without
+    changes to the controller or main module. Custom sensor nodes can be developed
+    per industry requirement on request — see Section 6.5 for an example use case.
+
+  Connection to Controller:
+    - Type          : Wired Serial1 (UART)
+    - Max distance  : ~10 meters
+    - Note          : Shorter cables recommended for signal reliability
+
+  Power:
+    - Voltage       : 3.3V
+    - Current       : ~50mA
+    - Source        : USB or external regulated supply
+
+  Operating Temperature : -40°C to +85°C (MCU)
+                          Limited by sensor — see Section 5
+
+
+3.2 SENSOR CONTROLLER
+  MCU               : ESP32
+  Capacity          : Up to 8 Sensor Nodes per controller
+  Storage           : NVS (non-volatile) — retains interval config after reboot
+
+  Connection to Sensor Nodes:
+    - Type          : Wired Serial (UART)
+    - Max distance  : ~10 meters per node
+
+  Connection to Main Module:
+    - Type          : ESP-NOW (2.4 GHz wireless)
+    - Channel       : Fixed at Channel 1
+    - Max range (open air)  : ~200 – 480 meters
+    - Max range (indoors)   : ~50 – 100 meters
+    - Note          : Walls, metal, and concrete reduce range significantly.
+                      For industrial environments, keep within 30–50m.
+
+  Power:
+    - Voltage       : 3.3V
+    - Current       : ~150 – 240mA
+    - Source        : USB or external regulated supply
+
+  Operating Temperature : -40°C to +85°C
+
+
+3.3 MAIN MODULE
+  MCU               : ESP32-S3
+  Display           : TFT ILI9341 2.4" 320×240 (6 status pages)
+  SIM Modem         : SIM7080G M5STAMP (LTE-M / Cat-M1)
+  GPS               : Not supported
+
+  Connection to Controllers:
+    - Type          : ESP-NOW (2.4 GHz wireless, receives from controllers)
+    - Max peers     : Up to 20 controllers
+
+  Connection to Internet — Primary (WiFi):
+    - Standard      : IEEE 802.11 b/g/n (2.4 GHz)
+    - Max range     : ~50m indoors / ~100m outdoors
+    - Note          : Ensure the module is within router range
+
+  Connection to Internet — Fallback (LTE-M):
+    - Modem         : SIM7080G (Cat-M1)
+    - Coverage      : Anywhere with LTE-M cellular signal
+    - Activation    : Automatic when WiFi is unavailable
+    - Requirement   : Active SIM card with LTE-M data plan
+    - Data usage    : Minimal (sensor telemetry only, typically under 300MB/month)
+
+  Connectivity Modes:
+    - wifi mode     : WiFi connected, MQTT over WiFi
+    - sim mode      : WiFi unavailable, MQTT over SIM modem
+    - Offline       : No connection, data not published
+
+  Power:
+    - ESP32-S3      : 3.3V / ~150 – 300mA
+    - SIM7080G      : 3.3V – 4.2V / up to 500mA (during transmission)
+    - Note          : Use a stable, regulated power supply.
+                      Power fluctuations can cause unexpected resets.
+                      Hardware watchdog will auto-restart if a crash occurs.
+
+  Operating Temperature:
+    - ESP32-S3      : -40°C to +85°C
+    - SIM7080G      : -40°C to +85°C
+
+
+4. SENSOR SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+The following specifications describe sensor nodes currently in production.
+Additional sensor types can be developed per customer requirement — see Section 3.1.
+
+4.1 DHT20 — Temperature & Humidity Sensor
+  Manufacturer      : ASAIR (Aosong Electronics)
+  Interface         : I2C
+  I2C Address       : 0x38
+  Supply Voltage    : 2.2V – 5.5V
+  Current (active)  : ~1.6mA
+  Current (standby) : ~0.4mA
+  Calibration       : Factory calibrated — no additional calibration needed
+
+  Temperature:
+    - Measurement range : -40°C to +80°C
+    - Accuracy          : ±0.5°C
+    - Resolution        : 0.01°C
+    - Response time     : ~2 seconds
+
+  Humidity (Relative Humidity / RH):
+    - Measurement range : 0% – 100% RH
+    - Accuracy          : ±3% RH
+    - Resolution        : 0.024% RH
+    - Response time     : ~2 seconds
+
+  Upload interval   : Default 500ms (recommended minimum 500ms)
+
+  Notes:
+    - Avoid condensing environments for long-term accuracy
+    - RH = Relative Humidity (% of max water vapor air can hold at
+      current temperature). 0% = dry, 100% = fully saturated.
+
+
+4.2 MPU6050 — 6-Axis IMU (Accelerometer + Gyroscope)
+  Manufacturer      : TDK InvenSense
+  Interface         : I2C
+  I2C Address       : 0x68 (default) / 0x69 (AD0 pin HIGH)
+  Supply Voltage    : 2.375V – 3.46V
+  Operating Current : ~3.9mA
+  ADC Resolution    : 16-bit per axis
+  Startup Time      : ~30ms
+  Operating Temp    : -40°C to +85°C
+
+  Accelerometer:
+    - Axes              : X, Y, Z
+    - Full-scale range  : ±2g / ±4g / ±8g / ±16g (configurable)
+    - Sensitivity (±2g) : 16,384 LSB/g
+    - Unit output       : m/s²
+
+  Gyroscope:
+    - Axes              : X, Y, Z
+    - Full-scale range  : ±250 / ±500 / ±1000 / ±2000 °/s (configurable)
+    - Sensitivity (±250°/s) : 131 LSB/°/s
+    - Unit output       : °/s
+
+  Euler Angles (computed from gyro + accel):
+    - Pitch             : Rotation around X axis (tilt forward/backward) in °
+    - Roll              : Rotation around Y axis (tilt left/right) in °
+    - Yaw               : Rotation around Z axis (turn left/right) in °
+
+  Upload interval   : Default 200ms (recommended minimum 200ms)
+
+  Notes:
+    - Mount firmly — loose mounting causes vibration noise in readings
+    - Keep away from strong magnetic fields (can cause gyro drift)
+
+
+5. SYSTEM FEATURES (DASHBOARD)
+--------------------------------------------------------------------------------
+
+5.1 Device Management
+  - View list of all registered devices
+  - See online/offline status for each device
+  - View device connection mode (WiFi or LTE-M)
+  - View device last-seen timestamp
+
+5.2 Real-Time Monitoring
+  - Live sensor readings updated in real time (via WebSocket)
+  - Readings displayed per controller and per sensor port
+  - Supported sensor values (currently available nodes):
+      - Temperature (°C)
+      - Humidity (% RH)
+      - Acceleration X / Y / Z (m/s²)
+      - Gyroscope X / Y / Z (°/s)
+      - Pitch / Roll / Yaw (°)
+  - Connection status indicator per device
+  - If a device goes offline, last known sensor values remain visible on the
+    dashboard until the device reconnects
+
+5.3 Sensor Configuration
+  - Set a custom upload interval per sensor port
+      - Default: 500ms for standard sensors (e.g., DHT20)
+      - Default: 200ms for IMU sensors (e.g., MPU6050)
+  - Delivery confirmation shown in UI (Pending / Delivered)
+  - Assign custom labels to sensor ports (e.g., "Cold Room 1", "Motor A")
+
+5.4 Alert Thresholds
+  - Set minimum and/or maximum threshold per sensor
+  - Visual alert shown on dashboard when value is out of range
+
+5.5 Historical Data
+  - View historical readings per sensor in a chart
+  - Filter by time range
+
+5.6 Data Export
+  - Export sensor readings in CSV or JSON format
+  - Filter by device, sensor port, and time range
+
+
+6. USE CASES
+--------------------------------------------------------------------------------
+
+6.1 Food & Beverage Manufacturing — Temperature & Humidity Compliance
+  Scenario:
+    A food processing facility must keep cold storage rooms within a specific
+    temperature and humidity range at all times for food safety compliance.
+
+  Setup:
+    - DHT20 sensor nodes placed inside cold rooms, storage areas, and production
+      lines
+    - Sensor controller mounted outside the cold room (within 10m cable reach)
+    - Main module connected to facility WiFi (or LTE-M as backup)
+
+  Benefit:
+    - Continuous real-time monitoring without manual rounds
+    - Alert threshold set to notify immediately if temperature rises above limit
+    - Historical data exportable for compliance reporting
+
+
+6.2 Machine Condition Monitoring — Vibration & Predictive Maintenance
+  Scenario:
+    A manufacturing facility wants to detect abnormal vibration in rotating
+    machinery (motors, pumps, compressors) before a breakdown occurs.
+
+  Setup:
+    - MPU6050 sensor nodes mounted directly on machine housings
+    - Upload interval set to 200ms for high-frequency vibration capture
+    - Alert threshold set on acceleration values
+
+  Benefit:
+    - Detect vibration anomalies early — schedule maintenance before failure
+    - Compare vibration signatures over time using the historical chart
+    - No wiring to a central system — sensor controller communicates wirelessly
+
+
+6.3 Remote & Outdoor Site Monitoring
+  Scenario:
+    A facility needs monitoring at a remote location with no stable WiFi
+    (outdoor warehouse, construction site, remote pumping station).
+
+  Setup:
+    - Main module uses SIM card (LTE-M) as primary connection
+    - No WiFi infrastructure needed at the monitored site
+    - Dashboard accessible from office or mobile browser over the internet
+
+  Benefit:
+    - Full monitoring even without local network
+    - Automatic WiFi/LTE-M failover — if one goes down, the other takes over
+    - Data reaches the dashboard as long as there is LTE-M cellular coverage
+
+
+6.4 Multi-Location, Multi-Sensor Monitoring
+  Scenario:
+    A company operates multiple factory floors or buildings and needs a unified
+    view of all sensor data from one dashboard.
+
+  Setup:
+    - One CIREN main module per location
+    - Up to 20 controllers × 8 sensor nodes = 160 sensors per main module
+    - All devices appear on the same dashboard under their respective device IDs
+
+  Benefit:
+    - Single dashboard view across all locations and all sensor types
+    - Each sensor can have its own label, threshold, and upload interval
+    - Historical data per sensor accessible from anywhere
+
+
+6.5 Custom Sensor Integration
+  Scenario:
+    A customer needs to monitor a parameter not covered by the standard sensor
+    catalog (e.g., CO₂ concentration, voltage, pressure, flow rate,
+    4–20mA industrial analog signals).
+
+  Setup:
+    - A custom sensor node is developed using the XIAO SAMD21 MCU platform
+    - The sensor communicates over I2C, SPI, UART, or analog to the XIAO
+    - No changes needed to the controller, main module, or dashboard
+
+  Benefit:
+    - Platform is open — any sensor type can be added
+    - Existing installation is reused — only the sensor node is swapped
+    - New sensor data appears on the dashboard automatically
+
+
+7. DASHBOARD PAGES
+--------------------------------------------------------------------------------
+  - Device List     : All devices + online/offline status
+  - Device Detail   : All controllers and sensors for a selected device
+  - Controller View : Individual sensor cards per port
+  - Sensor Card     : Live reading, label, interval badge, threshold indicator
+
+
+8. SYSTEM REQUIREMENTS
+--------------------------------------------------------------------------------
+
+8.1 To Access the Dashboard
+  - A modern web browser (Chrome, Firefox, Edge — latest version recommended)
+  - Network access to the CIREN server (local network or via internet)
+  - A registered user account (username + password)
+
+8.2 To Use the Hardware
+  - CIREN sensor nodes (pre-configured)
+  - CIREN sensor controller (pre-configured)
+  - CIREN main module connected to power + internet (WiFi or SIM card)
+
+
+9. SETUP GUIDE
+--------------------------------------------------------------------------------
+
+9.1 First-Time Hardware Setup
+
+  Step 1 — Connect Sensor Nodes to Controller
+    1. Connect each sensor node to a numbered port on the sensor controller
+       using a UART cable (4-wire: VCC, GND, TX, RX).
+    2. Ports are numbered 1 – 8 on the controller.
+    3. The controller auto-detects the sensor type on first data receipt.
+       No manual type configuration is required.
+
+  Step 2 — Power On the Sensor Controller
+    1. Connect the sensor controller to a 3.3V regulated supply or USB power.
+    2. The controller starts automatically and begins collecting sensor data.
+    3. It will broadcast data via ESP-NOW once the main module is powered and
+       in range.
+
+  Step 3 — Configure WiFi on the Main Module
+    1. Power on the main module.
+    2. On first boot (or if no WiFi credentials are stored), the module enters
+       WiFi configuration mode and creates a temporary WiFi hotspot.
+    3. From a phone or PC, connect to the hotspot created by the main module
+       (the hotspot name and password are printed on the device label).
+    4. A configuration page opens automatically in your browser.
+    5. Enter your WiFi network name (SSID) and password, then save.
+    6. The main module reboots and connects to your WiFi network.
+    7. The TFT display on the module shows the connection status and device ID.
+
+  Step 4 — Insert SIM Card (for LTE-M Fallback, optional)
+    1. Power off the main module before inserting the SIM card.
+    2. Insert a nano SIM card with an active LTE-M (Cat-M1) data plan into
+       the SIM slot on the SIM7080G modem.
+    3. Recommended SIM: Soracom Air plan-D D-300MB (~¥330/month, incl. 300MB).
+       Any LTE-M SIM from a compatible carrier will work.
+    4. Power on the main module.
+    5. When WiFi is available, the system uses WiFi as the primary connection.
+       When WiFi is unavailable, it automatically switches to LTE-M.
+    6. The TFT display shows the active connection mode: "wifi" or "sim".
+
+  Step 5 — Verify on Dashboard
+    1. Open the CIREN dashboard in a browser and log in.
+    2. The main module device should appear as "Online" within ~30 seconds
+       of powering on.
+    3. Select the device to view its controllers and live sensor data.
+
+
+9.2 Configure a Sensor Upload Interval
+  1. Open the device detail page on the dashboard.
+  2. Click the interval badge on the target sensor port.
+  3. Enter the desired interval in milliseconds.
+     (Recommended minimum: 500ms for DHT20, 200ms for MPU6050)
+  4. Click Save.
+  5. Wait for the delivery status to change to "Delivered".
+     The config is sent wirelessly to the sensor controller.
+
+9.3 Set an Alert Threshold
+  1. Open the sensor card for the target sensor.
+  2. Click the threshold icon / button.
+  3. Enter minimum and/or maximum values.
+  4. Click Save.
+  5. A visual warning appears on the sensor card when the value is out of range.
+
+9.4 Export Data
+  1. Open the sensor card or history modal.
+  2. Click the Export button.
+  3. Select format: CSV or JSON.
+  4. Select the desired time range.
+  5. Click Download.
+
+9.5 Assign a Label to a Sensor Port
+  1. Open the sensor card.
+  2. Click the label / edit icon next to the port name.
+  3. Enter a descriptive label (e.g., "Cold Room 1", "Motor A Vibration").
+  4. Click Save.
+  5. The label appears on the dashboard and in all exported data files.
+
+
+10. TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+10.1 Device Shows Offline on Dashboard
+  Possible causes and solutions:
+
+  a) Main module has no internet connection
+     - Check WiFi: is the router on? Is the CIREN module within range?
+     - Check the TFT display on the module — it shows the current connection
+       mode (wifi / sim) and any error indicators.
+     - If the display shows "sim", the LTE-M fallback is active. If neither
+       is shown, the module has no connection.
+
+  b) SIM card not working (LTE-M fallback only)
+     - Confirm the SIM card is inserted correctly and the data plan is active.
+     - Confirm the carrier supports LTE-M / Cat-M1 coverage at your location.
+
+  c) Main module is powered off or has crashed
+     - Check the power LED and TFT display.
+     - The hardware watchdog automatically restarts the module within ~3 minutes
+       if it hangs. Wait briefly and check again.
+
+  d) Backend server is unreachable
+     - Contact your system administrator to verify the server is running.
+
+
+10.2 Sensor Data Not Appearing for a Specific Port
+  Possible causes:
+
+  a) Sensor node not connected or not powered
+     - Check the UART cable connection between the node and the controller.
+     - Verify the sensor node has power (check LED if present).
+
+  b) Controller does not detect the sensor node
+     - The controller detects sensor type automatically on first data receipt.
+       Wait up to 5 seconds after powering on.
+     - Try disconnecting and reconnecting the sensor node cable.
+
+  c) Controller out of ESP-NOW range
+     - If the port appears but shows no data, the controller may be out of
+       range of the main module.
+     - Move the controller closer, or reduce obstructions between them.
+     - Recommended maximum distance in industrial environments: 30–50m.
+
+
+10.3 Interval Config Shows "Pending" for a Long Time
+  The "Pending" status means the config was sent to the controller but not
+  yet acknowledged.
+  - Verify the controller is online and within ESP-NOW range.
+  - Config is automatically re-sent after a controller reboot (~10 seconds).
+  - If it remains pending after 1–2 minutes, re-enter and re-save the value.
+
+
+10.4 Alert Threshold Not Triggering
+  - Re-open the threshold modal to confirm the values are saved correctly.
+  - Confirm the current live reading is actually crossing the set threshold.
+  - Visual alerts appear in real time — ensure the browser tab is active and
+    not sleeping.
+
+
+10.5 Data Export is Empty
+  - Verify the selected time range actually contains data (check the history
+    chart view first).
+  - Confirm the correct device and sensor port are selected in the export
+    options.
+
+
+================================================================================
+END OF USER SPECIFICATION
+================================================================================
