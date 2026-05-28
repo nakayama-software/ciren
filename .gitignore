@@ -29,6 +29,7 @@ logs/
 
 # Claude Code
 .claude
+CLAUDE.md
 config/
 dev.config
 temporary files/
