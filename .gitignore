@@ -24,6 +24,9 @@ Caddyfile
 **/dist/
 **/*.zip
 
+# PM2 logs
+logs/
+
 # Claude Code
 .claude
 config/

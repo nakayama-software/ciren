@@ -1,7 +1,27 @@
-FRONTEND SYSTEM
-cd frontend
-npm run dev
+================================================================================
+HOW TO RUN — CIREN using PM2
+================================================================================
 
-BACKEND SYSTEM
-cd backend
-$env:NODE_ENV="production"; node src/index.js             
+1.    cd backend; npm install --omit=dev; cd ..
+2.    cd frontend; npm install; cd ..
+3.    mkdir -Force logs
+4.    pm2 start ecosystem.config.js
+
+  Check status:
+    pm2 status
+
+  View logs:
+    pm2 logs ciren-backend
+    pm2 logs ciren-frontend
+
+  Stop all:
+    pm2 stop all
+
+  Restart all:
+    pm2 restart all
+
+  Auto-start on reboot (run once):
+    pm2 save
+    pm2 startup
+
+================================================================================

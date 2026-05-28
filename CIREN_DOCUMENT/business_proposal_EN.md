@@ -11,7 +11,7 @@
 *Plug-and-Play Industrial IoT Monitoring System*
 
 Proposal for Japan Market Entry
-Prepared by: [Your Name / Department]
+Prepared by: Raihan Rafif
 Date: May 2026
 
 ---
@@ -19,7 +19,8 @@ Date: May 2026
 # SLIDE 2 — Executive Summary
 
 **The Opportunity**
-Japan's industrial IoT market is growing at 15% CAGR and is currently dominated by expensive, complex systems that require weeks to install and dedicated IT staff to operate.
+Japan's industrial IoT market is growing at approximately 9% CAGR and is currently dominated by expensive, complex systems that require weeks to install and dedicated IT staff to operate.
+*Source: IMARC Group, "Japan Industrial Internet of Things Market," 2025.*
 
 **What We Have**
 CIREN is a ready-to-ship industrial IoT monitoring system developed in-house by Nakayama Iron. It plugs in, auto-detects sensors, and streams live data to a dashboard in minutes — no installation, no IT team.
@@ -31,8 +32,8 @@ A three-phase Japan market entry:
 - **Phase 3** (Year 2–3): Co-development with strategic partners, OEM licensing
 
 **Revenue Potential**
-- Year 1 target: ¥15M hardware + ¥2M SaaS
-- Year 3 target: ¥80M hardware + ¥20M SaaS
+- Year 1 target: ¥4.4M hardware + ¥2.3M SaaS
+- Year 3 target: ¥44M hardware + ¥23M SaaS
 
 **What We Need**
 Approval for sales headcount (2 roles), legal budget for IP filing, and authority to negotiate distributor agreements.
@@ -47,11 +48,14 @@ Approval for sales headcount (2 roles), legal budget for IP filing, and authorit
 
 | Problem | Current Reality |
 |---------|----------------|
-| Installation time | 4–12 weeks for typical industrial IoT setup |
-| Cost barrier | Entry-level systems: ¥500,000–¥2,000,000+ |
+| Installation time | Weeks to months for typical industrial IoT setup |
+| Cost barrier | Entry-level systems: ¥500,000–¥1,500,000+ |
 | IT dependency | Requires dedicated system engineer to deploy and maintain |
 | Connectivity risk | Most systems are WiFi-only — one network failure = blind spot |
 | Vendor lock-in | Proprietary sensors, closed APIs, expensive upgrades |
+
+*Installation time — Source: METI SME IoT Case Study Compendium, Kanto Bureau of Economy, Trade and Industry, 2022.*
+*Cost range — Source: IoT Navi cost comparison survey; METI SME IoT case study compendium, 2023.*
 
 **Target industries with urgent need:**
 - Food & beverage manufacturing (temperature compliance — legally required)
@@ -82,9 +86,12 @@ Sensor Node → Sensor Controller → Main Module → Cloud → Dashboard
 
 **Key hardware specs:**
 - Main Module: ESP32-S3 + SIM7080G LTE-M modem + 2.4" status display
-- Sensor Controller: ESP32, up to 8 sensor nodes
-- Sensor Nodes: XIAO SAMD21 microcontroller + sensor (temp/humidity, vibration, voltage)
+- Sensor Controller: ESP32, up to 8 sensor nodes per controller
+- Sensor Nodes: XIAO SAMD21 microcontroller + any compatible sensor — the node design is open and sensor-agnostic
 - Connectivity: WiFi primary + LTE-M automatic fallback
+
+**Sensor node extensibility:**
+CIREN is designed as an open IoT monitoring platform. Sensor nodes are interchangeable modules — any sensor that communicates over I2C, SPI, UART, or analog can be integrated into a new node. Currently available sensor nodes: Temp/Humidity (DHT20) and Vibration/IMU (MPU6050). Additional node types can be developed per customer or industry requirement without changes to the controller or main module.
 
 ---
 
@@ -98,9 +105,9 @@ Sensor Node → Sensor Controller → Main Module → Cloud → Dashboard
 | Entry price | **¥148,000** | ¥500,000–¥2,000,000 |
 | Connectivity | **WiFi + LTE-M dual** | WiFi only |
 | Sensor swap | **Hot-swap, no restart** | Requires reconfiguration |
-| Sensor types | **Mix freely per port** | Fixed sensor per unit |
+| Sensor types | **Open platform — any sensor type, custom nodes on request** | Fixed sensor per unit |
 | Dashboard | **Real-time, any browser** | Often proprietary app |
-| Customization | **API + open firmware** | Closed system |
+| Customization | **Open platform: API + custom sensor nodes** | Closed system |
 
 **One-line competitive message:**
 > *"CIREN does in 15 minutes what others take 6 weeks and ¥1,000,000 to do."*
@@ -112,9 +119,11 @@ Sensor Node → Sensor Controller → Main Module → Cloud → Dashboard
 ### Japan industrial IoT market is large and underserved at the entry level
 
 **Market size:**
-- Japan Industrial IoT market: ~¥850B (2025), growing 15% CAGR
-- SME manufacturing segment (our primary target): ~¥120B addressable
-- Current penetration of affordable IoT monitoring: **less than 12%** — most SMEs still use manual checks or dated data loggers
+- Japan Industrial IoT market: ~¥1.1 trillion (2025), growing ~9% CAGR
+  *Source: IMARC Group, "Japan Industrial Internet of Things Market," 2025.*
+- SME manufacturing segment (our primary target): ~¥120B addressable *(internal estimate — no external source available for this sub-segment)*
+- Current IoT adoption among Japanese SMEs (≤100 employees): **~9.5%** vs. 50% for large enterprises — most SMEs still use manual checks or dated data loggers
+  *Source: MM Research Institute, IoT Adoption Survey, November 2019. (No comprehensive updated survey identified as of 2025; current penetration likely higher but remains well below large-enterprise levels.)*
 
 **Target customer profile:**
 - Japanese manufacturers with 50–500 employees
@@ -123,10 +132,13 @@ Sensor Node → Sensor Controller → Main Module → Cloud → Dashboard
 - Key trigger events: equipment failure incident, new compliance requirement, DX initiative
 
 **Number of target companies in Japan:**
-- Food manufacturing: ~28,000 factories
-- Metal/machinery: ~45,000 factories
-- Chemical/pharmaceutical: ~6,000 factories
-- **Total addressable: ~79,000 potential customers**
+- Food manufacturing: ~24,800 establishments
+- Fabricated metal products: ~30,600 establishments
+- General-purpose & production machinery: ~13,000 establishments
+- Chemical/pharmaceutical: ~25,700 establishments
+- **Total addressable: ~94,000 potential customers**
+
+*Source: METI 経済構造実態調査 (Economic Structure Survey), 2023.*
 
 ---
 
@@ -145,16 +157,18 @@ Sensor Node → Sensor Controller → Main Module → Cloud → Dashboard
    Enterprise: Quote on request
 
 ③ Connectivity (pass-through or bundled)
-   Soracom LTE-M SIM: ¥55 base + ~¥500/month data
+   Soracom Air plan-D D-300MB: ¥330/month (incl. 300MB)
    Margin opportunity if we resell SIM
 ```
+
+*Source (connectivity pricing): Soracom official pricing, plan-D D-300MB bundle, 2025. Pay-as-you-go alternative: ¥15/day active status + ¥0.2/MB overage.*
 
 **Customer lifetime value example (3 years):**
 ```
 Hardware (Starter Kit + 2 extra sensors):  ¥172,000
 SaaS Standard (36 months):                ¥460,800
-Connectivity (36 months):                  ¥21,600
-Total LTV:                                ¥654,400
+Connectivity (36 months):                  ¥11,880  (Soracom D-300MB ¥330/month × 36)
+Total LTV:                                ¥644,680
 ```
 
 ---
@@ -170,6 +184,7 @@ Total LTV:                                ¥654,400
 | Sensor Controller | ESP32, up to 8 nodes | ¥28,000 |
 | Sensor Node — Temp/Humidity | XIAO + DHT20 | ¥12,000 |
 | Sensor Node — Vibration/IMU | XIAO + MPU6050 | ¥14,000 |
+| Sensor Node — Custom | XIAO + customer-specified sensor (I2C/SPI/UART/analog) | Quote on request |
 
 ### SaaS pricing
 
@@ -224,10 +239,10 @@ Priority 2 → LTE-M auto-failover (SIM7080G built in) — ~¥500/month
 > *"Even if your factory WiFi goes down at 3am, your monitoring doesn't."*
 
 **Recommended partner: Soracom Air**
-- Japan's #1 IoT SIM platform (NTT Docomo + KDDI networks)
+- Japan's leading IoT SIM platform (NTT Docomo + KDDI networks)
 - LTE-M / Cat-M1 native — plug-and-play with CIREN hardware
-- Cost: ¥55/month base + ¥0.1–0.2/MB data
-- CIREN sensor data usage: well under ¥100/month even at full LTE-M
+- Cost: ¥330/month (D-300MB bundle, incl. 300MB data); pay-as-you-go ¥15/day active + ¥0.2/MB
+- CIREN sensor data usage: well within 300MB/month even at full LTE-M
 
 **Business opportunity:**
 Register as Soracom reseller → earn margin on SIM sales alongside hardware.
@@ -282,11 +297,6 @@ Target:    500+ units, ¥80M hardware, ¥20M SaaS
 - System integrators specializing in factory automation (FAシステムインテグレーター)
 - DX consulting firms working with manufacturers (DX推進コンサル)
 
-**Outreach plan:**
-- Exhibition at [exhibition name] → identify 5–10 interested parties
-- Follow up within 2 weeks with formal proposal + demo unit loan offer
-- NDA → pilot agreement → distributor contract
-
 ---
 
 # SLIDE 13 — Financial Projections
@@ -304,103 +314,13 @@ Target:    500+ units, ¥80M hardware, ¥20M SaaS
 
 *Assumptions: 60% of retail as our revenue (via distributors). SaaS at ¥3,800/device/month average. 70% of hardware buyers convert to SaaS.*
 
-**Break-even point:** ~30 Starter Kit sales (hardware-only basis)
+> **Note on COGS:** The figures above reflect component (BOM) cost only (~¥22,000/unit). Actual fully-loaded COGS — including assembly labor, per-unit testing, packaging, and TELEC certification amortization — is estimated at ¥30,000–40,000/unit. Gross profit in production scale will be confirmed once manufacturing process is finalized.
+
+**Break-even point:** ~30 Starter Kit sales (hardware-only basis, BOM cost)
 
 ---
 
-# SLIDE 14 — Team & Resources Required
-### For HR Division
-
-**Current state:** CIREN is developed and maintained by the in-house engineering team.
-No dedicated sales or market development resources exist for Japan.
-
-**Roles needed for Japan market entry:**
-
-| Role | Type | Priority | Responsibilities |
-|------|------|----------|-----------------|
-| **Japan Sales Manager** | Full-time hire | ★★★ Immediate | Partner development, distributor relations, trade shows, proposals |
-| **Technical Sales Support** | Full-time hire | ★★★ Immediate | Customer demos, technical Q&A, onboarding support, Japanese documentation |
-| **Marketing / Content** | Part-time or contract | ★★ Year 1 | Catalogue, case studies, website localization, trade show materials |
-| **Legal / IP Coordinator** | External counsel | ★★ Immediate | Trademark filing, distributor contracts, NDA templates |
-
-**Hiring profile — Japan Sales Manager:**
-- Experience in industrial equipment or IoT sales in Japan
-- Existing network with 商社 or SIer in manufacturing sector
-- Business-level Japanese (native preferred) + working English
-- Can operate independently in the field
-
-**Hiring profile — Technical Sales Support:**
-- Background in electronics, IoT, or embedded systems
-- Comfortable doing live product demos
-- Japanese native or near-native
-- Experience with technical customer support
-
-**Timeline:** Both roles should be filled before the first distributor agreement is signed.
-
----
-
-# SLIDE 15 — IP & Legal Strategy
-
-### Protecting our technology and brand
-
-**Current IP status:**
-All CIREN technology — firmware, protocol, backend, dashboard, hardware design —
-was developed internally at Nakayama Iron and is owned by the company.
-No external IP encumbrances.
-
-**IP assets:**
-
-| Asset | Protection Type | Status |
-|-------|----------------|--------|
-| CIREN firmware (all platforms) | Copyright | Active |
-| CIREN Frame Protocol | Copyright + patent candidate | Pending review |
-| Cloud backend & API | Copyright | Active |
-| Dashboard (React frontend) | Copyright | Active |
-| Hardware schematics & PCB | Copyright + design registration candidate | Pending |
-
-**Key actions required:**
-
-```
-Immediate:
-  ① Trademark filing — Japan (Class 9 + 42): ~¥24,000 filing fee
-  ② NDA template for partner discussions
-  ③ Distributor agreement template (lawyer review)
-
-Within 3 months:
-  ④ Patent search — CIREN Frame Protocol
-     (plug-and-play sensor auto-detection mechanism)
-
-Within 6 months:
-  ⑤ Design registration — hardware enclosure
-  ⑥ Trademark filing — Indonesia (protect home market)
-```
-
-**Budget request for legal:** Approx. ¥500,000–¥800,000 Year 1
-(trademark + patent search + contract templates + lawyer review)
-
----
-
-# SLIDE 16 — Trademark
-
-### File CIREN in Japan — before competitors do
-
-**Brand name:** CIREN (サイレン)
-**Why the name works in Japan:** Pronounced "sairen" — identical to the Japanese word for siren/alarm. Instantly communicates monitoring and early warning to Japanese engineers.
-
-**Filing plan:**
-- **Class 9** — electronic measurement instruments, IoT hardware, sensors
-- **Class 42** — SaaS, cloud computing services
-- **Cost:** ¥24,000 filing + ~¥65,800 registration = ~¥90,000 total
-- **Timeline:** 12–18 months to registration
-
-**Risk of not filing:**
-Any third party can register "CIREN" in Japan. Once registered by someone else, we cannot use the name commercially in Japan without licensing it back — or rebranding entirely.
-
-**Recommendation:** File immediately. The exhibition has already publicly introduced the name.
-
----
-
-# SLIDE 17 — Risk Analysis
+# SLIDE 14 — Risk Analysis
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
@@ -414,44 +334,6 @@ Any third party can register "CIREN" in Japan. Once registered by someone else, 
 
 ---
 
-# SLIDE 18 — Next Steps & Ask
-
-### What we need from each audience
-
-**From Sales Division:**
-- Identify and rank 5 distributor candidates from existing contacts
-- Attend exhibition and qualify leads
-- Define target verticals for Year 1 focus
-
-**From HR Division:**
-- Open requisitions for Japan Sales Manager and Technical Sales Support
-- Define compensation bands competitive with Japan market
-- Target: both roles filled within 90 days
-
-**From President:**
-- Approval to proceed with Japan market entry under this proposal
-- Authorization to sign distributor agreements (up to Phase 1 terms)
-- Budget approval:
-  - Legal / IP: ¥800,000
-  - Marketing materials: ¥300,000
-  - Demo units (3 units for loan program): ¥444,000
-  - **Total Year 1 budget request: ¥1,544,000**
-
----
-
-# SLIDE 19 — Summary
-
-| Item | Decision Needed |
-|------|----------------|
-| Market entry approval | ✅ Proceed with Japan market — Phase 1 |
-| Sales headcount | ✅ Hire Japan Sales Manager + Technical Support |
-| Legal budget | ✅ ¥800,000 for trademark, patent, contracts |
-| First distributor target | ⏳ Sales to identify top 3 candidates |
-| Trademark filing | ⏳ File immediately (CIREN, Class 9 + 42) |
-| Phase 2 decision | ⏳ Review after Year 1 results |
-
----
-
 # APPENDIX A — Product Technical Specifications
 
 | Component | Model | Specification |
@@ -460,7 +342,9 @@ Any third party can register "CIREN" in Japan. Once registered by someone else, 
 | Cellular Modem | SIM7080G | LTE-M (Cat-M1) / NB-IoT |
 | Display | TFT ILI9341 2.4" | 320×240, status display |
 | Controller MCU | ESP32 | Up to 8 sensor nodes |
-| Sensor Node MCU | Seeeduino XIAO SAMD21 | Low-power, compact |
+| Sensor Node MCU | Seeeduino XIAO SAMD21 | Low-power, compact; sensor-agnostic design |
+| Sensor Node — available | DHT20 (Temp/Humidity), MPU6050 (Vibration/IMU) | Currently in production; additional types on request |
+| Sensor Node — expandable | I2C / SPI / UART / Analog | Any compatible sensor can be integrated without platform changes |
 | Wireless (internal) | ESP-NOW | Controller ↔ Main Module |
 | RTOS | FreeRTOS | Multi-task, dual-core |
 | Backend | Node.js + MongoDB | Cloud-hosted |
@@ -496,3 +380,21 @@ Tagline (JP):    センサーを挿すだけ。即時モニタリング。
 
 Do not write:    "Ciren" / "ciren" / "C.I.R.E.N"
 ```
+
+---
+
+# APPENDIX D — Data Sources
+
+| Claim | Source | Year |
+|-------|--------|------|
+| Industrial IoT setup time (weeks to months) | Kanto Bureau of Economy, Trade and Industry — SME IoT Case Study Compendium (中小ものづくり企業IoT等活用事例集) | 2022 |
+| Entry-level industrial IoT system cost ¥500K–¥1.5M+ | IoT Navi cost comparison survey; METI SME IoT case studies | 2023 |
+| Japan Industrial IoT market ~¥1.1 trillion, ~9% CAGR | IMARC Group — "Japan Industrial Internet of Things Market Report" | 2025 |
+| IoT adoption rate: ~9.5% (SMEs ≤100 employees) vs. 50% (large enterprises) | MM Research Institute — IoT Adoption Survey | Nov 2019 |
+| Factory/establishment counts by industry | METI — 経済構造実態調査 (Economic Structure Survey) | 2023 |
+| Soracom Air plan-D pricing | Soracom official pricing & developer documentation (soracom.io) | 2025 |
+
+**Notes:**
+- SME addressable market figure (~¥120B) is an internal estimate derived from top-down calculation; no external research firm publishes this specific sub-segment figure.
+- MM Research Institute IoT penetration data is from 2019; no comprehensive updated survey was identified as of 2025. Current penetration is likely higher but remains well below large-enterprise levels.
+- All yen figures use an exchange rate of approximately ¥150/USD where conversion from USD-denominated reports was required.
