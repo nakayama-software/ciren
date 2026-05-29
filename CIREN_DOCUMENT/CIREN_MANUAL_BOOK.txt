@@ -1,0 +1,910 @@
+================================================================================
+CIREN — MANUAL BOOK
+Real-Time IoT Monitoring System
+================================================================================
+Date    : 2026-05-29
+Version : 1.0
+================================================================================
+
+
+DOCUMENT CONVENTIONS
+--------------------------------------------------------------------------------
+  [NOTE]     General information worth paying attention to
+  [TIP]      Helpful suggestion to get the most out of the system
+  [WARNING]  Action that may cause data loss or system disruption
+  [REQUIRED] Step that must not be skipped
+
+
+================================================================================
+CHAPTER 1 — INTRODUCTION
+================================================================================
+
+1.1  About This Manual
+--------------------------------------------------------------------------------
+This manual is the primary operational guide for CIREN. It covers everything
+you need to install the hardware, access the dashboard, monitor sensor data,
+configure alerts, export reports, and keep the system running.
+
+This manual is written for operators and daily users. No programming or
+networking experience is required to follow it.
+
+For advanced technical details (firmware, protocol, API), refer to the
+CIREN System Specification document.
+
+
+1.2  What is CIREN
+--------------------------------------------------------------------------------
+CIREN is a plug-and-play real-time IoT (Internet of Things) monitoring system.
+It reads data from physical sensors, transmits that data wirelessly to the
+cloud, and displays it live on a web-based dashboard — accessible from any
+browser, anywhere.
+
+Key benefits:
+  - No complex installation — hardware self-configures on first power-on
+  - No dedicated IT team needed — designed for non-technical users
+  - Works even without stable WiFi — built-in LTE-M cellular fallback
+  - Expandable — add more sensors or locations without replacing hardware
+
+
+1.3  System Components at a Glance
+--------------------------------------------------------------------------------
+
+  ┌───────────────┐     ┌──────────────────┐     ┌─────────────────┐
+  │  Sensor Node  │────►│Sensor Controller │────►│   Main Module   │
+  │  (1 sensor)   │UART │  (up to 8 nodes) │ESPNOW│ (cloud gateway) │
+  └───────────────┘     └──────────────────┘     └────────┬────────┘
+                                                           │ WiFi / LTE-M
+                                                           ▼
+                                                  ┌─────────────────┐
+                                                  │  Cloud Backend  │
+                                                  └────────┬────────┘
+                                                           │ WebSocket
+                                                           ▼
+                                                  ┌─────────────────┐
+                                                  │    Dashboard    │
+                                                  │  (any browser)  │
+                                                  └─────────────────┘
+
+  Component         | Description
+  ──────────────────|────────────────────────────────────────────────
+  Sensor Node       | Small device with one sensor attached.
+                    | Plugs into the Sensor Controller via cable.
+  ──────────────────|────────────────────────────────────────────────
+  Sensor Controller | Collects data from up to 8 Sensor Nodes.
+                    | Sends data wirelessly to the Main Module.
+  ──────────────────|────────────────────────────────────────────────
+  Main Module       | The central gateway. Receives data from all
+                    | controllers and sends it to the cloud via WiFi
+                    | or LTE-M (cellular) backup.
+  ──────────────────|────────────────────────────────────────────────
+  Dashboard         | Web-based control panel. View live readings,
+                    | set alerts, export data, configure sensors.
+
+
+1.4  Document Conventions
+--------------------------------------------------------------------------------
+  Steps are numbered: 1. 2. 3. ...
+  Sub-steps are lettered: a. b. c. ...
+  File paths and technical values are written in: [square brackets]
+  Screen elements (buttons, menus) are written in: "quotes"
+
+
+================================================================================
+CHAPTER 2 — BEFORE YOU START
+================================================================================
+
+2.1  What's in the Package
+--------------------------------------------------------------------------------
+  Standard Starter Kit contents:
+
+  Qty  | Item
+  ─────|────────────────────────────────────────────────────
+   1   | Main Module (ESP32-S3 + SIM7080G + TFT display)
+   1   | Sensor Controller (ESP32)
+   2   | Sensor Nodes (type depends on order)
+   2   | UART connection cables (sensor node ↔ controller)
+   1   | Power supply — Main Module
+   1   | Power supply — Sensor Controller
+  ─────|────────────────────────────────────────────────────
+
+  [NOTE] Additional sensor nodes and controllers can be added at any time
+         without replacing existing hardware.
+
+
+2.2  Requirements
+--------------------------------------------------------------------------------
+  To access the dashboard:
+    - A modern web browser (Chrome, Firefox, or Edge — latest version)
+    - Internet access or access to the local network where CIREN is hosted
+    - A CIREN user account (provided by your system administrator)
+
+  To run the hardware:
+    - Stable power supply for each unit (see power specs in Appendix A)
+    - WiFi network with internet access, OR a SIM card with LTE-M data plan
+    - Physical mounting location within sensor range of the controller
+
+
+2.3  Safety Notes
+--------------------------------------------------------------------------------
+  [WARNING] Always power off the Main Module before inserting or removing
+            the SIM card. Hot-plugging the SIM can damage the modem.
+
+  [WARNING] Do not expose hardware to rain, condensation, or liquids unless
+            housed in a weatherproof enclosure.
+
+  [NOTE]    Operating temperature range: -40°C to +80°C.
+            DHT20 sensor accuracy may degrade above +80°C.
+
+  [NOTE]    Use a stable, regulated power supply. Power fluctuations can
+            cause unexpected resets. The system has a built-in hardware
+            watchdog that will auto-restart after a crash (~3 minutes).
+
+
+================================================================================
+CHAPTER 3 — HARDWARE INSTALLATION
+================================================================================
+
+3.1  Step 1 — Connect Sensor Nodes to Controller
+--------------------------------------------------------------------------------
+  Each Sensor Node connects to one numbered port (1–8) on the Sensor Controller
+  using a 4-wire UART cable.
+
+  1. Identify the port numbers on the Sensor Controller (labeled 1–8).
+  2. Connect each Sensor Node cable to a port:
+       - Match wire colors: VCC (red) → VCC, GND (black) → GND,
+                            TX → RX, RX → TX
+  3. Secure the cable connectors firmly.
+
+  [NOTE]    Maximum cable length between node and controller: ~10 meters.
+            Use shorter cables where possible for reliable signal.
+
+  [NOTE]    Each port detects the sensor type automatically when the
+            system powers on. No manual type selection is needed.
+
+  [TIP]     Label each port at installation time (e.g., "Port 1 — Cold Room")
+            to make dashboard configuration easier later.
+
+
+3.2  Step 2 — Power On the Sensor Controller
+--------------------------------------------------------------------------------
+  1. Connect the Sensor Controller to its power supply (3.3V regulated / USB).
+  2. The controller starts automatically — no buttons to press.
+  3. It will begin collecting sensor data within a few seconds.
+  4. It broadcasts data wirelessly once the Main Module is powered and in range.
+
+  [NOTE]    The Sensor Controller and Main Module communicate wirelessly
+            (ESP-NOW, 2.4 GHz). Keep them within 30–50 meters in industrial
+            environments. Walls and metal reduce range significantly.
+
+
+3.3  Step 3 — Configure WiFi on the Main Module
+--------------------------------------------------------------------------------
+  On the first power-on (or if WiFi credentials have been cleared), the Main
+  Module will enter WiFi setup mode.
+
+  1. Power on the Main Module.
+  2. The TFT display on the module will show it is in setup/hotspot mode.
+  3. On your phone or PC, open the WiFi settings.
+  4. Connect to the temporary WiFi hotspot created by the Main Module.
+     (Hotspot name and password are printed on the device label.)
+  5. A configuration page opens automatically in your browser.
+     If it does not open automatically, open a browser and go to:
+     [192.168.4.1]
+  6. Enter your WiFi network name (SSID) and password.
+  7. Click "Save" or "Connect".
+  8. The Main Module reboots and connects to your WiFi.
+  9. The TFT display will change to show: conn mode = "wifi".
+
+  [NOTE]    If WiFi setup fails (wrong password, network out of range),
+            the module will retry. Power cycle to re-enter setup mode.
+
+  [TIP]     If the facility has a dedicated IoT VLAN or network, connect
+            the Main Module to that network for better isolation.
+
+
+3.4  Step 4 — Insert SIM Card (Optional — LTE-M Fallback)
+--------------------------------------------------------------------------------
+  The SIM card enables automatic connectivity when WiFi is unavailable.
+
+  [REQUIRED] Power off the Main Module completely before this step.
+
+  1. Power off the Main Module and disconnect power.
+  2. Locate the SIM card slot on the SIM7080G modem (on the side of the
+     Main Module enclosure).
+  3. Insert a nano SIM card with an active LTE-M (Cat-M1) data plan.
+       Recommended: Soracom Air plan-D (~¥330/month, includes 300MB)
+       Any LTE-M SIM from a compatible carrier will work.
+  4. Reconnect power and power on the Main Module.
+  5. The module first tries WiFi. If WiFi is unavailable, it automatically
+     switches to LTE-M. The TFT display shows: conn mode = "sim".
+
+  [NOTE]    CIREN sensor data is very lightweight (well under 300MB/month
+            even with multiple sensors at high update rates).
+
+  [TIP]     Even if your site has WiFi, installing a SIM card is recommended
+            as insurance against network outages.
+
+
+3.5  Step 5 — Verify System is Online
+--------------------------------------------------------------------------------
+  1. Open the CIREN dashboard in a browser.
+  2. Log in with your account credentials.
+  3. Your device should appear in the Device List within ~30 seconds
+     of the Main Module powering on.
+  4. The status indicator next to the device name should show "Online".
+  5. Click the device to open Device Detail and verify sensor data is
+     appearing under the correct controller and port numbers.
+
+  [NOTE]    If the device does not appear after 60 seconds, refer to
+            Chapter 10 — Troubleshooting.
+
+
+================================================================================
+CHAPTER 4 — DASHBOARD ORIENTATION
+================================================================================
+
+4.1  Logging In
+--------------------------------------------------------------------------------
+  1. Open your browser and navigate to the CIREN dashboard URL.
+     (Provided by your system administrator.)
+  2. Enter your username and password.
+  3. Click "Login".
+
+  [NOTE]    If you forget your password, contact your system administrator.
+            There is no self-service password reset.
+
+
+4.2  Dashboard Layout Overview
+--------------------------------------------------------------------------------
+  The dashboard has three main levels:
+
+  Level 1 — Device List
+    The home page. Shows all devices registered to your account.
+    Each device card displays:
+      - Device name / ID
+      - Online / Offline status
+      - Connection mode (WiFi or LTE-M)
+      - Last seen timestamp
+
+  Level 2 — Device Detail
+    Opened by clicking a device. Shows all Sensor Controllers connected
+    to that device. Each controller lists its sensor ports (1–8) as cards.
+
+  Level 3 — Sensor Card
+    Each port on a controller is displayed as a Sensor Card showing:
+      - Current live reading (value + unit)
+      - Port label (custom name you assign)
+      - Upload interval badge (e.g., "500ms")
+      - Threshold alert indicator (if configured)
+
+
+4.3  Device List Page
+--------------------------------------------------------------------------------
+  What you see:
+    - All registered devices in a list or grid
+    - Green dot = Online | Grey dot = Offline
+    - "WiFi" or "LTE-M" badge showing active connection type
+    - Last seen time (e.g., "2 seconds ago" or "Last seen: 14:32:05")
+
+  Actions available:
+    - Click a device → opens Device Detail
+    - The list updates automatically in real time via WebSocket
+
+
+4.4  Device Detail Page
+--------------------------------------------------------------------------------
+  What you see:
+    - All Sensor Controllers linked to this device
+    - Each controller shows 8 port slots (occupied or empty)
+    - Each occupied port shows a Sensor Card with live data
+
+  [NOTE]    Empty ports (no sensor connected) show as inactive/greyed out.
+            They become active automatically when a sensor node is plugged in.
+
+
+4.5  Sensor Card Explained
+--------------------------------------------------------------------------------
+  Each Sensor Card contains:
+
+  ┌──────────────────────────────────────────┐
+  │  [Port Label]           [Interval Badge] │
+  │                                          │
+  │         [Live Reading]                   │
+  │         e.g.  23.4 °C                   │
+  │                                          │
+  │  [Sensor Type]      [Threshold Indicator]│
+  └──────────────────────────────────────────┘
+
+  Port Label        : Custom name you assign (e.g., "Cold Room 1").
+                      Default: "Port 1", "Port 2", etc.
+  Interval Badge    : Upload frequency (e.g., "500ms"). Click to change.
+  Live Reading      : The most recent sensor value with its unit.
+  Sensor Type       : Detected automatically (e.g., "Temperature", "Vibration").
+  Threshold Indicator: Shows a warning if the value is out of your set range.
+
+
+4.6  Status Indicators
+--------------------------------------------------------------------------------
+  Device Status:
+    ● Green   = Online (data being received in real time)
+    ● Grey    = Offline (no data received recently)
+
+  [NOTE]    When a device goes offline, the last known sensor values remain
+            visible on all Sensor Cards. A timestamp shows when data was
+            last received. This allows you to see the last reading even
+            during a network outage.
+
+  Connection Mode:
+    [WiFi]   = Main Module connected via your local WiFi network
+    [LTE-M]  = Main Module connected via SIM cellular (WiFi unavailable)
+
+  Interval Badge:
+    [500ms]  = Sensor uploads a new reading every 500 milliseconds
+    [Pending]= A new interval was set but not yet received by the controller
+    [Delivered]= Interval configuration confirmed by the controller
+
+
+================================================================================
+CHAPTER 5 — DAILY OPERATIONS
+================================================================================
+
+5.1  Monitoring Live Sensor Data
+--------------------------------------------------------------------------------
+  Live data updates automatically — you do not need to refresh the browser.
+
+  1. Log in to the dashboard.
+  2. Click a device from the Device List.
+  3. View the Sensor Cards on the Device Detail page.
+  4. Each card updates its reading in real time as new data arrives.
+
+  [TIP]     Keep the dashboard open on a dedicated monitor at your workstation
+            or control room for continuous visibility.
+
+
+5.2  What the Readings Mean
+--------------------------------------------------------------------------------
+
+  Temperature (°C)
+    - Measures ambient air temperature in degrees Celsius.
+    - Normal room temperature: ~18°C to 25°C.
+    - Cold storage: typically 0°C to 8°C (set threshold accordingly).
+
+  Humidity (% RH)
+    - Relative Humidity: how much moisture is in the air.
+    - 0% RH = completely dry, 100% RH = fully saturated (condensation risk).
+    - Typical comfortable indoor range: 40%–60% RH.
+    - Food storage typically requires specific RH ranges per product type.
+
+  Acceleration X / Y / Z  (m/s²)
+    - Measures vibration and movement force along three axes.
+    - A machine at rest shows near-zero values.
+    - Abnormal vibration shows as spikes — set a threshold to catch this.
+
+  Gyroscope X / Y / Z  (°/s)
+    - Measures rotational speed around three axes.
+    - Useful for detecting tilt, rotation, or angular movement.
+
+  Pitch / Roll / Yaw  (°)
+    - Euler angles computed from the IMU sensor.
+    - Pitch: forward/backward tilt. Roll: left/right tilt. Yaw: rotation.
+    - Useful for monitoring structural tilt or equipment orientation.
+
+
+5.3  Checking Device Connection Status
+--------------------------------------------------------------------------------
+  1. On the Device List page, check the status indicator for each device.
+  2. If a device shows "Offline", check the Main Module at the physical site:
+       - Is it powered on? (Check power LED and TFT display)
+       - What does the TFT display show? (conn mode, error codes)
+       - Is WiFi available? Is the SIM card active?
+  3. Refer to Chapter 10 — Troubleshooting for specific scenarios.
+
+
+5.4  Offline Device — What to Expect
+--------------------------------------------------------------------------------
+  When a device loses connection:
+    - The device status changes to "Offline" on the Device List.
+    - All Sensor Cards continue to display the last known values.
+    - A "Last seen" timestamp shows when data was last received.
+    - Data is NOT lost — readings taken while offline are stored in the
+      device's local buffer and re-published when connection is restored.
+
+  [NOTE]    If the device has been offline for an extended period, the
+            last-seen values may be significantly outdated. Check the
+            timestamp before acting on the displayed reading.
+
+
+================================================================================
+CHAPTER 6 — SENSOR CONFIGURATION
+================================================================================
+
+6.1  Assigning Labels to Sensor Ports
+--------------------------------------------------------------------------------
+  Labels make it easy to identify sensors on the dashboard and in exports.
+  Example: rename "Port 3" to "Freezer Room — East Wall".
+
+  1. Open the Device Detail page and find the Sensor Card you want to label.
+  2. Click the label / edit icon next to the current port name.
+  3. Type a descriptive name.
+     [TIP] Use location + measurement: e.g., "Motor A — Vibration"
+  4. Click "Save".
+  5. The new label appears on the card and in all exported data files.
+
+
+6.2  Setting Upload Intervals
+--------------------------------------------------------------------------------
+  The upload interval controls how often a sensor node sends a new reading.
+  A shorter interval = more frequent data = higher data usage.
+
+  Default intervals:
+    - Temperature / Humidity sensors : 500ms (2 readings per second)
+    - IMU / Vibration sensors         : 200ms (5 readings per second)
+
+  Recommended minimums:
+    - Temperature / Humidity : 500ms (sensor response time ~2 seconds anyway)
+    - IMU / Vibration         : 200ms
+
+  Steps to change the interval:
+  1. Click the interval badge on the Sensor Card (e.g., "[500ms]").
+  2. A dialog opens — enter the new interval in milliseconds.
+     Example: 1000 = 1 second, 5000 = 5 seconds, 60000 = 1 minute.
+  3. Click "Save".
+  4. The badge changes to "[Pending]" while the setting is being delivered.
+  5. When the controller confirms receipt, it changes to "[Delivered]".
+
+  [NOTE]    The interval is saved on the controller's non-volatile memory.
+            It is retained after a power cut and does not need to be
+            re-entered after a reboot.
+
+  [TIP]     For non-critical monitoring (e.g., room temperature that changes
+            slowly), set a longer interval (5000ms–60000ms) to reduce
+            data usage and storage.
+
+
+6.3  Hot-Swapping a Sensor Node
+--------------------------------------------------------------------------------
+  CIREN supports hot-swapping — you can replace a sensor node on a port
+  without restarting the system.
+
+  1. Unplug the sensor node cable from the controller port.
+  2. Plug in the new sensor node to the same port.
+  3. The controller detects the new sensor type automatically within ~5 seconds.
+  4. The Sensor Card on the dashboard updates to show the new sensor type
+     and reading.
+
+  [NOTE]    When a sensor type changes on a port, the upload interval resets
+            to the default for the new sensor type.
+            Re-configure the interval if needed (see Section 6.2).
+
+  [WARNING] Do not hot-swap while the controller is in the middle of
+            transmitting a config update (interval badge shows "Pending").
+            Wait for "Delivered" or "Failed" before swapping.
+
+
+================================================================================
+CHAPTER 7 — ALERTS & THRESHOLDS
+================================================================================
+
+7.1  Setting a Threshold
+--------------------------------------------------------------------------------
+  Thresholds define acceptable value ranges for a sensor. The dashboard shows
+  a visual alert when a reading falls outside the range.
+
+  1. Open the Sensor Card for the target sensor.
+  2. Click the threshold icon or button (bell / alert icon).
+  3. A dialog opens with two fields:
+       - Minimum : alert triggers if value falls BELOW this
+       - Maximum : alert triggers if value rises ABOVE this
+     You can set one or both. Leave a field empty to ignore that side.
+  4. Click "Save".
+
+  Example — Cold Room temperature:
+    Minimum: 0°C   (alert if it drops below freezing)
+    Maximum: 8°C   (alert if it rises too high)
+
+
+7.2  Understanding Threshold Alerts
+--------------------------------------------------------------------------------
+  When a sensor reading crosses a threshold:
+    - The Sensor Card shows a visual warning indicator (color change / icon).
+    - The alert is visible in real time as long as the browser is open.
+
+  [NOTE]    CIREN dashboard alerts are visual only (on-screen).
+            There is no email or SMS notification in the current version.
+            Keep the dashboard open on a monitor for continuous alerting.
+
+  [TIP]     For attended monitoring environments, assign a team member to
+            watch the dashboard during critical operating hours.
+
+
+7.3  Editing or Removing a Threshold
+--------------------------------------------------------------------------------
+  To edit:
+  1. Click the threshold icon on the Sensor Card.
+  2. Change the minimum and/or maximum values.
+  3. Click "Save".
+
+  To remove:
+  1. Click the threshold icon on the Sensor Card.
+  2. Clear both the minimum and maximum fields.
+  3. Click "Save".
+  4. The threshold alert is removed from that sensor card.
+
+
+================================================================================
+CHAPTER 8 — HISTORICAL DATA & EXPORT
+================================================================================
+
+8.1  Viewing Sensor History Chart
+--------------------------------------------------------------------------------
+  The history chart shows how a sensor's reading has changed over time.
+
+  1. Open the Sensor Card for the target sensor.
+  2. Click the "History" button or chart icon.
+  3. A modal opens with a line chart of historical readings.
+  4. The chart loads automatically for a default time range (e.g., last hour).
+  5. Use the time range selector to zoom in or out (see Section 8.2).
+
+
+8.2  Filtering by Time Range
+--------------------------------------------------------------------------------
+  In the History modal:
+  1. Use the time range controls to set a "From" and "To" date/time.
+  2. Click "Apply" or "Load" to refresh the chart.
+
+  [NOTE]    Historical data is stored for 30 days. Readings older than
+            30 days are automatically deleted.
+
+  [TIP]     For compliance reporting, export data regularly (see Section 8.3)
+            rather than relying on the 30-day retention window.
+
+
+8.3  Exporting Data (CSV / JSON)
+--------------------------------------------------------------------------------
+  Export sensor readings to a file on your computer for reporting, archiving,
+  or further analysis in Excel or other tools.
+
+  1. Open the Sensor Card and click "History" or the "Export" button.
+  2. In the export dialog, select:
+       - Format  : CSV (for Excel/spreadsheets) or JSON (for developers)
+       - Device  : The device to export from
+       - Sensor  : The specific sensor port
+       - From    : Start date and time
+       - To      : End date and time
+  3. Click "Download".
+  4. The file downloads to your computer automatically.
+
+  [TIP]     CSV format is recommended for most users. Open it directly in
+            Microsoft Excel or Google Sheets for charts and analysis.
+
+
+8.4  Using Exported Data
+--------------------------------------------------------------------------------
+  CSV file structure:
+    timestamp, device_id, ctrl_id, port_num, sensor_type, value
+
+  Example row:
+    2026-05-29T08:32:15.000Z, ciren-001, 1, 3, temperature, 22.4
+
+  [TIP]     In Excel, use the "Insert Chart" feature with the timestamp and
+            value columns to create a visual trend chart for reports.
+
+
+================================================================================
+CHAPTER 9 — MAINTENANCE
+================================================================================
+
+9.1  Routine Checks
+--------------------------------------------------------------------------------
+  Perform these checks regularly (recommended: weekly):
+
+  Hardware:
+    [ ] All sensor node cables are firmly connected to the controller
+    [ ] All units have stable power (check power LEDs)
+    [ ] Main Module TFT display shows correct conn mode (wifi/sim)
+    [ ] Main Module is online on the dashboard
+
+  Dashboard:
+    [ ] All expected devices show "Online" status
+    [ ] Sensor readings are updating in real time (not frozen)
+    [ ] No unexpected threshold alerts are active
+
+
+9.2  Hardware Care & Placement Tips
+--------------------------------------------------------------------------------
+  Main Module:
+    - Mount in a dry, ventilated location — avoid direct sunlight
+    - Keep away from strong electromagnetic sources (motors, inverters)
+    - Ensure WiFi antenna has clear line of sight to the router
+
+  Sensor Controller:
+    - Mount within 30–50m of the Main Module in industrial environments
+    - Avoid placing behind thick concrete walls or large metal structures
+    - Keep ventilated — operating temperature up to +85°C
+
+  Sensor Nodes:
+    - Mount sensors in the location being measured, not the controller
+    - For DHT20 (temperature/humidity): avoid condensing environments;
+      allow airflow around the sensor
+    - For MPU6050 (vibration): mount firmly on the surface being measured;
+      loose mounting causes noise in readings
+
+  Cables:
+    - Secure UART cables to prevent vibration-induced disconnection
+    - Maximum cable length: ~10 meters (shorter is better)
+    - Avoid routing cables near high-voltage power lines
+
+
+9.3  Updating WiFi Credentials
+--------------------------------------------------------------------------------
+  If your WiFi network name or password changes:
+
+  1. Power cycle the Main Module (turn off, wait 5 seconds, turn on).
+  2. While powered off, hold the [WiFi Reset] button (if present) for 3 seconds
+     to clear stored credentials and re-enter setup mode.
+     [NOTE] If there is no dedicated button, consult the device label for
+            the reset procedure specific to your unit.
+  3. The TFT display shows the module is in hotspot/setup mode.
+  4. Follow the WiFi setup steps in Section 3.3.
+
+
+9.4  SIM Card Management
+--------------------------------------------------------------------------------
+  Checking data usage:
+    - Log in to your SIM provider's portal (e.g., Soracom console).
+    - CIREN typically uses well under 300MB/month per device.
+
+  Replacing a SIM card:
+    1. Power off the Main Module completely.
+    2. Remove the old SIM and insert the new one.
+    3. Power on — the modem registers to the new SIM automatically.
+
+  If LTE-M stops working:
+    - Check SIM card is seated correctly (remove and re-insert)
+    - Confirm data plan is still active (check provider portal)
+    - Confirm LTE-M coverage at your location (check carrier coverage map)
+
+
+================================================================================
+CHAPTER 10 — TROUBLESHOOTING
+================================================================================
+
+10.1  Device Shows Offline on Dashboard
+--------------------------------------------------------------------------------
+  Symptoms: Device status = grey "Offline", last seen time is old.
+
+  Check in order:
+
+  a) Is the Main Module powered on?
+       → Check the power LED on the unit.
+       → If off: check power cable and supply.
+
+  b) What does the TFT display show?
+       → If display shows "wifi": module connected to WiFi but not to server.
+          Check internet connectivity on your network.
+       → If display shows "sim": LTE-M active. If still offline, check SIM
+          plan and coverage.
+       → If display is blank or shows error: check power supply.
+
+  c) Did WiFi credentials change recently?
+       → Re-configure WiFi (see Section 9.3).
+
+  d) Is the server running?
+       → Contact your system administrator.
+
+  e) Hardware watchdog: if the module crashed, it restarts automatically
+     within ~3 minutes. Wait and check again before taking further action.
+
+
+10.2  No Sensor Data on a Port
+--------------------------------------------------------------------------------
+  Symptoms: Sensor Card on dashboard shows no reading or is inactive.
+
+  Check in order:
+
+  a) Is the sensor node cable plugged into the correct port?
+       → Verify the physical connection at the controller.
+
+  b) Is the sensor node powered?
+       → Check the sensor node power LED (if present).
+       → Try disconnecting and reconnecting the cable.
+
+  c) Is the controller detecting the sensor?
+       → The controller auto-detects sensor type on first data receipt.
+          Wait up to 10 seconds after plugging in.
+
+  d) Is the controller in range of the Main Module?
+       → Move the controller closer or remove obstructions.
+       → Industrial environments: keep within 30–50 meters.
+
+  e) Did you recently hot-swap a sensor?
+       → The sensor type resets on swap — wait for auto-detection.
+
+
+10.3  Upload Interval Stuck on "Pending"
+--------------------------------------------------------------------------------
+  Symptoms: Interval badge shows "Pending" for more than 2 minutes.
+
+  a) Verify the controller is online:
+       → If the device itself is offline, resolve that first (see 10.1).
+
+  b) Controller may have been rebooted mid-delivery:
+       → Config is automatically re-sent within ~10 seconds of reboot.
+          Wait briefly and check again.
+
+  c) Re-send manually:
+       → Open the interval setting dialog again and re-enter the value.
+       → Click Save to re-trigger delivery.
+
+
+10.4  Data Export Returns Empty
+--------------------------------------------------------------------------------
+  Symptoms: Exported file has no rows (CSV) or empty array (JSON).
+
+  a) Check the time range:
+       → Open the History chart for the same sensor and time range.
+       → If the chart is also empty, there is no data for that period.
+
+  b) Check device and sensor selection:
+       → Confirm the correct device ID and port number are selected
+          in the export dialog.
+
+  c) Check data retention:
+       → Data older than 30 days is automatically deleted.
+          If you need older data, it must have been exported previously.
+
+
+10.5  Main Module Won't Connect to WiFi
+--------------------------------------------------------------------------------
+  a) Wrong password: Re-enter WiFi credentials (see Section 9.3).
+
+  b) Network out of range: Move the Main Module closer to the router,
+     or use a WiFi repeater/extender.
+
+  c) Network uses 5 GHz only: CIREN supports 2.4 GHz only.
+     Ensure your router has a 2.4 GHz band enabled.
+
+  d) Network uses a captive portal (e.g., hotel/office login page):
+     CIREN cannot authenticate through captive portals. Use a standard
+     password-protected home/business WiFi network.
+
+  e) If WiFi cannot be resolved: insert a SIM card and use LTE-M
+     as the primary connection (see Section 3.4).
+
+
+10.6  When to Contact Support
+--------------------------------------------------------------------------------
+  Contact your system administrator or CIREN support if:
+    - The Main Module TFT display shows a persistent error code
+    - A device has been offline for more than 24 hours with no clear cause
+    - Sensor readings appear incorrect or unrealistic after checking cables
+    - You need to add new sensor nodes, controllers, or devices
+    - You need a new user account or password reset
+
+  When contacting support, have the following ready:
+    - Device ID (shown on the dashboard and on the Main Module label)
+    - Description of the problem and when it started
+    - What you have already tried (from the steps above)
+    - Any error messages or codes shown on the TFT display
+
+
+================================================================================
+APPENDIX A — SENSOR QUICK REFERENCE
+================================================================================
+
+DHT20 — Temperature & Humidity
+  Measurement     | Range              | Accuracy
+  ────────────────|────────────────────|──────────────────
+  Temperature     | -40°C to +80°C    | ±0.5°C
+  Humidity (RH)   |  0% to 100% RH    | ±3% RH
+  ────────────────|────────────────────|──────────────────
+  Default upload interval : 500ms
+  Notes: Avoid condensing environments for long-term accuracy.
+
+
+MPU6050 — Vibration / IMU (Accelerometer + Gyroscope)
+  Measurement     | Range              | Unit
+  ────────────────|────────────────────|──────────────────
+  Acceleration    | ±2g to ±16g       | m/s²
+  Gyroscope       | ±250 to ±2000°/s  | °/s
+  Pitch/Roll/Yaw  | 0° to 360°        | °
+  ────────────────|────────────────────|──────────────────
+  Default upload interval : 200ms
+  Notes: Mount firmly. Avoid strong magnetic fields.
+
+
+================================================================================
+APPENDIX B — MAIN MODULE TFT DISPLAY PAGES
+================================================================================
+
+The Main Module has a 2.4" TFT display that cycles through 6 status pages.
+Each page shows different system information.
+
+  Page 1 — Identity
+    Device ID, firmware version, uptime
+
+  Page 2 — Connectivity
+    conn mode (wifi / sim / offline), IP address or signal strength
+
+  Page 3 — MQTT Status
+    Connection state, broker address, last publish timestamp
+
+  Page 4 — Controller List
+    Number of active controllers, last received data from each
+
+  Page 5 — System Health
+    Free heap memory, CPU load, watchdog status
+
+  Page 6 — SIM / Cellular Status (if SIM inserted)
+    Carrier name, signal quality, data session status
+
+
+================================================================================
+APPENDIX C — GLOSSARY
+================================================================================
+
+  Term              | Meaning
+  ──────────────────|───────────────────────────────────────────────────────
+  Dashboard         | The web-based control panel for CIREN, accessible
+                    | from any browser.
+  ──────────────────|───────────────────────────────────────────────────────
+  Device            | A complete CIREN installation at one location,
+                    | identified by a unique Device ID.
+  ──────────────────|───────────────────────────────────────────────────────
+  ESP-NOW           | The short-range wireless protocol used internally
+                    | between Sensor Controllers and the Main Module.
+                    | No internet required — works like local radio.
+  ──────────────────|───────────────────────────────────────────────────────
+  Euler Angles      | Pitch, Roll, and Yaw — three angles that describe
+                    | the orientation of an object in 3D space.
+  ──────────────────|───────────────────────────────────────────────────────
+  Firmware          | The embedded software running inside the hardware
+                    | components (not user-editable in normal operation).
+  ──────────────────|───────────────────────────────────────────────────────
+  Hot-swap          | Replacing a sensor node while the system is running,
+                    | without powering off or restarting.
+  ──────────────────|───────────────────────────────────────────────────────
+  IMU               | Inertial Measurement Unit — a sensor that measures
+                    | acceleration and rotation. Used for vibration
+                    | monitoring and orientation tracking.
+  ──────────────────|───────────────────────────────────────────────────────
+  LTE-M / Cat-M1    | A low-power cellular standard for IoT devices.
+                    | Works on mobile networks (requires a SIM card).
+  ──────────────────|───────────────────────────────────────────────────────
+  Main Module       | The central gateway device. Receives data from all
+                    | Sensor Controllers and sends it to the cloud.
+  ──────────────────|───────────────────────────────────────────────────────
+  MQTT              | The lightweight messaging protocol used by CIREN
+                    | to send sensor data to the cloud backend.
+  ──────────────────|───────────────────────────────────────────────────────
+  NVS               | Non-Volatile Storage — memory that retains data
+                    | after a power cut (used to store interval configs).
+  ──────────────────|───────────────────────────────────────────────────────
+  Relative Humidity | % RH — the amount of moisture in the air relative
+                    | to the maximum it can hold at that temperature.
+                    | 0% = dry, 100% = saturated (condensation forms).
+  ──────────────────|───────────────────────────────────────────────────────
+  Sensor Controller | The device that collects data from up to 8 Sensor
+                    | Nodes and forwards it wirelessly to the Main Module.
+  ──────────────────|───────────────────────────────────────────────────────
+  Sensor Node       | The smallest unit in the system. One sensor per node.
+                    | Plugs into the Sensor Controller via cable.
+  ──────────────────|───────────────────────────────────────────────────────
+  Threshold         | A user-defined min/max range for a sensor. The
+                    | dashboard alerts visually when the range is exceeded.
+  ──────────────────|───────────────────────────────────────────────────────
+  Upload Interval   | How often a Sensor Node sends a new reading.
+                    | Set in milliseconds (e.g., 500ms = twice per second).
+  ──────────────────|───────────────────────────────────────────────────────
+  WebSocket         | The real-time connection between the backend server
+                    | and your browser — enables live dashboard updates
+                    | without page refresh.
+  ──────────────────|───────────────────────────────────────────────────────
+  WiFi Hotspot      | A temporary WiFi network created by the Main Module
+                    | during first-time WiFi setup.
+  ──────────────────|───────────────────────────────────────────────────────
+
+
+================================================================================
+END OF MANUAL BOOK
+================================================================================
