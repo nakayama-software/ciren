@@ -233,6 +233,12 @@ async function handleMessage(topic, message) {
 // Payload: { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype }
 async function handleSensorData(deviceId, data) {
   const { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype, _shared_ts } = data
+
+  if (ctrl_id == null) {
+    console.warn(`[WARN] Dropped frame with null ctrl_id from ${deviceId}`)
+    return
+  }
+
   _trackRx(`c${ctrl_id}p${port_num}s${sensor_type}`)
 
   // Rate limit — HELLO dan STALE dikecualikan (penting, frekuensi rendah)
