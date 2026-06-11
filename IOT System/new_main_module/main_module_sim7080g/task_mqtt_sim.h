@@ -278,6 +278,12 @@ void mqtt_sim_task(void* param) {
         if (_smq_connect()) {
           _smq_connected  = true;
           _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;  // reset backoff on success
+          // Flush stale items from queue — accumulated during disconnection,
+          // mostly HB_TYPED frames that are now outdated.
+          PublishItem _flush;
+          uint16_t flushed = 0;
+          while (xQueueReceive(publish_queue, &_flush, 0) == pdTRUE) flushed++;
+          if (flushed) Serial.printf("[SIM MQTT] Flushed %u stale items on reconnect\n", flushed);
         }
         xSemaphoreGive(sim_at_mutex);
       }
