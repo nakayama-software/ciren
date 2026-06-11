@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   HelpCircle,
+  Scale,
 } from 'lucide-react'
 import {
   getDevice, getLatest, getUserDevices, clearToken, getToken,
@@ -21,6 +22,7 @@ import {
 import { getNodeKey, getReadingKey, isIMUSensor, countDisplayNodes } from './utils/sensors'
 import { translations } from './utils/translation'
 import ControllerDetailView from './components/ControllerDetailView'
+import CompareChartModal from './components/charts/CompareChartModal'
 import AliasInlineEdit, { getAlias } from './components/AliasInlineEdit'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
@@ -124,6 +126,7 @@ export default function App() {
   const [wsStatus, setWsStatus] = useState('connecting')
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [ctrlHbTs, setCtrlHbTs] = useState({})  // { "${deviceId}_${ctrlId}": timestamp }
+  const [compareTarget, setCompareTarget] = useState(null) // { portNum, isHumTemp }
 
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
@@ -412,6 +415,20 @@ export default function App() {
 
   const ctrlIds = getCtrlIds(selectedNodes)
 
+  // First port that has HumTemp nodes on 2+ different controllers — used for Compare button
+  const commonHumTempPort = (() => {
+    if (ctrlIds.length < 2) return null
+    const portCtrlSet = {}
+    for (const n of selectedNodes) {
+      if (n.sensor_type !== 0x01 && n.sensor_type !== 0x02) continue
+      const k = String(n.port_num)
+      if (!portCtrlSet[k]) portCtrlSet[k] = new Set()
+      portCtrlSet[k].add(String(n.ctrl_id))
+    }
+    const found = Object.entries(portCtrlSet).find(([, s]) => s.size >= 2)
+    return found ? Number(found[0]) : null
+  })()
+
   function isCtrlOnline(ctrlId) {
     // Live HB_TYPED arrives every 15s — check if received within 30s
     const hbKey = `${selectedDeviceId}_${ctrlId}`
@@ -676,9 +693,20 @@ export default function App() {
 
             {/* Controller cards — 3/4 width */}
             <div data-tour="controller-cards" className="lg:col-span-3 order-2 lg:order-1">
-              <h3 className="text-base font-semibold mb-3 text-slate-900 dark:text-white">
-                {t.dashboard?.sensorControllers || 'Sensor Controllers'}
-              </h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                  {t.dashboard?.sensorControllers || 'Sensor Controllers'}
+                </h3>
+                {commonHumTempPort != null && (
+                  <button
+                    onClick={() => setCompareTarget({ portNum: commonHumTempPort, isHumTemp: true })}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors cursor-pointer"
+                  >
+                    <Scale className="w-3.5 h-3.5" />
+                    Compare
+                  </button>
+                )}
+              </div>
               {ctrlIds.length === 0 ? (
                 <div className="rounded-2xl border border-black/10 bg-white/80 p-8 backdrop-blur-sm dark:border-white/10 dark:bg-slate-800/60 shadow-sm text-center">
                   <p className="text-sm text-slate-400 dark:text-gray-500">
@@ -894,6 +922,15 @@ export default function App() {
           <div className="text-center text-[11px] text-slate-400 dark:text-gray-600 pb-2">
             {t.dashboard?.footer || '© 2025 CIREN Dashboard'}
           </div>
+
+          <CompareChartModal
+            open={compareTarget != null}
+            onClose={() => setCompareTarget(null)}
+            deviceId={selectedDeviceId}
+            portNum={compareTarget?.portNum}
+            ctrlIds={ctrlIds}
+            isHumTemp={compareTarget?.isHumTemp ?? true}
+          />
 
           <OnboardingTour
             page="dashboard"
