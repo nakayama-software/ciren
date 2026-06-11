@@ -197,9 +197,12 @@ router.get('/devices/:deviceId/data/history', async (req, res) => {
     }
     if (sensor_type) filter.sensor_type = Number(sensor_type)
 
+    const maxPoints = Math.min(Number(req.query.limit) || 2000, 5000)
+
     const data = await SensorReading
       .find(filter)
       .sort({ server_ts: 1 })
+      .limit(maxPoints)
       .lean()
 
     res.json(data)

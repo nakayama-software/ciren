@@ -20,6 +20,9 @@
 static HardwareSerial& _sim_ser = Serial2;
 SemaphoreHandle_t sim_at_mutex  = NULL;   // shared with task_mqtt_sim
 
+// ── Shared AT response buffer — no heap alloc/free on every AT command ────────
+static char _sim_rxbuf[512];
+
 // ── Low-level AT helpers ──────────────────────────────────────────────────────
 // Call with sim_at_mutex held (or before tasks start during init phase).
 
@@ -35,36 +38,47 @@ static bool _sim_sendAT(const char* cmd, const char* expect = "OK",
   if (verbose) Serial.printf("[AT>>] %s\n", cmd);
   _sim_ser.println(cmd);
   uint32_t t = millis();
-  String buf = "";
+  size_t pos = 0;
+  _sim_rxbuf[0] = '\0';
   while (millis() - t < ms) {
-    while (_sim_ser.available()) buf += (char)_sim_ser.read();
-    if (buf.indexOf(expect) >= 0) {
-      if (verbose) { buf.trim(); Serial.printf("[AT<<] %s\n", buf.c_str()); }
+    while (_sim_ser.available() && pos < sizeof(_sim_rxbuf) - 1) {
+      _sim_rxbuf[pos++] = (char)_sim_ser.read();
+      _sim_rxbuf[pos]   = '\0';
+    }
+    if (strstr(_sim_rxbuf, expect)) {
+      if (verbose) Serial.printf("[AT<<] %s\n", _sim_rxbuf);
       return true;
     }
-    if (buf.indexOf("ERROR") >= 0) {
-      if (verbose) { buf.trim(); Serial.printf("[AT<<ERR] %s\n", buf.c_str()); }
+    if (strstr(_sim_rxbuf, "ERROR")) {
+      if (verbose) Serial.printf("[AT<<ERR] %s\n", _sim_rxbuf);
       return false;
     }
     delay(10);
   }
-  if (verbose) { buf.trim(); Serial.printf("[AT<<TO] %s\n", buf.c_str()); }
+  if (verbose) Serial.printf("[AT<<TO] %s\n", _sim_rxbuf);
   return false;
 }
 
-// Send AT command, return full modem reply as String.
-static String _sim_atReply(const char* cmd, uint32_t ms = 5000) {
+// Send AT command, return pointer to shared _sim_rxbuf containing the reply.
+// WARNING: returned pointer is invalidated by the next _sim_sendAT/_sim_atReply call.
+static const char* _sim_atReply(const char* cmd, uint32_t ms = 5000) {
   _sim_flush();
   _sim_ser.println(cmd);
   uint32_t t = millis();
-  String r = "";
+  size_t pos = 0;
+  _sim_rxbuf[0] = '\0';
   while (millis() - t < ms) {
-    while (_sim_ser.available()) r += (char)_sim_ser.read();
-    if (r.indexOf("OK") >= 0 || r.indexOf("ERROR") >= 0) break;
+    while (_sim_ser.available() && pos < sizeof(_sim_rxbuf) - 1) {
+      _sim_rxbuf[pos++] = (char)_sim_ser.read();
+      _sim_rxbuf[pos]   = '\0';
+    }
+    if (strstr(_sim_rxbuf, "OK") || strstr(_sim_rxbuf, "ERROR")) break;
     delay(10);
   }
-  r.trim();
-  return r;
+  while (pos > 0 && (_sim_rxbuf[pos-1] == '\r' || _sim_rxbuf[pos-1] == '\n' ||
+                      _sim_rxbuf[pos-1] == ' '))
+    _sim_rxbuf[--pos] = '\0';
+  return _sim_rxbuf;
 }
 
 // ── Phase 1: Init modem ───────────────────────────────────────────────────────
@@ -74,12 +88,15 @@ static bool _sim_init_modem() {
   for (int i = 0; i < 15; i++) {
     _sim_ser.println("AT");
     delay(800);
-    String r = "";
+    char r[64]; size_t rpos = 0; r[0] = '\0';
     uint32_t t = millis();
     while (millis() - t < 500) {
-      while (_sim_ser.available()) r += (char)_sim_ser.read();
+      while (_sim_ser.available() && rpos < sizeof(r) - 1) {
+        r[rpos++] = (char)_sim_ser.read();
+        r[rpos]   = '\0';
+      }
     }
-    if (r.indexOf("OK") >= 0) {
+    if (strstr(r, "OK")) {
       Serial.println("[SIM] Modem responding");
       break;
     }
@@ -97,9 +114,9 @@ static bool _sim_init_modem() {
     return false;
   }
 
-  // Print modem info
-  Serial.printf("[SIM] %s\n", _sim_atReply("ATI").c_str());
-  Serial.printf("[SIM] IMEI: %s\n", _sim_atReply("AT+CGSN").c_str());
+  // Use result immediately — each call overwrites _sim_rxbuf
+  Serial.printf("[SIM] %s\n",       _sim_atReply("ATI"));
+  Serial.printf("[SIM] IMEI: %s\n", _sim_atReply("AT+CGSN"));
 
   xSemaphoreTake(state_mutex, portMAX_DELAY);
   sys_state.sim_modem_ok = true;
@@ -122,12 +139,12 @@ static bool _sim_wait_registered(uint32_t timeout_ms = 180000UL) {
   Serial.print("[SIM] Waiting registration");
   uint32_t t = millis();
   while (millis() - t < timeout_ms) {
-    String cereg = _sim_atReply("AT+CEREG?", 3000);
-    bool ok = (cereg.indexOf(",1") >= 0 || cereg.indexOf(",5") >= 0);
+    const char* cereg = _sim_atReply("AT+CEREG?", 3000);
+    bool ok = (strstr(cereg, ",1") != nullptr || strstr(cereg, ",5") != nullptr);
     if (ok) {
       Serial.println(" OK");
-      Serial.printf("[SIM] Signal: %s\n", _sim_atReply("AT+CSQ").c_str());
-      Serial.printf("[SIM] Operator: %s\n", _sim_atReply("AT+COPS?").c_str());
+      Serial.printf("[SIM] Signal: %s\n",   _sim_atReply("AT+CSQ"));
+      Serial.printf("[SIM] Operator: %s\n", _sim_atReply("AT+COPS?"));
       return true;
     }
     Serial.print(".");
@@ -172,16 +189,19 @@ static bool _sim_activate_pdp() {
 
   Serial.print("[SIM] PDP activating");
   uint32_t t = millis();
-  String rbuf = "";
+  char rbuf[256]; size_t rpos = 0; rbuf[0] = '\0';
   bool activated = false;
   while (millis() - t < 60000UL) {
-    while (_sim_ser.available()) rbuf += (char)_sim_ser.read();
-    if (rbuf.indexOf("ACTIVE") >= 0 && rbuf.indexOf("DEACTIVE") < 0) {
+    while (_sim_ser.available() && rpos < sizeof(rbuf) - 1) {
+      rbuf[rpos++] = (char)_sim_ser.read();
+      rbuf[rpos]   = '\0';
+    }
+    if (strstr(rbuf, "ACTIVE") && !strstr(rbuf, "DEACTIVE")) {
       activated = true;
       Serial.println(" ACTIVE");
       break;
     }
-    if (rbuf.indexOf("DEACTIVE") >= 0) {
+    if (strstr(rbuf, "DEACTIVE")) {
       Serial.println(" DEACTIVE");
       break;
     }
@@ -192,17 +212,23 @@ static bool _sim_activate_pdp() {
 
   // Verify IP
   delay(500);
-  String ipReply = _sim_atReply("AT+CNACT?");
-  int q1 = ipReply.indexOf('"');
-  int q2 = ipReply.indexOf('"', q1 + 1);
-  if (q1 >= 0 && q2 > q1) {
-    String ip = ipReply.substring(q1 + 1, q2);
-    if (ip.length() >= 7 && ip != "0.0.0.0") {
-      Serial.printf("[SIM] IP: %s\n", ip.c_str());
-      xSemaphoreTake(state_mutex, portMAX_DELAY);
-      sys_state.sim_gprs = true;
-      xSemaphoreGive(state_mutex);
-      return true;
+  const char* ipReply = _sim_atReply("AT+CNACT?");
+  const char* q1p = strchr(ipReply, '"');
+  if (q1p) {
+    const char* q2p = strchr(q1p + 1, '"');
+    if (q2p && q2p > q1p + 1) {
+      char ip[32];
+      size_t iplen = (size_t)(q2p - q1p - 1);
+      if (iplen >= sizeof(ip)) iplen = sizeof(ip) - 1;
+      strncpy(ip, q1p + 1, iplen);
+      ip[iplen] = '\0';
+      if (strlen(ip) >= 7 && strcmp(ip, "0.0.0.0") != 0) {
+        Serial.printf("[SIM] IP: %s\n", ip);
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        sys_state.sim_gprs = true;
+        xSemaphoreGive(state_mutex);
+        return true;
+      }
     }
   }
   Serial.println("[SIM] IP invalid");
@@ -211,24 +237,28 @@ static bool _sim_activate_pdp() {
 
 // ── Poll signal + operator ────────────────────────────────────────────────────
 static void _sim_poll_status() {
-  String csq  = _sim_atReply("AT+CSQ",   3000);
-  String cops = _sim_atReply("AT+COPS?", 3000);
-
-  // Parse CSQ: +CSQ: rssi,ber
+  // CSQ: +CSQ: rssi,ber — must consume before next call overwrites _sim_rxbuf
   int8_t sig = -1;
-  int colon = csq.indexOf(':');
-  if (colon >= 0) {
-    int comma = csq.indexOf(',', colon);
-    if (comma > colon) sig = (int8_t)csq.substring(colon + 2, comma).toInt();
+  {
+    const char* csq = _sim_atReply("AT+CSQ", 3000);
+    const char* colon = strchr(csq, ':');
+    if (colon) sig = (int8_t)atoi(colon + 2);
   }
 
-  // Parse operator name (quoted string)
+  // COPS: +COPS: 0,0,"NTT DOCOMO",7
   char op[24] = "";
-  int q1 = cops.indexOf('"');
-  int q2 = cops.indexOf('"', q1 + 1);
-  if (q1 >= 0 && q2 > q1) {
-    String op_str = cops.substring(q1 + 1, q2);
-    strncpy(op, op_str.c_str(), sizeof(op) - 1);
+  {
+    const char* cops = _sim_atReply("AT+COPS?", 3000);
+    const char* q1 = strchr(cops, '"');
+    if (q1) {
+      const char* q2 = strchr(q1 + 1, '"');
+      if (q2 && q2 > q1) {
+        size_t len = (size_t)(q2 - q1 - 1);
+        if (len >= sizeof(op)) len = sizeof(op) - 1;
+        strncpy(op, q1 + 1, len);
+        op[len] = '\0';
+      }
+    }
   }
 
   xSemaphoreTake(state_mutex, portMAX_DELAY);
@@ -243,8 +273,7 @@ static void _sim_poll_status() {
 // ── Check if PDP is still active ──────────────────────────────────────────────
 static bool _sim_check_pdp() {
   // +CNACT: 0,1,"x.x.x.x" = active
-  String r = _sim_atReply("AT+CNACT?", 3000);
-  return (r.indexOf("0,1") >= 0);
+  return (strstr(_sim_atReply("AT+CNACT?", 3000), "0,1") != nullptr);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -324,10 +353,12 @@ void sim_manager_task(void* param) {
       xSemaphoreGive(state_mutex);
 
       xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
-      // Re-register if needed
-      String cereg = _sim_atReply("AT+CEREG?", 3000);
-      bool registered = (cereg.indexOf(",1") >= 0 || cereg.indexOf(",5") >= 0);
-      if (!registered) _sim_wait_registered(90000UL);
+      // Re-register if needed — consume cereg before next AT call
+      {
+        const char* cereg = _sim_atReply("AT+CEREG?", 3000);
+        bool registered = (strstr(cereg, ",1") != nullptr || strstr(cereg, ",5") != nullptr);
+        if (!registered) _sim_wait_registered(90000UL);
+      }
       bool ok = _sim_activate_pdp();
       xSemaphoreGive(sim_at_mutex);
 
