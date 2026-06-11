@@ -105,6 +105,8 @@ export default function CompareChartModal({
     if (open) setHours(24)
   }, [open, deviceId, portNum])
 
+  const ctrlIdsKey = ctrlIds.join(',')
+
   useEffect(() => {
     if (!open || ctrlIds.length === 0) { setDataByCtrl({}); return }
     const ac = new AbortController()
@@ -147,7 +149,8 @@ export default function CompareChartModal({
     }
     load()
     return () => ac.abort()
-  }, [open, deviceId, portNum, ctrlIds, isHumTemp, hours])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, deviceId, portNum, ctrlIdsKey, isHumTemp, hours])
 
   // ── Shared Y bounds (same scale across all controllers) ────────────────────
   const { tempBounds, humBounds, singleBounds } = useMemo(() => {
@@ -158,7 +161,8 @@ export default function CompareChartModal({
     }
     const all = ctrlIds.flatMap(cid => (Array.isArray(dataByCtrl[cid]) ? dataByCtrl[cid] : []).map(r => r.value))
     return { tempBounds: null, humBounds: null, singleBounds: sharedBounds(all) }
-  }, [dataByCtrl, ctrlIds, isHumTemp])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataByCtrl, ctrlIdsKey, isHumTemp])
 
   function makeDatasets(getRows) {
     return {
