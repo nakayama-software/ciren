@@ -121,7 +121,19 @@ function _isRateLimited(deviceId) {
   return false
 }
 
+async function _cleanupNullCtrlIds() {
+  try {
+    const result = await SensorNode.deleteMany({ ctrl_id: { $in: [null, 0] } })
+    if (result.deletedCount > 0)
+      console.log(`[CLEANUP] Deleted ${result.deletedCount} SensorNode(s) with null/zero ctrl_id`)
+  } catch (e) {
+    console.error('[CLEANUP] cleanupNullCtrlIds error:', e.message)
+  }
+}
+
 function initMQTT() {
+  _cleanupNullCtrlIds()
+
   const host = process.env.MQTT_HOST || 'localhost'
   const port = process.env.MQTT_PORT || 1883
   const clientId = process.env.MQTT_CLIENT_ID || 'ciren-backend'
@@ -234,8 +246,8 @@ async function handleMessage(topic, message) {
 async function handleSensorData(deviceId, data) {
   const { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype, _shared_ts } = data
 
-  if (ctrl_id == null) {
-    console.warn(`[WARN] Dropped frame with null ctrl_id from ${deviceId}`)
+  if (ctrl_id == null || ctrl_id === 0) {
+    console.warn(`[WARN] Dropped frame with null/zero ctrl_id from ${deviceId}`)
     return
   }
 
