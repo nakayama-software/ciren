@@ -42,12 +42,13 @@ void task_watchdog(void* param) {
                   hwm_conn, hwm_rx, hwm_oled, hwm_pub, hwm_agg, hwm_stat, hwm_wd);
 
     // Warning jika ada yang kritis (< 128 words = 512 bytes tersisa)
-    if (hwm_conn  < 128) Serial.printf("[WD] WARN: conn_mgr   low stack! %u words\n", hwm_conn);
-    if (hwm_rx    < 128) Serial.printf("[WD] WARN: espnow_rx  low stack! %u words\n", hwm_rx);
-    if (hwm_oled  < 128) Serial.printf("[WD] WARN: oled       low stack! %u words\n", hwm_oled);
-    if (hwm_pub   < 128) Serial.printf("[WD] WARN: publish    low stack! %u words\n", hwm_pub);
-    if (hwm_agg   < 128) Serial.printf("[WD] WARN: aggregator low stack! %u words\n", hwm_agg);
-    if (hwm_stat  < 128) Serial.printf("[WD] WARN: status     low stack! %u words\n", hwm_stat);
+    // Guard with handle != NULL — NULL handle reports 0 but the task was simply not started
+    if (h_conn_mgr   && hwm_conn  < 128) Serial.printf("[WD] WARN: conn_mgr   low stack! %u words\n", hwm_conn);
+    if (h_espnow_rx  && hwm_rx    < 128) Serial.printf("[WD] WARN: espnow_rx  low stack! %u words\n", hwm_rx);
+    if (h_oled       && hwm_oled  < 128) Serial.printf("[WD] WARN: oled       low stack! %u words\n", hwm_oled);
+    if (h_publish    && hwm_pub   < 128) Serial.printf("[WD] WARN: publish    low stack! %u words\n", hwm_pub);
+    if (h_aggregator && hwm_agg   < 128) Serial.printf("[WD] WARN: aggregator low stack! %u words\n", hwm_agg);
+    if (h_status     && hwm_stat  < 128) Serial.printf("[WD] WARN: status     low stack! %u words\n", hwm_stat);
     if (hwm_wd    < 128) Serial.printf("[WD] WARN: watchdog   low stack! %u words\n", hwm_wd);
   }
 }

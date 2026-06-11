@@ -138,6 +138,11 @@ static const char* _smq_drain() {
 
 // ── Connect to MQTT broker using SIM7080G AT+SMCONF / AT+SMCONN ───────────────
 static bool _smq_connect() {
+  // Clear any stale MQTT session left in the modem (e.g. after ESP32 reboot without
+  // modem power cycle). AT+SMDISC returns ERROR if not connected — ignore the result.
+  _sim_sendAT("AT+SMDISC", "OK", 3000);
+  vTaskDelay(pdMS_TO_TICKS(300));
+
   char buf[128];
 
   // Configure client
