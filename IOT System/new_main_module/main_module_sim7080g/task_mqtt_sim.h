@@ -83,7 +83,11 @@ static void _smq_process_urcs(const char* buf) {
         }
       }
 
-      if (strstr(payload_buf, "set_node_interval")) {
+      if (strstr(payload_buf, "reboot")) {
+          Serial.println("[SIM MQTT] Remote reboot command — restarting in 500ms");
+          delay(500);
+          esp_restart();
+      } else if (strstr(payload_buf, "set_node_interval")) {
         int ctrl_id = 0, port_num = 0;
         uint32_t interval_ms = 0;
         const char* p;

@@ -57,7 +57,11 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
         memcpy(buf, ev->data, plen);
         buf[plen] = '\0';
 
-        if (strstr(buf, "\"set_node_interval\"")) {
+        if (strstr(buf, "\"reboot\"")) {
+          Serial.println("[MQTT] Remote reboot command — restarting in 500ms");
+          vTaskDelay(pdMS_TO_TICKS(500));
+          esp_restart();
+        } else if (strstr(buf, "\"set_node_interval\"")) {
           int ctrl_id = 0, port_num = 0;
           uint32_t interval_ms = 0;
           const char* p;
