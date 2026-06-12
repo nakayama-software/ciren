@@ -173,7 +173,7 @@ export default function CompareChartModal({
         backgroundColor: 'transparent',
         pointRadius: 0,
         borderWidth: 1.5,
-        tension: 0.25,
+        tension: hours >= 168 ? 0.4 : 0.25,
         spanGaps: true,
         fill: false,
       })),
