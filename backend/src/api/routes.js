@@ -193,7 +193,7 @@ router.get('/devices/:deviceId/data/history', async (req, res) => {
       ctrl_id:   Number(ctrl_id),
       port_num:  Number(port_num),
       server_ts: { $gte: from },
-      ftype:     { $in: [0x01, 0x04] },
+      ftype:     { $in: [0x01, 0x04, 0x05] },
     }
     if (sensor_type) filter.sensor_type = Number(sensor_type)
 
@@ -318,7 +318,7 @@ router.get('/devices/:deviceId/node-config/verify', async (req, res) => {
           device_id: req.params.deviceId,
           ctrl_id:   cfg.ctrl_id,
           port_num:  cfg.port_num,
-          ftype:     { $in: [0x01, 0x04] },  // DATA frames only
+          ftype:     { $in: [0x01, 0x04, 0x05] },  // DATA frames only
         })
         .sort({ server_ts: -1 })
         .limit(10)
