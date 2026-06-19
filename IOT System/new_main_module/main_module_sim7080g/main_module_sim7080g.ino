@@ -57,6 +57,7 @@ void save_config_defaults()
   prefs.putString("mqtt_host", "118.22.31.254");
   if (!prefs.isKey("conn_mode")) prefs.putString("conn_mode", "wifi");
   if (!prefs.isKey("sim_en"))    prefs.putBool("sim_en", true);
+  if (!prefs.isKey("sim_apn"))   prefs.putString("sim_apn", "soracom.io");
   prefs.end();
 }
 
