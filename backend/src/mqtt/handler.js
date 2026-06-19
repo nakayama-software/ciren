@@ -123,9 +123,12 @@ function _isRateLimited(deviceId) {
 
 async function _cleanupNullCtrlIds() {
   try {
-    const result = await SensorNode.deleteMany({ ctrl_id: { $in: [null, 0] } })
-    if (result.deletedCount > 0)
-      console.log(`[CLEANUP] Deleted ${result.deletedCount} SensorNode(s) with null/zero ctrl_id`)
+    const r1 = await SensorNode.deleteMany({ ctrl_id: { $in: [null, 0] } })
+    if (r1.deletedCount > 0)
+      console.log(`[CLEANUP] Deleted ${r1.deletedCount} SensorNode(s) with null/zero ctrl_id`)
+    const r2 = await SensorNode.deleteMany({ sensor_type: { $in: [null, 0] } })
+    if (r2.deletedCount > 0)
+      console.log(`[CLEANUP] Deleted ${r2.deletedCount} SensorNode(s) with null/zero sensor_type`)
   } catch (e) {
     console.error('[CLEANUP] cleanupNullCtrlIds error:', e.message)
   }
@@ -248,6 +251,10 @@ async function handleSensorData(deviceId, data) {
 
   if (ctrl_id == null || ctrl_id === 0) {
     console.warn(`[WARN] Dropped frame with null/zero ctrl_id from ${deviceId}`)
+    return
+  }
+  if (!sensor_type) {
+    console.warn(`[WARN] Dropped frame with null/zero sensor_type from ${deviceId} ctrl=${ctrl_id} port=${port_num}`)
     return
   }
 
