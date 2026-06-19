@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <esp_mac.h>
 #include "ciren_config.h"
 #include "ring_buffer.h"
 #include "system_state.h"
@@ -84,18 +85,14 @@ void setup()
   strncpy(sys_state.sim_apn_user, cfg.sim_apn_user, sizeof(sys_state.sim_apn_user));
   strncpy(sys_state.sim_apn_pass, cfg.sim_apn_pass, sizeof(sys_state.sim_apn_pass));
 
-  // WiFi.mode(WIFI_STA) dipanggil lebih awal agar WiFi.macAddress() mengembalikan
-  // MAC yang benar saat generate device_id pada first boot (sebelum ini return 00:00:00)
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-
   // ── Device ID: load dari Preferences, atau generate dari MAC suffix ──────────
   if (strlen(cfg.device_id) > 0) {
     strncpy(sys_state.device_id, cfg.device_id, sizeof(sys_state.device_id));
   } else {
     // First boot — generate dari 3 byte terakhir MAC: "MM-AABBCC"
+    // esp_read_mac reads eFuse directly — no WiFi init needed
     uint8_t mac[6];
-    WiFi.macAddress(mac);
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(sys_state.device_id, sizeof(sys_state.device_id),
              "%s-%02X%02X%02X", DEVICE_ID_PREFIX, mac[3], mac[4], mac[5]);
     // Simpan ke Preferences agar konsisten di reboot berikutnya
@@ -117,6 +114,10 @@ void setup()
 
   // Initialize node interval config (loads NVS, creates mutex)
   nc_init();
+
+  // WiFi harus STA mode sebelum esp_now_init
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
 
   if (esp_now_init() != ESP_OK)
   {
