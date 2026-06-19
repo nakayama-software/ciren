@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <esp_wifi.h>
 #include "ciren_config.h"
 #include "ring_buffer.h"
 #include "system_state.h"
@@ -89,8 +90,9 @@ void setup()
     strncpy(sys_state.device_id, cfg.device_id, sizeof(sys_state.device_id));
   } else {
     // First boot — generate dari 3 byte terakhir MAC: "MM-AABBCC"
+    // esp_read_mac reads eFuse directly — works before WiFi.mode() is called
     uint8_t mac[6];
-    WiFi.macAddress(mac);
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(sys_state.device_id, sizeof(sys_state.device_id),
              "%s-%02X%02X%02X", DEVICE_ID_PREFIX, mac[3], mac[4], mac[5]);
     // Simpan ke Preferences agar konsisten di reboot berikutnya
