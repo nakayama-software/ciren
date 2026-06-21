@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <esp_mac.h>
 #include "ciren_config.h"
 #include "ring_buffer.h"
 #include "system_state.h"
@@ -57,6 +58,7 @@ void save_config_defaults()
   prefs.putString("mqtt_host", "118.22.31.254");
   if (!prefs.isKey("conn_mode")) prefs.putString("conn_mode", "wifi");
   if (!prefs.isKey("sim_en"))    prefs.putBool("sim_en", true);
+  if (!prefs.isKey("sim_apn"))   prefs.putString("sim_apn", "soracom.io");
   prefs.end();
 }
 
@@ -88,8 +90,9 @@ void setup()
     strncpy(sys_state.device_id, cfg.device_id, sizeof(sys_state.device_id));
   } else {
     // First boot — generate dari 3 byte terakhir MAC: "MM-AABBCC"
+    // esp_read_mac reads eFuse directly — no WiFi init needed
     uint8_t mac[6];
-    WiFi.macAddress(mac);
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(sys_state.device_id, sizeof(sys_state.device_id),
              "%s-%02X%02X%02X", DEVICE_ID_PREFIX, mac[3], mac[4], mac[5]);
     // Simpan ke Preferences agar konsisten di reboot berikutnya
