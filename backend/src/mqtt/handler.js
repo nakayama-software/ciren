@@ -129,6 +129,9 @@ async function _cleanupNullCtrlIds() {
     const r2 = await SensorNode.deleteMany({ sensor_type: { $in: [null, 0] } })
     if (r2.deletedCount > 0)
       console.log(`[CLEANUP] Deleted ${r2.deletedCount} SensorNode(s) with null/zero sensor_type`)
+    const r3 = await SensorNode.deleteMany({ port_num: null })
+    if (r3.deletedCount > 0)
+      console.log(`[CLEANUP] Deleted ${r3.deletedCount} SensorNode(s) with null port_num`)
   } catch (e) {
     console.error('[CLEANUP] cleanupNullCtrlIds error:', e.message)
   }
