@@ -9,10 +9,6 @@ typedef struct {
   uint8_t channel;
 } __attribute__((packed)) HelloAck;
 
-// ── Deferred log dari callback ke task ──────────────────────────────────────
-// espnow_recv_cb() berjalan di WiFi task stack (Core 0, ~3584B fixed).
-// Serial.printf di dalam callback menghabiskan ~256B per call.
-// Solusi: simpan data log di struct kecil, cetak dari task_espnow_rx.
 
 typedef struct {
   enum { LOG_NONE, LOG_HELLO_ACK, LOG_RX, LOG_RX_SKIP, LOG_PEER_FAIL,
@@ -190,10 +186,7 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TASK — berjalan di stack task_espnow_rx (Core 0, STACK_RX bytes).
-// Semua Serial.printf dan esp_now_send dilakukan di sini, bukan di callback.
-// ─────────────────────────────────────────────────────────────────────────────
+────────────
 void task_espnow_rx(void* param) {
   espnow_log_queue = xQueueCreate(16, sizeof(EspNowLog));
   espnow_ack_queue = xQueueCreate(4,  sizeof(PendingAck));
@@ -204,14 +197,12 @@ void task_espnow_rx(void* param) {
   uint32_t last_peer_check_ms = 0;
 
   for (;;) {
-    // ── Kirim HELLO_ACK yang pending ─────────────────────────────────────────
     PendingAck pending;
     while (xQueueReceive(espnow_ack_queue, &pending, 0) == pdTRUE) {
       ack_pkt.channel = pending.ch;
       esp_now_send(pending.mac, (uint8_t*)&ack_pkt, sizeof(ack_pkt));
     }
 
-    // ── Cetak log yang pending ───────────────────────────────────────────────
     EspNowLog log;
     while (xQueueReceive(espnow_log_queue, &log, 0) == pdTRUE) {
       switch (log.type) {
@@ -238,8 +229,6 @@ void task_espnow_rx(void* param) {
       }
     }
 
-    // ── Update peer_count setiap 2s berdasarkan timeout ─────────────────────
-    // Lebih akurat dari esp_now_get_peer_num() yang tidak berkurang saat peer mati
     uint32_t now_ms = (uint32_t)millis();
     if (now_ms - last_peer_check_ms >= 2000) {
       last_peer_check_ms = now_ms;

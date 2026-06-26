@@ -81,6 +81,15 @@ static const char* _sim_atReply(const char* cmd, uint32_t ms = 5000) {
   return _sim_rxbuf;
 }
 
+// ── PWRKEY pulse — power on SIM7080G ─────────────────────────────────────────
+static void _sim_pwrkey_pulse() {
+  pinMode(PIN_MODEM_PWRKEY, OUTPUT);
+  digitalWrite(PIN_MODEM_PWRKEY, HIGH); delay(100);
+  digitalWrite(PIN_MODEM_PWRKEY, LOW);  delay(1200);  // hold low ≥1s
+  digitalWrite(PIN_MODEM_PWRKEY, HIGH);
+  Serial.println("[SIM] PWRKEY pulsed");
+}
+
 // ── Phase 1: Init modem ───────────────────────────────────────────────────────
 static bool _sim_init_modem() {
   _sim_flush();
@@ -289,12 +298,22 @@ void sim_manager_task(void* param) {
     return;
   }
 
-  // Boot delay — give SIM7080G time to power up
-  vTaskDelay(pdMS_TO_TICKS(SIM_BOOT_WAIT_MS));
-
   // Init Serial2 for modem AT communication
   _sim_ser.begin(MODEM_BAUD, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
   vTaskDelay(pdMS_TO_TICKS(500));
+
+  // Try AT first (modem may already be on); if no response, send PWRKEY pulse
+  _sim_flush();
+  _sim_ser.println("AT");
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  bool already_on = (_sim_ser.available() && strstr(_sim_atReply("AT", 2000), "OK") != nullptr);
+  if (!already_on) {
+    Serial.println("[SIM] Modem not responding — sending PWRKEY pulse");
+    _sim_pwrkey_pulse();
+    vTaskDelay(pdMS_TO_TICKS(SIM_BOOT_WAIT_MS));  // wait for boot
+  } else {
+    Serial.println("[SIM] Modem already on");
+  }
 
   // ── Phase 1: Init modem ──────────────────────────────────────────────────────
   Serial.println("[SIM] Phase 1: Init modem");

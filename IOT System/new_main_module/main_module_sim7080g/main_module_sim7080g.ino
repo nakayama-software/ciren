@@ -5,7 +5,7 @@
 #include "ciren_config.h"
 #include "ring_buffer.h"
 #include "system_state.h"
-#include "task_node_config.h"   // must come before espnow_rx (nc_on_ack, nc_resync_ctrl) and mqtt_sim (nc_set)
+#include "task_node_config.h"   
 #include "task_espnow_rx.h"
 #include "task_publish.h"
 #include "task_aggregator.h"
@@ -54,7 +54,6 @@ void load_config()
 void save_config_defaults()
 {
   prefs.begin("ciren", false);
-  // Always write mqtt_host so firmware update can change the default
   prefs.putString("mqtt_host", "118.22.31.254");
   if (!prefs.isKey("conn_mode")) prefs.putString("conn_mode", "wifi");
   if (!prefs.isKey("sim_en"))    prefs.putBool("sim_en", true);
@@ -69,6 +68,7 @@ void setup()
   delay(500);
 
   state_mutex = xSemaphoreCreateMutex();
+
   state_init();
   rb_init();
   publish_queue_init();
@@ -85,37 +85,31 @@ void setup()
   strncpy(sys_state.sim_apn_user, cfg.sim_apn_user, sizeof(sys_state.sim_apn_user));
   strncpy(sys_state.sim_apn_pass, cfg.sim_apn_pass, sizeof(sys_state.sim_apn_pass));
 
-  // ── Device ID: load dari Preferences, atau generate dari MAC suffix ──────────
+  
   if (strlen(cfg.device_id) > 0) {
     strncpy(sys_state.device_id, cfg.device_id, sizeof(sys_state.device_id));
   } else {
-    // First boot — generate dari 3 byte terakhir MAC: "MM-AABBCC"
-    // esp_read_mac reads eFuse directly — no WiFi init needed
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(sys_state.device_id, sizeof(sys_state.device_id),
              "%s-%02X%02X%02X", DEVICE_ID_PREFIX, mac[3], mac[4], mac[5]);
-    // Simpan ke Preferences agar konsisten di reboot berikutnya
     prefs.begin("ciren", false);
     prefs.putString("device_id", sys_state.device_id);
     prefs.end();
     Serial.printf("[SETUP] Generated Device ID: %s\n", sys_state.device_id);
   }
-  state_build_topics();  // build topic strings dari device_id
+  state_build_topics(); 
 
   Serial.printf("CIREN Main Module %s\n", FW_VERSION);
   Serial.printf("Device   : %s\n", sys_state.device_id);
   Serial.printf("WiFi SSID: %s\n", cfg.wifi_ssid);
   Serial.printf("MQTT Host: %s\n", cfg.mqtt_host);
 
-  // Initialize SIM-related tasks
   sim_manager_init();
   mqtt_sim_init();
 
-  // Initialize node interval config (loads NVS, creates mutex)
   nc_init();
 
-  // WiFi harus STA mode sebelum esp_now_init
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
 

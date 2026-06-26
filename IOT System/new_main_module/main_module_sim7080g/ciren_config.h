@@ -22,6 +22,7 @@
 
 #define PIN_MODEM_RX       16
 #define PIN_MODEM_TX       17
+#define PIN_MODEM_PWRKEY   5
 #define MODEM_BAUD         115200
 
 #define RB_SIZE            128
@@ -75,12 +76,7 @@
 #define PRIO_STATUS        2
 
 // ── Stack sizes ───────────────────────────────────────────────────────────────
-// Riwayat crash & fix:
-//   Crash 1-2: task_oled overflow saat portal aktif          → 4096→8192
-//   Crash 1-2: task_conn_mgr overflow saat wifi_recover      → 4096→5120
-//   Crash 1-2: espnow_recv_cb di WiFi task (fixed stack IDF) → pindah ke queue
-//   Crash 3:   task_watchdog overflow akibat 7x Serial.printf → 2048→4096
-//              + ganti ke 1x printf + stored handles
+
 #define STACK_RX           5120   // was 4096
 #define STACK_CONN         8192   // was 5120 — WiFi.begin() probe in SIM mode needs more stack
 #define STACK_AGG          6144
