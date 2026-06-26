@@ -186,7 +186,7 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t* mac,
   }
 }
 
-────────────
+// ────────────────────────────────────────────────────────────────────────────
 void task_espnow_rx(void* param) {
   espnow_log_queue = xQueueCreate(16, sizeof(EspNowLog));
   espnow_ack_queue = xQueueCreate(4,  sizeof(PendingAck));
