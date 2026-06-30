@@ -144,99 +144,197 @@ CHAPTER 2 — BEFORE YOU START
 CHAPTER 3 — HARDWARE INSTALLATION
 ================================================================================
 
-3.1  Step 1 — Connect Sensor Nodes to Controller
---------------------------------------------------------------------------------
-  Each Sensor Node connects to one numbered port (1–8) on the Sensor Controller
-  using a 4-wire UART cable.
+  Install and commission hardware in this order:
+  Main Module → WiFi → SIM Card (optional) → Verify Online
+  → Sensor Controller → Verify Controller Detected → Sensor Nodes
 
-  1. Identify the port numbers on the Sensor Controller (labeled 1–8).
-  2. Connect each Sensor Node cable to a port:
+  Always set up the gateway (Main Module) and confirm cloud connectivity
+  before adding Sensor Controllers or Nodes. This makes each step verifiable
+  as you go.
+
+
+3.1  Step 1 — Power On the Main Module
+--------------------------------------------------------------------------------
+  The Main Module is the central gateway. Set it up first.
+
+  1. Place the Main Module in its final mounting location.
+  2. Connect the power supply.
+  3. The TFT display powers on and shows the boot screen (Device ID,
+     firmware version).
+  4. Wait ~10 seconds for the module to complete startup.
+  5. Check the TFT display — it will show one of:
+       - "hotspot mode" : first power-on, WiFi not yet configured → go to 3.2
+       - conn mode = "wifi" : already configured → verify connection in 3.4
+       - conn mode = "offline" : WiFi credentials set but no connection → 3.2
+
+  [NOTE]    The Main Module does not require any sensor hardware to be
+            connected at this stage. It can come online independently.
+
+
+3.2  Step 2 — Configure WiFi
+--------------------------------------------------------------------------------
+  On the first power-on (or after a WiFi reset), the Main Module enters
+  hotspot mode automatically.
+
+  1. On your phone or PC, open WiFi settings.
+  2. Connect to the temporary hotspot created by the Main Module.
+     (Hotspot name and password are printed on the device label.)
+  3. A configuration page opens automatically in your browser.
+     If it does not open, navigate to: [192.168.4.1]
+  4. Enter your WiFi network name (SSID) and password.
+  5. Click "Save" or "Connect".
+  6. The Main Module reboots and connects to your WiFi.
+  7. TFT display changes to: conn mode = "wifi".
+
+  [NOTE]    If setup fails (wrong password, out of range), the module retries.
+            Power cycle to re-enter hotspot mode.
+
+  [TIP]     If the facility has a dedicated IoT VLAN, use that network for
+            better isolation.
+
+  [TIP]     If you are not using WiFi and will rely entirely on LTE-M,
+            skip this step and proceed to Step 3.
+
+
+3.3  Step 3 — Insert SIM Card & Configure APN (Optional — LTE-M Fallback)
+--------------------------------------------------------------------------------
+  The SIM card enables automatic connectivity when WiFi is unavailable.
+  Configure the SIM before verifying connectivity, so both paths are ready.
+
+  [REQUIRED] Power off the Main Module completely before inserting the SIM.
+
+  A. Insert SIM Card
+  ─────────────────
+  1. Power off the Main Module and disconnect power.
+  2. Locate the SIM card slot on the SIM7080G modem (side of enclosure).
+  3. Insert a nano SIM card with an active LTE-M (Cat-M1) data plan.
+       Recommended: Soracom Air plan-D (~¥330/month, includes 300MB)
+       Any LTE-M compatible SIM will work.
+  4. Reconnect power and power on the Main Module.
+
+  B. Configure APN Settings
+  ──────────────────────────
+  5. Connect to the Main Module hotspot (or use the existing WiFi connection)
+     and open the configuration page at: [192.168.4.1]
+  6. Navigate to the "SIM / Cellular" settings section.
+  7. Enter the APN details for your SIM provider:
+
+       Provider          | APN              | Username  | Password
+       ──────────────────|──────────────────|───────────|──────────
+       Soracom Air       | soracom.io       | sora      | sora
+       IIJmio (LTE-M)   | iijmio.jp        | mio@iij   | iij
+       Other providers  | (see SIM provider documentation)
+
+  8. Click "Save". The module reboots.
+  9. The module tries WiFi first. If unavailable, it switches to LTE-M
+     automatically. TFT display shows: conn mode = "sim".
+
+  [NOTE]    CIREN sensor data is very lightweight (well under 300MB/month
+            even with many sensors at high update rates).
+
+  [TIP]     Even if WiFi is available, installing a SIM card is recommended
+            as insurance against network outages.
+
+  [NOTE]    If the APN is incorrect, the modem will fail to register on the
+            network. The TFT will show conn mode = "sim" but the device will
+            appear offline on the dashboard. Double-check APN with your
+            SIM provider if this occurs.
+
+
+3.4  Step 4 — Verify Main Module is Online
+--------------------------------------------------------------------------------
+  Confirm the Main Module is connected and visible on the dashboard before
+  adding any Sensor Controllers.
+
+  1. Open the CIREN dashboard in a browser.
+  2. Log in with your account credentials.
+  3. The device should appear in the Device List within ~30 seconds.
+  4. The status indicator should show "Online".
+  5. Check the connection mode badge — "WiFi" or "LTE-M".
+
+  [NOTE]    If the device does not appear after 60 seconds, refer to
+            Chapter 10 — Troubleshooting, Section 10.1.
+
+  [REQUIRED] Do not proceed to Step 5 until the Main Module shows "Online"
+             on the dashboard.
+
+
+3.5  Step 5 — Power On the Sensor Controller
+--------------------------------------------------------------------------------
+  Once the Main Module is confirmed online, power on the Sensor Controller.
+
+  1. Place the Sensor Controller within wireless range of the Main Module.
+     Recommended distance: within 30–50 meters in industrial environments.
+     Walls and metal reduce range significantly.
+  2. Connect the Sensor Controller to its power supply (3.3V regulated / USB).
+  3. The controller starts automatically — no buttons to press.
+  4. It begins scanning for the Main Module via ESP-NOW (2.4 GHz).
+
+  [NOTE]    At this stage, sensor nodes do not need to be connected yet.
+            The controller will pair with the Main Module first.
+
+  [TIP]     During initial setup, place the Sensor Controller physically
+            close to the Main Module to ensure reliable first pairing.
+            It can be moved to its final location after pairing is confirmed.
+
+
+3.6  Step 6 — Verify Sensor Controller Detected
+--------------------------------------------------------------------------------
+  Confirm the Sensor Controller is paired with the Main Module before
+  connecting any Sensor Nodes.
+
+  On the TFT display (Main Module):
+  1. Wait for Page 4 — Controller List to appear (display cycles automatically).
+  2. Confirm the controller's MAC address or ID appears in the list.
+  3. The "last received" timestamp should be updating (within the last few seconds).
+
+  On the Dashboard:
+  4. Open Device Detail for the Main Module device.
+  5. A new Sensor Controller card should appear.
+  6. All 8 port slots will show as empty/inactive — this is expected.
+
+  [NOTE]    If the controller does not appear within ~30 seconds of powering
+            on, check distance and obstacles. Move closer and power cycle
+            the controller.
+
+  [REQUIRED] Do not connect Sensor Nodes until the controller is visible
+             on the dashboard.
+
+
+3.7  Step 7 — Connect & Verify Sensor Nodes
+--------------------------------------------------------------------------------
+  Connect Sensor Nodes one at a time and verify each one before continuing.
+  This makes troubleshooting easier if a node has a problem.
+
+  For each Sensor Node:
+
+  1. Identify the target port number on the Sensor Controller (labeled 1–8).
+  2. Connect the Sensor Node cable to the port:
        - Match wire colors: VCC (red) → VCC, GND (black) → GND,
                             TX → RX, RX → TX
-  3. Secure the cable connectors firmly.
+  3. Secure the cable connector firmly.
+  4. Wait ~5–10 seconds.
+  5. On the dashboard (Device Detail), the corresponding port card should
+     become active and show:
+       - Sensor type (auto-detected)
+       - A live reading value
+  6. Confirm the reading looks reasonable for the sensor type and location.
+  7. Assign a label to the port (see Section 6.1):
+       e.g., "Port 1 — Cold Room East"
+  8. Repeat for each remaining Sensor Node.
 
   [NOTE]    Maximum cable length between node and controller: ~10 meters.
             Use shorter cables where possible for reliable signal.
 
-  [NOTE]    Each port detects the sensor type automatically when the
-            system powers on. No manual type selection is needed.
+  [NOTE]    Sensor type is detected automatically. No manual type selection
+            is needed.
 
-  [TIP]     Label each port at installation time (e.g., "Port 1 — Cold Room")
-            to make dashboard configuration easier later.
+  [TIP]     Label each port immediately at installation, before moving to
+            the next node. Labels carry through to exported data files.
 
-
-3.2  Step 2 — Power On the Sensor Controller
---------------------------------------------------------------------------------
-  1. Connect the Sensor Controller to its power supply (3.3V regulated / USB).
-  2. The controller starts automatically — no buttons to press.
-  3. It will begin collecting sensor data within a few seconds.
-  4. It broadcasts data wirelessly once the Main Module is powered and in range.
-
-  [NOTE]    The Sensor Controller and Main Module communicate wirelessly
-            (ESP-NOW, 2.4 GHz). Keep them within 30–50 meters in industrial
-            environments. Walls and metal reduce range significantly.
-
-
-3.3  Step 3 — Configure WiFi on the Main Module
---------------------------------------------------------------------------------
-  On the first power-on (or if WiFi credentials have been cleared), the Main
-  Module will enter WiFi setup mode.
-
-  1. Power on the Main Module.
-  2. The TFT display on the module will show it is in setup/hotspot mode.
-  3. On your phone or PC, open the WiFi settings.
-  4. Connect to the temporary WiFi hotspot created by the Main Module.
-     (Hotspot name and password are printed on the device label.)
-  5. A configuration page opens automatically in your browser.
-     If it does not open automatically, open a browser and go to:
-     [192.168.4.1]
-  6. Enter your WiFi network name (SSID) and password.
-  7. Click "Save" or "Connect".
-  8. The Main Module reboots and connects to your WiFi.
-  9. The TFT display will change to show: conn mode = "wifi".
-
-  [NOTE]    If WiFi setup fails (wrong password, network out of range),
-            the module will retry. Power cycle to re-enter setup mode.
-
-  [TIP]     If the facility has a dedicated IoT VLAN or network, connect
-            the Main Module to that network for better isolation.
-
-
-3.4  Step 4 — Insert SIM Card (Optional — LTE-M Fallback)
---------------------------------------------------------------------------------
-  The SIM card enables automatic connectivity when WiFi is unavailable.
-
-  [REQUIRED] Power off the Main Module completely before this step.
-
-  1. Power off the Main Module and disconnect power.
-  2. Locate the SIM card slot on the SIM7080G modem (on the side of the
-     Main Module enclosure).
-  3. Insert a nano SIM card with an active LTE-M (Cat-M1) data plan.
-       Recommended: Soracom Air plan-D (~¥330/month, includes 300MB)
-       Any LTE-M SIM from a compatible carrier will work.
-  4. Reconnect power and power on the Main Module.
-  5. The module first tries WiFi. If WiFi is unavailable, it automatically
-     switches to LTE-M. The TFT display shows: conn mode = "sim".
-
-  [NOTE]    CIREN sensor data is very lightweight (well under 300MB/month
-            even with multiple sensors at high update rates).
-
-  [TIP]     Even if your site has WiFi, installing a SIM card is recommended
-            as insurance against network outages.
-
-
-3.5  Step 5 — Verify System is Online
---------------------------------------------------------------------------------
-  1. Open the CIREN dashboard in a browser.
-  2. Log in with your account credentials.
-  3. Your device should appear in the Device List within ~30 seconds
-     of the Main Module powering on.
-  4. The status indicator next to the device name should show "Online".
-  5. Click the device to open Device Detail and verify sensor data is
-     appearing under the correct controller and port numbers.
-
-  [NOTE]    If the device does not appear after 60 seconds, refer to
-            Chapter 10 — Troubleshooting.
+  [WARNING] If a port does not activate within 30 seconds, check the cable
+            connection and wire color matching. Do not proceed to the next
+            node until the current one is confirmed active.
 
 
 ================================================================================
@@ -645,7 +743,7 @@ CHAPTER 9 — MAINTENANCE
      [NOTE] If there is no dedicated button, consult the device label for
             the reset procedure specific to your unit.
   3. The TFT display shows the module is in hotspot/setup mode.
-  4. Follow the WiFi setup steps in Section 3.3.
+  4. Follow the WiFi setup steps in Section 3.2.
 
 
 9.4  SIM Card Management
@@ -769,7 +867,7 @@ CHAPTER 10 — TROUBLESHOOTING
      password-protected home/business WiFi network.
 
   e) If WiFi cannot be resolved: insert a SIM card and use LTE-M
-     as the primary connection (see Section 3.4).
+     as the primary connection (see Section 3.3).
 
 
 10.6  When to Contact Support

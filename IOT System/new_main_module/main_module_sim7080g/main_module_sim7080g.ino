@@ -2,10 +2,11 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <esp_mac.h>
+#include <esp_task_wdt.h>
 #include "ciren_config.h"
 #include "ring_buffer.h"
 #include "system_state.h"
-#include "task_node_config.h"   // must come before espnow_rx (nc_on_ack, nc_resync_ctrl) and mqtt_sim (nc_set)
+#include "task_node_config.h"   
 #include "task_espnow_rx.h"
 #include "task_publish.h"
 #include "task_aggregator.h"
@@ -15,6 +16,8 @@
 #include "task_btn_oled.h"
 #include "task_sim_manager.h"
 #include "task_mqtt_sim.h"
+#include "task_logger.h"
+#include "task_ntp.h"
 
 // ─── Global definitions ───────────────────────────
 SystemState sys_state;
@@ -54,7 +57,6 @@ void load_config()
 void save_config_defaults()
 {
   prefs.begin("ciren", false);
-  // Always write mqtt_host so firmware update can change the default
   prefs.putString("mqtt_host", "118.22.31.254");
   if (!prefs.isKey("conn_mode")) prefs.putString("conn_mode", "wifi");
   if (!prefs.isKey("sim_en"))    prefs.putBool("sim_en", true);
@@ -69,9 +71,11 @@ void setup()
   delay(500);
 
   state_mutex = xSemaphoreCreateMutex();
+
   state_init();
   rb_init();
   publish_queue_init();
+  log_queue_init();
 
   btn_oled_init();
 
@@ -85,54 +89,63 @@ void setup()
   strncpy(sys_state.sim_apn_user, cfg.sim_apn_user, sizeof(sys_state.sim_apn_user));
   strncpy(sys_state.sim_apn_pass, cfg.sim_apn_pass, sizeof(sys_state.sim_apn_pass));
 
-  // ── Device ID: load dari Preferences, atau generate dari MAC suffix ──────────
+  
   if (strlen(cfg.device_id) > 0) {
     strncpy(sys_state.device_id, cfg.device_id, sizeof(sys_state.device_id));
   } else {
-    // First boot — generate dari 3 byte terakhir MAC: "MM-AABBCC"
-    // esp_read_mac reads eFuse directly — no WiFi init needed
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(sys_state.device_id, sizeof(sys_state.device_id),
              "%s-%02X%02X%02X", DEVICE_ID_PREFIX, mac[3], mac[4], mac[5]);
-    // Simpan ke Preferences agar konsisten di reboot berikutnya
     prefs.begin("ciren", false);
     prefs.putString("device_id", sys_state.device_id);
     prefs.end();
     Serial.printf("[SETUP] Generated Device ID: %s\n", sys_state.device_id);
   }
-  state_build_topics();  // build topic strings dari device_id
+  state_build_topics(); 
 
   Serial.printf("CIREN Main Module %s\n", FW_VERSION);
   Serial.printf("Device   : %s\n", sys_state.device_id);
   Serial.printf("WiFi SSID: %s\n", cfg.wifi_ssid);
   Serial.printf("MQTT Host: %s\n", cfg.mqtt_host);
+  LOG_INFO("SETUP", "Config: SSID=%s MQTT=%s:%d", cfg.wifi_ssid, cfg.mqtt_host, MQTT_PORT);
+  LOG_INFO("SETUP", "CIREN Main Module %s booted, device_id=%s", FW_VERSION, sys_state.device_id);
 
-  // Initialize SIM-related tasks
   sim_manager_init();
   mqtt_sim_init();
 
-  // Initialize node interval config (loads NVS, creates mutex)
-  nc_init();
+  // ── Task Watchdog Timer ────────────────────────────────────────────────────
+  // 15s timeout — if any subscribed task fails to feed, system panics and reboots.
+  // This ensures automatic recovery from task hangs (e.g., mutex deadlock, infinite loop).
+  esp_task_wdt_init(15, true);   // panic=true → reboot on timeout
+  esp_task_wdt_add(NULL);         // subscribe the setup/loop task
+  LOG_INFO("SETUP", "Task Watchdog initialized (15s timeout, panic on timeout)");
 
-  // WiFi harus STA mode sebelum esp_now_init
+  nc_init();
+  esp_task_wdt_reset();   // feed WD after init phases
+
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
 
+  esp_task_wdt_reset();   // feed WD before ESP-NOW init
   if (esp_now_init() != ESP_OK)
   {
+    LOG_ERROR("SETUP", "ESP-NOW init failed — cannot receive sensor data");
     Serial.println("[FATAL] esp_now_init failed");
     while (1)
       delay(1000);
   }
   esp_now_register_recv_cb(espnow_recv_cb);
   Serial.println("[ESP-NOW] Init OK");
+  LOG_INFO("SETUP", "ESP-NOW initialized OK");
 
   if (strlen(cfg.wifi_ssid) == 0)
   {
     // No WiFi credentials — auto-start portal; SIM becomes primary connection
     Serial.println("[SETUP] No WiFi credentials — auto-starting portal, SIM as primary");
+    LOG_WARN("SETUP", "No WiFi credentials — portal started, SIM as primary");
     portal_start(&prefs);
+    esp_task_wdt_reset();   // feed WD after portal start
     xSemaphoreTake(state_mutex, portMAX_DELAY);
     strncpy(sys_state.conn_mode, "sim", sizeof(sys_state.conn_mode));
     xSemaphoreGive(state_mutex);
@@ -145,6 +158,8 @@ void setup()
   }
 
   // All other tasks start regardless of WiFi state
+  esp_task_wdt_reset();   // feed WD before creating tasks
+
   // Core 0: IO + display
   xTaskCreatePinnedToCore(task_espnow_rx,   "espnow_rx", STACK_RX,      NULL,   PRIO_RX,       &h_espnow_rx,  0);
   xTaskCreatePinnedToCore(task_watchdog,    "watchdog",  STACK_WATCHDOG,NULL,   PRIO_WATCHDOG, NULL,          0);
@@ -156,12 +171,19 @@ void setup()
   xTaskCreatePinnedToCore(task_aggregator,  "aggregator", STACK_AGG,      NULL, PRIO_AGG,     &h_aggregator, 1);
   xTaskCreatePinnedToCore(task_status,      "status",     STACK_STATUS,   NULL, PRIO_STATUS,  &h_status,     1);
   xTaskCreatePinnedToCore(mqtt_sim_task,    "mqtt_sim",   STACK_MQTT_SIM, NULL, PRIO_CONN,    NULL,          1);
+  xTaskCreatePinnedToCore(task_logger,     "logger",     STACK_LOGGER,   NULL, PRIO_LOGGER,  NULL,          1);
   xTaskCreatePinnedToCore(task_node_config, "node_cfg",   STACK_CONFIG,   NULL, PRIO_CONFIG,  NULL,          1);
+  xTaskCreatePinnedToCore(task_ntp,        "ntp",         4096,           NULL, PRIO_STATUS,  NULL,          1);
 
   Serial.println("All tasks started.");
+  LOG_INFO("SETUP", "All tasks started, entering main loop");
 }
 
 void loop()
 {
-  vTaskDelay(portMAX_DELAY);
+  // loopTask is subscribed to TWDT — must feed periodically.
+  // All real work runs in FreeRTOS tasks; loop() just keeps the
+  // Arduino framework task alive and feeds the watchdog.
+  esp_task_wdt_reset();
+  vTaskDelay(pdMS_TO_TICKS(5000));
 }

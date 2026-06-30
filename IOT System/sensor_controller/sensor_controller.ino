@@ -139,9 +139,10 @@ const int RX_P8 = 35;//19;  // can
 #define INTERVAL_OTHER_MS 500   // demo: 2 Hz
 
 // Heartbeat forward interval — independent of data interval
-// Sensor controller always sends HB every 15s so dashboard can detect online/offline
-// regardless of how long the data upload interval is (e.g., 30 minutes)
-#define HB_INTERVAL_MS 15000
+// Sensor controller sends HB so the main module can detect online/offline locally.
+// The main module now aggregates controller status in its periodic status message
+// (ciren/status/{device_id}), so frequent HB over MQTT is no longer needed.
+#define HB_INTERVAL_MS 30000
 
 // Max sensor types tracked per port (IMU has up to 9)
 #define MAX_STYPES_PER_PORT 10
@@ -340,7 +341,7 @@ void reset_peer_channel();  // ← FIX: deklarasi baru
 
 // Forward buffered readings for all ports.
 // Two independent timers per port:
-//   HB   — every HB_INTERVAL_MS (15s), so dashboard always sees the controller online
+//   HB   — every HB_INTERVAL_MS (30s), main module aggregates status for dashboard
 //   DATA — every interval_ms (user-configured), for actual data recording
 void flush_port_buffers() {
   if (!macValid || !channel_synced) return;

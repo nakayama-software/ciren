@@ -15,6 +15,7 @@ import {
   X,
   HelpCircle,
   Scale,
+  ScrollText,
 } from 'lucide-react'
 import {
   getDevice, getLatest, getUserDevices, clearToken, getToken,
@@ -27,6 +28,7 @@ import AliasInlineEdit, { getAlias } from './components/AliasInlineEdit'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DeviceManagementPage from './pages/DeviceManagementPage'
+import LogsPage from './pages/LogsPage'
 import OnboardingTour, { getStage, setStage } from './components/OnboardingTour'
 
 // Build WebSocket URL from env or derive from VITE_API_BASE
@@ -59,6 +61,7 @@ const PAGE_LOGIN    = 'login'
 const PAGE_REGISTER = 'register'
 const PAGE_DEVICES  = 'devices'
 const PAGE_DASH     = 'dashboard'
+const PAGE_LOGS     = 'logs'
 
 export default function App() {
   // ---------- theme ----------
@@ -110,6 +113,7 @@ export default function App() {
     setDevices({})
     setLatestData({})
     setNodeStatus({})
+    setLiveLogs([])
     setSelectedDeviceId(null)
     setSelectedCtrlId(null)
     setPage(PAGE_LOGIN)
@@ -126,6 +130,7 @@ export default function App() {
   const [wsStatus, setWsStatus] = useState('connecting')
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [ctrlHbTs, setCtrlHbTs] = useState({})  // { "${deviceId}_${ctrlId}": timestamp }
+  const [liveLogs, setLiveLogs] = useState([])      // real-time log entries from WS
   const [compareTarget, setCompareTarget] = useState(null) // { portNum, isHumTemp }
 
   const wsRef = useRef(null)
@@ -294,6 +299,33 @@ export default function App() {
               },
             }
           })
+        } else if (type === 'ctrl_status') {
+          // Per-controller/sensor liveness from main module status message
+          // (replaces per-node HB_TYPED for online detection)
+          const { device_id, controllers, ts } = payload
+          if (!device_id || !Array.isArray(controllers)) return
+          const stamp = ts || Date.now()
+          setCtrlHbTs((prev) => {
+            const next = { ...prev }
+            for (const c of controllers) {
+              const key = `${device_id}_${c.ctrl_id}`
+              if (c.online) next[key] = stamp
+              else delete next[key]
+            }
+            return next
+          })
+          setNodeStatus((prev) => {
+            const devMap = { ...(prev[device_id] || {}) }
+            for (const c of controllers) {
+              const status = c.online ? 'online' : 'offline'
+              for (const node of (c.nodes || [])) {
+                for (const st of (node.stypes || [])) {
+                  devMap[getReadingKey(c.ctrl_id, node.p, st)] = status
+                }
+              }
+            }
+            return { ...prev, [device_id]: devMap }
+          })
         } else if (type === 'node_status') {
           const { device_id, ctrl_id, port_num, sensor_type, status, event } = payload
           // HELLO includes sensor_type → use sensor_type-aware key
@@ -329,6 +361,9 @@ export default function App() {
               } catch { /* ignore */ }
             }, 1000)
           }
+        } else if (type === 'device_log') {
+          // Real-time log entry from firmware
+          setLiveLogs(prev => [...prev.slice(-999), payload])
         }
       } catch {
         // ignore malformed
@@ -345,7 +380,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (page !== PAGE_DASH) return
+    // Keep WS alive on both dashboard and logs pages
+    if (page !== PAGE_DASH && page !== PAGE_LOGS) return
     mountedRef.current = true
     connect()
     return () => {
@@ -430,18 +466,20 @@ export default function App() {
   })()
 
   function isCtrlOnline(ctrlId) {
-    // Live HB_TYPED arrives every 15s — check if received within 30s
+    // Primary: ctrlHbTs is updated by both sensor_data (HB_TYPED) and ctrl_status events
+    // On WiFi, status arrives every 10s; on SIM, every 30s. Use wider window for SIM.
     const hbKey = `${selectedDeviceId}_${ctrlId}`
     const lastHb = ctrlHbTs[hbKey]
-    if (lastHb != null && (now - lastHb) < 30000) return true
+    const windowMs = connMode === 'sim' ? 90000 : 45000
+    if (lastHb != null && (now - lastHb) < windowMs) return true
 
-    // Fallback: node.last_seen from API (covers first 30s before any HB arrives on page load)
+    // Fallback: node.last_seen from API (covers first status cycle on page load)
     const ctrlNodes = selectedNodes.filter((n) => String(n.ctrl_id) === String(ctrlId))
     const maxLastSeen = Math.max(
       ...ctrlNodes.map((n) => n.last_seen ? new Date(n.last_seen).getTime() : 0),
       0
     )
-    return maxLastSeen > 0 && (now - maxLastSeen) < 30000
+    return maxLastSeen > 0 && (now - maxLastSeen) < windowMs
   }
 
   const connMode = selectedDevice?.conn_mode || null
@@ -507,6 +545,11 @@ export default function App() {
                 <button data-tour="header-devices" onClick={() => setPage(PAGE_DEVICES)} aria-label="Devices"
                   className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
                   <Settings size={14} />
+                </button>
+                {/* Logs */}
+                <button onClick={() => setPage(PAGE_LOGS)} aria-label="Logs"
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-black/10 bg-black/5 text-gray-600 hover:bg-black/10 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20 transition-colors cursor-pointer">
+                  <ScrollText size={14} />
                 </button>
                 {/* Help / tour */}
                 <button
@@ -576,6 +619,13 @@ export default function App() {
                         {lang === 'ja' ? 'デバイス管理' : 'Devices'}
                       </button>
 
+                      {/* Logs */}
+                      <button onClick={() => { setPage(PAGE_LOGS); setMobileMenuOpen(false) }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-black/5 dark:text-gray-200 dark:hover:bg-white/10 transition-colors cursor-pointer border-b border-black/5 dark:border-white/5">
+                        <ScrollText size={15} className="text-gray-400 shrink-0" />
+                        {lang === 'ja' ? 'ログ' : 'Logs'}
+                      </button>
+
                       {/* Sign out */}
                       <button onClick={() => { handleLogout(); setMobileMenuOpen(false) }}
                         className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 transition-colors cursor-pointer">
@@ -629,6 +679,20 @@ export default function App() {
         onLogout={handleLogout}
         theme={theme}
         toggleTheme={toggleTheme}
+      />
+    )
+  }
+
+  if (page === PAGE_LOGS) {
+    return shell(
+      <LogsPage
+        username={username}
+        onGoToDashboard={handleGoToDashboard}
+        theme={theme}
+        toggleTheme={toggleTheme}
+        liveLogs={liveLogs}
+        deviceIds={deviceIds}
+        lang={lang}
       />
     )
   }

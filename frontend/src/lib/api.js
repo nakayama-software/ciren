@@ -135,3 +135,39 @@ export function verifyNodeConfig(deviceId, ctrl_id, port_num) {
   if (params.length) url += '?' + params.join('&')
   return apiFetch(url)
 }
+
+// ─── Device Logs ──────────────────────────────────
+export function getDeviceLogs(deviceId, { level, tag, limit, from, to } = {}) {
+  const params = new URLSearchParams()
+  if (level) params.set('level', level)
+  if (tag)   params.set('tag', tag)
+  if (limit) params.set('limit', limit)
+  if (from)  params.set('from', from)
+  if (to)    params.set('to', to)
+  const qs = params.toString()
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/logs${qs ? '?' + qs : ''}`)
+}
+
+export function getLogs({ device_ids, level, tag, limit, from, to } = {}) {
+  const params = new URLSearchParams()
+  if (device_ids) params.set('device_ids', device_ids)
+  if (level) params.set('level', level)
+  if (tag)   params.set('tag', tag)
+  if (limit) params.set('limit', limit)
+  if (from)  params.set('from', from)
+  if (to)    params.set('to', to)
+  const qs = params.toString()
+  return apiFetch(`/api/logs${qs ? '?' + qs : ''}`)
+}
+
+export function clearDeviceLogs(deviceId, { level, tag, from, to } = {}) {
+  const params = new URLSearchParams()
+  if (level) params.set('level', level)
+  if (tag)   params.set('tag', tag)
+  if (from)  params.set('from', from)
+  if (to)    params.set('to', to)
+  const qs = params.toString()
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/logs${qs ? '?' + qs : ''}`, {
+    method: 'DELETE',
+  })
+}

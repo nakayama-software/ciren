@@ -3,9 +3,6 @@
 // SIM7080G (M5STAMP CatM) driver — pure AT commands, no TinyGSM.
 // Replaces SIM7600 + TinyGSM implementation.
 //
-// NOTE: GPS is NOT available on SIM7080G.
-//       sys_state.gps_fix is always false. Coordinates left at 0,0.
-//
 // Shared AT bus (Serial2) is protected by sim_at_mutex.
 // task_mqtt_sim.h (included after this file) uses the same mutex
 // and the AT helpers defined here.
@@ -13,8 +10,10 @@
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
+#include <esp_task_wdt.h>
 #include "ciren_config.h"
 #include "system_state.h"
+#include "task_logger.h"
 
 // ── Shared AT bus ─────────────────────────────────────────────────────────────
 static HardwareSerial& _sim_ser = Serial2;
@@ -22,6 +21,12 @@ SemaphoreHandle_t sim_at_mutex  = NULL;   // shared with task_mqtt_sim
 
 // ── Shared AT response buffer — no heap alloc/free on every AT command ────────
 static char _sim_rxbuf[512];
+
+// ── AT failure counter for modem crash detection ─────────────────────────────
+// If AT commands fail consecutively, the modem is likely unresponsive and
+// needs a PWRKEY reset. Reset to 0 on every success.
+#define SIM_MAX_AT_FAILURES 5
+static uint8_t _sim_fail_count = 0;
 
 // ── Low-level AT helpers ──────────────────────────────────────────────────────
 // Call with sim_at_mutex held (or before tasks start during init phase).
@@ -34,6 +39,7 @@ static void _sim_flush() {
 // Send AT command, return true if expected string appears in response within ms.
 static bool _sim_sendAT(const char* cmd, const char* expect = "OK",
                          uint32_t ms = 5000, bool verbose = false) {
+  esp_task_wdt_reset();   // feed watchdog before potentially long AT command
   _sim_flush();
   if (verbose) Serial.printf("[AT>>] %s\n", cmd);
   _sim_ser.println(cmd);
@@ -47,15 +53,18 @@ static bool _sim_sendAT(const char* cmd, const char* expect = "OK",
     }
     if (strstr(_sim_rxbuf, expect)) {
       if (verbose) Serial.printf("[AT<<] %s\n", _sim_rxbuf);
+      _sim_fail_count = 0;   // reset failure counter on success
       return true;
     }
     if (strstr(_sim_rxbuf, "ERROR")) {
       if (verbose) Serial.printf("[AT<<ERR] %s\n", _sim_rxbuf);
+      _sim_fail_count++;
       return false;
     }
     delay(10);
   }
   if (verbose) Serial.printf("[AT<<TO] %s\n", _sim_rxbuf);
+  _sim_fail_count++;   // timeout also counts as failure
   return false;
 }
 
@@ -73,12 +82,86 @@ static const char* _sim_atReply(const char* cmd, uint32_t ms = 5000) {
       _sim_rxbuf[pos]   = '\0';
     }
     if (strstr(_sim_rxbuf, "OK") || strstr(_sim_rxbuf, "ERROR")) break;
+    esp_task_wdt_reset();   // feed watchdog during long AT reply waits (e.g. AT+CNTP 30s)
     delay(10);
   }
   while (pos > 0 && (_sim_rxbuf[pos-1] == '\r' || _sim_rxbuf[pos-1] == '\n' ||
                       _sim_rxbuf[pos-1] == ' '))
     _sim_rxbuf[--pos] = '\0';
   return _sim_rxbuf;
+}
+
+// ── PWRKEY pulse — power on SIM7080G ─────────────────────────────────────────
+static void _sim_pwrkey_pulse() {
+  pinMode(PIN_MODEM_PWRKEY, OUTPUT);
+  digitalWrite(PIN_MODEM_PWRKEY, HIGH); delay(100);
+  digitalWrite(PIN_MODEM_PWRKEY, LOW);  delay(1200);  // hold low ≥1s
+  digitalWrite(PIN_MODEM_PWRKEY, HIGH);
+  Serial.println("[SIM] PWRKEY pulsed");
+  LOG_INFO("SIM", "PWRKEY pulsed — powering on modem");
+}
+
+// ── Forward declarations (needed because _sim_reset_modem calls Phase 1-4 fns) ──
+static bool _sim_init_modem();
+static void _sim_set_catm();
+static bool _sim_wait_registered(uint32_t timeout_ms);
+static bool _sim_activate_pdp();
+
+// ── Runtime modem reset ──────────────────────────────────────────────────────
+// Called when AT commands fail consecutively (modem unresponsive).
+// Pulses PWRKEY to hard-reset the modem, then re-initializes from Phase 1.
+// Returns true if modem comes back online, false if reset fails.
+// Caller must NOT hold sim_at_mutex — this function takes it internally.
+static bool _sim_reset_modem() {
+  LOG_ERROR("SIM", "Modem unresponsive (%d consecutive AT failures) — resetting", _sim_fail_count);
+  Serial.printf("[SIM] Modem unresponsive (%d failures) — resetting modem\n", _sim_fail_count);
+
+  // Mark GPRS as down so mqtt_sim_task stops publishing and disconnects
+  xSemaphoreTake(state_mutex, portMAX_DELAY);
+  sys_state.sim_gprs = false;
+  xSemaphoreGive(state_mutex);
+
+  // Take AT mutex for the full reset sequence
+  xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
+
+  // Full PWRKEY reset cycle
+  _sim_pwrkey_pulse();
+  esp_task_wdt_reset();   // feed watchdog during boot wait
+  vTaskDelay(pdMS_TO_TICKS(SIM_BOOT_WAIT_MS));
+
+  // Re-init from Phase 1
+  esp_task_wdt_reset();
+  if (!_sim_init_modem()) {
+    xSemaphoreGive(sim_at_mutex);
+    LOG_ERROR("SIM", "Modem reset failed — init unsuccessful");
+    Serial.println("[SIM] Modem reset failed — init unsuccessful");
+    _sim_fail_count = 0;  // reset so we don't immediately try again
+    return false;
+  }
+
+  esp_task_wdt_reset();
+  _sim_set_catm();
+
+  esp_task_wdt_reset();
+  if (!_sim_wait_registered(180000UL)) {
+    LOG_WARN("SIM", "Registration timeout after reset — continuing anyway");
+    Serial.println("[SIM] Registration timeout after reset — continuing anyway");
+  }
+
+  esp_task_wdt_reset();
+  if (!_sim_activate_pdp()) {
+    xSemaphoreGive(sim_at_mutex);
+    LOG_ERROR("SIM", "PDP activation failed after reset");
+    Serial.println("[SIM] PDP activation failed after reset");
+    _sim_fail_count = 0;
+    return false;
+  }
+
+  xSemaphoreGive(sim_at_mutex);
+  LOG_INFO("SIM", "Modem reset successful — PDP re-activated");
+  Serial.println("[SIM] Modem reset successful — PDP re-activated");
+  _sim_fail_count = 0;
+  return true;
 }
 
 // ── Phase 1: Init modem ───────────────────────────────────────────────────────
@@ -98,10 +181,16 @@ static bool _sim_init_modem() {
     }
     if (strstr(r, "OK")) {
       Serial.println("[SIM] Modem responding");
+      LOG_INFO("SIM", "Modem responding after %d attempts", i + 1);
       break;
     }
+    esp_task_wdt_reset();   // feed watchdog between attempts
     Serial.printf("[SIM] Waiting modem (%d/15)\n", i + 1);
-    if (i == 14) { Serial.println("[SIM] Modem not responding — check wiring/power"); return false; }
+    if (i == 14) {
+      Serial.println("[SIM] Modem not responding — check wiring/power");
+      LOG_ERROR("SIM", "Modem not responding after 15 attempts");
+      return false;
+    }
     delay(500);
   }
 
@@ -111,12 +200,14 @@ static bool _sim_init_modem() {
   // Check SIM card
   if (!_sim_sendAT("AT+CPIN?", "READY", 8000)) {
     Serial.println("[SIM] SIM not ready");
+    LOG_ERROR("SIM", "SIM card not ready (CPIN check failed)");
     return false;
   }
 
   // Use result immediately — each call overwrites _sim_rxbuf
   Serial.printf("[SIM] %s\n",       _sim_atReply("ATI"));
   Serial.printf("[SIM] IMEI: %s\n", _sim_atReply("AT+CGSN"));
+  LOG_INFO("SIM", "Modem initialized OK");
 
   xSemaphoreTake(state_mutex, portMAX_DELAY);
   sys_state.sim_modem_ok = true;
@@ -132,6 +223,7 @@ static void _sim_set_catm() {
   snprintf(buf, sizeof(buf), "AT+CBANDCFG=\"CAT-M\",%s", SIM_CATM_BANDS);
   _sim_sendAT(buf, "OK", 5000);
   Serial.printf("[SIM] CAT-M mode set, JP bands: %s\n", SIM_CATM_BANDS);
+  LOG_INFO("SIM", "CAT-M mode set, bands=%s", SIM_CATM_BANDS);
 }
 
 // ── Phase 3: Wait for network registration ────────────────────────────────────
@@ -143,14 +235,39 @@ static bool _sim_wait_registered(uint32_t timeout_ms = 180000UL) {
     bool ok = (strstr(cereg, ",1") != nullptr || strstr(cereg, ",5") != nullptr);
     if (ok) {
       Serial.println(" OK");
-      Serial.printf("[SIM] Signal: %s\n",   _sim_atReply("AT+CSQ"));
-      Serial.printf("[SIM] Operator: %s\n", _sim_atReply("AT+COPS?"));
+      LOG_INFO("SIM", "Network registered OK");
+      esp_task_wdt_reset();   // feed watchdog after successful registration
+      int csq = -1;
+      {
+        const char* r = _sim_atReply("AT+CSQ");
+        const char* colon = strchr(r, ':');
+        if (colon) csq = atoi(colon + 2);
+        Serial.printf("[SIM] Signal: %s\n", r);
+      }
+      char op[24] = "";
+      {
+        const char* r = _sim_atReply("AT+COPS?");
+        const char* q1 = strchr(r, '"');
+        if (q1) {
+          const char* q2 = strchr(q1 + 1, '"');
+          if (q2 && q2 > q1) {
+            size_t len = (size_t)(q2 - q1 - 1);
+            if (len >= sizeof(op)) len = sizeof(op) - 1;
+            strncpy(op, q1 + 1, len);
+            op[len] = '\0';
+          }
+        }
+        Serial.printf("[SIM] Operator: %s\n", r);
+      }
+      LOG_INFO("SIM", "Network registered, signal=%d op=%s", csq, op);
       return true;
     }
     Serial.print(".");
+    esp_task_wdt_reset();   // feed watchdog during registration wait
     delay(3000);
   }
   Serial.println(" TIMEOUT");
+  LOG_WARN("SIM", "Network registration timeout");
   return false;
 }
 
@@ -166,10 +283,12 @@ static bool _sim_activate_pdp() {
 
   if (strlen(apn) == 0) {
     Serial.println("[SIM] APN not configured — set via portal");
+    LOG_ERROR("SIM", "APN not configured — cannot activate PDP");
     return false;
   }
 
   Serial.printf("[SIM] Activating PDP, APN=%s user=%s\n", apn, apn_user);
+  LOG_INFO("SIM", "Activating PDP, APN=%s", apn);
 
   // Deactivate existing context
   _sim_sendAT("AT+CNACT=0,0", "OK", 5000);
@@ -203,12 +322,17 @@ static bool _sim_activate_pdp() {
     }
     if (strstr(rbuf, "DEACTIVE")) {
       Serial.println(" DEACTIVE");
+      LOG_ERROR("SIM", "PDP activation failed — DEACTIVE response");
       break;
     }
     Serial.print(".");
+    esp_task_wdt_reset();   // feed watchdog during PDP activation (can take 60s)
     delay(1000);
   }
-  if (!activated) return false;
+  if (!activated) {
+    LOG_ERROR("SIM", "PDP activation timeout");
+    return false;
+  }
 
   // Verify IP
   delay(500);
@@ -224,6 +348,7 @@ static bool _sim_activate_pdp() {
       ip[iplen] = '\0';
       if (strlen(ip) >= 7 && strcmp(ip, "0.0.0.0") != 0) {
         Serial.printf("[SIM] IP: %s\n", ip);
+        LOG_INFO("SIM", "PDP active, IP=%s", ip);
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.sim_gprs = true;
         xSemaphoreGive(state_mutex);
@@ -232,6 +357,7 @@ static bool _sim_activate_pdp() {
     }
   }
   Serial.println("[SIM] IP invalid");
+  LOG_ERROR("SIM", "PDP activated but IP invalid");
   return false;
 }
 
@@ -283,23 +409,39 @@ void sim_manager_init() {
 }
 
 void sim_manager_task(void* param) {
+  esp_task_wdt_add(NULL);   // subscribe to Task Watchdog
   if (!sys_state.sim_enabled) {
     Serial.println("[SIM] sim_enabled=false, task exit");
+    LOG_WARN("SIM", "SIM disabled — task exiting");
     vTaskDelete(NULL);
     return;
   }
-
-  // Boot delay — give SIM7080G time to power up
-  vTaskDelay(pdMS_TO_TICKS(SIM_BOOT_WAIT_MS));
 
   // Init Serial2 for modem AT communication
   _sim_ser.begin(MODEM_BAUD, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
   vTaskDelay(pdMS_TO_TICKS(500));
 
+  // Try AT first (modem may already be on); if no response, send PWRKEY pulse
+  _sim_flush();
+  _sim_ser.println("AT");
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  bool already_on = (_sim_ser.available() && strstr(_sim_atReply("AT", 2000), "OK") != nullptr);
+  if (!already_on) {
+    LOG_WARN("SIM", "Modem not responding — retrying PWRKEY");
+    Serial.println("[SIM] Modem not responding — sending PWRKEY pulse");
+    _sim_pwrkey_pulse();
+    vTaskDelay(pdMS_TO_TICKS(SIM_BOOT_WAIT_MS));  // wait for boot
+  } else {
+    Serial.println("[SIM] Modem already on");
+    LOG_INFO("SIM", "Modem already on");
+  }
+
   // ── Phase 1: Init modem ──────────────────────────────────────────────────────
   Serial.println("[SIM] Phase 1: Init modem");
   while (!_sim_init_modem()) {
+    LOG_WARN("SIM", "Modem init failed — retry in 10s");
     Serial.println("[SIM] Modem init failed, retry in 10s");
+    esp_task_wdt_reset();   // feed watchdog during retry wait
     vTaskDelay(pdMS_TO_TICKS(10000));
   }
 
@@ -310,6 +452,7 @@ void sim_manager_task(void* param) {
   // ── Phase 3: Wait registration ────────────────────────────────────────────────
   Serial.println("[SIM] Phase 3: Wait network registration");
   if (!_sim_wait_registered(180000UL)) {
+    LOG_WARN("SIM", "Registration timeout — continuing anyway");
     Serial.println("[SIM] Registration timeout — continuing anyway");
   }
 
@@ -317,23 +460,18 @@ void sim_manager_task(void* param) {
   Serial.println("[SIM] Phase 4: Activate PDP");
   while (!_sim_activate_pdp()) {
     Serial.printf("[SIM] PDP failed, retry in %ds\n", SIM_RETRY_MS / 1000);
-    vTaskDelay(pdMS_TO_TICKS(SIM_RETRY_MS));
+    // Split long delay into 5s chunks to keep feeding watchdog
+    for (uint32_t _d = 0; _d < SIM_RETRY_MS; _d += 5000) {
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      esp_task_wdt_reset();
+    }
   }
-
-  // GPS: SIM7080G has no GPS — set fields to empty/false
-  xSemaphoreTake(state_mutex, portMAX_DELAY);
-  sys_state.gps_lat    = 0.0f;
-  sys_state.gps_lon    = 0.0f;
-  sys_state.gps_fix    = false;
-  sys_state.gps_fix_ms = 0;
-  sys_state.gps_alt    = 0.0f;
-  sys_state.gps_speed  = 0.0f;
-  sys_state.gps_ts[0]  = '\0';
-  xSemaphoreGive(state_mutex);
+  LOG_INFO("SIM", "SIM fully initialized — PDP active");
 
   // ── Main loop: monitor + reconnect ────────────────────────────────────────────
   uint32_t last_poll_ms = 0;
   for (;;) {
+    esp_task_wdt_reset();   // feed watchdog every loop iteration
     vTaskDelay(pdMS_TO_TICKS(5000));
 
     uint32_t now = millis();
@@ -342,14 +480,25 @@ void sim_manager_task(void* param) {
 
     if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(3000)) != pdTRUE) continue;
 
+    // ── Check for modem crash (consecutive AT failures) ────────────────────
+    if (_sim_fail_count >= SIM_MAX_AT_FAILURES) {
+      xSemaphoreGive(sim_at_mutex);
+      // Modem appears unresponsive — hard reset via PWRKEY
+      // _sim_reset_modem takes the mutex internally
+      _sim_reset_modem();
+      continue;   // next iteration will poll again with fresh modem
+    }
+
     _sim_poll_status();
     bool pdp_ok = _sim_check_pdp();
     xSemaphoreGive(sim_at_mutex);
 
     if (!pdp_ok) {
       Serial.println("[SIM] PDP lost — reactivating");
+      LOG_WARN("SIM", "PDP lost — reactivating");
       xSemaphoreTake(state_mutex, portMAX_DELAY);
       sys_state.sim_gprs = false;
+      sys_state.server_hb_ms = 0;   // clear stale heartbeat timestamp
       xSemaphoreGive(state_mutex);
 
       xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
@@ -362,7 +511,12 @@ void sim_manager_task(void* param) {
       bool ok = _sim_activate_pdp();
       xSemaphoreGive(sim_at_mutex);
 
-      if (!ok) Serial.println("[SIM] PDP re-activate failed");
+      if (!ok) {
+        Serial.println("[SIM] PDP re-activate failed");
+        LOG_ERROR("SIM", "PDP re-activation failed");
+      } else {
+        LOG_INFO("SIM", "PDP re-activated OK");
+      }
     }
   }
 }

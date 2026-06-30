@@ -72,6 +72,8 @@ async function start() {
       console.log(`  GET  /api/devices/:id/data`)
       console.log(`  GET  /api/devices/:id/data/latest`)
       console.log(`  GET  /api/devices/:id/data/history`)
+      console.log(`  GET  /api/devices/:id/logs`)
+      console.log(`  GET  /api/logs`)
       console.log(`  POST /api/devices/:id/config`)
     })
 

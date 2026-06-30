@@ -2,6 +2,7 @@ const mqtt   = require('mqtt')
 const SensorReading          = require('../models/SensorReading')
 const { SensorNode, Device } = require('../models/Device')
 const NodeConfig             = require('../models/NodeConfig')
+const Log                     = require('../models/Log')
 const { broadcast }          = require('../websocket/ws')
 const { FTYPE }              = require('../utils/constants')
 
@@ -18,6 +19,7 @@ const TOPICS = [
   'ciren/data/+',
   'ciren/status/+',
   'ciren/hello/+',
+  'ciren/log/+',
 ]
 
 let client = null
@@ -245,12 +247,18 @@ async function handleMessage(topic, message) {
   }
   if (topicType === 'status') return handleDeviceStatus(deviceId, payload)
   if (topicType === 'hello')  return handleDeviceHello(deviceId, payload)
+  if (topicType === 'log')    return handleLogs(deviceId, payload)
 }
 
 // ─── Sensor data dari main module ─────────────────
-// Payload: { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype }
+// Payload: { ctrl_id, port_num, sensor_type, value, timestamp, ftype }
+// Legacy payload (pre-NTP): { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype }
+// "timestamp" is epoch seconds (NTP-synced) or monotonic seconds since boot.
+// "timestamp_ms" was monotonic milliseconds (old firmware). Both are accepted.
 async function handleSensorData(deviceId, data) {
-  const { ctrl_id, port_num, sensor_type, value, timestamp_ms, ftype, _shared_ts } = data
+  const { ctrl_id, port_num, sensor_type, value, timestamp, timestamp_ms, ftype, _shared_ts } = data
+  // Prefer epoch seconds ("timestamp"), fall back to legacy milliseconds ("timestamp_ms")
+  const deviceTs = timestamp ?? timestamp_ms
 
   if (ctrl_id == null || ctrl_id === 0) {
     console.warn(`[WARN] Dropped frame with null/zero ctrl_id from ${deviceId}`)
@@ -379,7 +387,7 @@ async function handleSensorData(deviceId, data) {
         device_id: deviceId,
         ctrl_id, port_num, sensor_type,
         value, ftype,
-        device_ts: timestamp_ms,
+        device_ts: deviceTs,
         server_ts: new Date(serverTs),
       })
     }
@@ -401,7 +409,8 @@ async function handleSensorData(deviceId, data) {
 }
 
 // ─── Status/heartbeat dari main module ────────────
-// Payload: { device_id, conn_mode, gps_lat, gps_lon, gps_fix, rssi, batt_pct }
+// Payload: { device_id, conn_mode, gps_lat, gps_lon, gps_fix, rssi, batt_pct, ctrl_status? }
+// ctrl_status (optional): { "1": { online: true, ts: 12345, nodes: [{ p:1, stypes:[1,2] }] }, ... }
 async function handleDeviceStatus(deviceId, data) {
   const update = {
     status:    'online',
@@ -420,6 +429,54 @@ async function handleDeviceStatus(deviceId, data) {
     { upsert: true, setDefaultsOnInsert: true }
   )
   broadcast('device_status', { device_id: deviceId, ...update })
+
+  // ── Parse ctrl_status from status message ──────────────────────────
+  // Main module embeds per-controller/sensor liveness info in the status
+  // message instead of forwarding individual HB_TYPED frames over MQTT.
+  const ctrlStatus = data.ctrl_status
+  if (ctrlStatus && typeof ctrlStatus === 'object') {
+    try {
+      const now = new Date()
+      const bulkOps = []
+      const ctrlBroadcast = []
+
+      for (const [ctrlIdStr, info] of Object.entries(ctrlStatus)) {
+        const ctrl_id = Number(ctrlIdStr)
+        if (isNaN(ctrl_id)) continue
+        const online = !!info.online
+        const status = online ? 'online' : 'offline'
+        const nodes = Array.isArray(info.nodes) ? info.nodes : []
+
+        ctrlBroadcast.push({ ctrl_id, online, nodes })
+
+        for (const node of nodes) {
+          const port_num = node.p
+          if (port_num == null) continue
+          const stypes = Array.isArray(node.stypes) ? node.stypes : []
+          for (const sensor_type of stypes) {
+            bulkOps.push({
+              updateOne: {
+                filter: { device_id: deviceId, ctrl_id, port_num, sensor_type },
+                update: { $set: { status, last_seen: now }, $setOnInsert: { first_seen: now } },
+                upsert: true,
+              },
+            })
+          }
+        }
+      }
+
+      if (bulkOps.length) {
+        await SensorNode.bulkWrite(bulkOps, { ordered: false }).catch(err => {
+          // Ignore duplicate key errors from concurrent upserts
+          if (err.code !== 11000 && !err.message?.includes('E11000')) throw err
+        })
+      }
+
+      broadcast('ctrl_status', { device_id: deviceId, controllers: ctrlBroadcast, ts: Date.now() })
+    } catch (err) {
+      console.error(`[MQTT] ctrl_status parse error for ${deviceId}:`, err.message)
+    }
+  }
 }
 
 // ─── Hello dari main module (pertama konek) ───────
@@ -442,6 +499,57 @@ async function handleDeviceHello(deviceId, data) {
 
   // Re-send all stored node interval configs so firmware always has the latest values
   resendNodeConfigs(deviceId)
+}
+
+// ─── Device logs (remote debugging) ────────────────
+async function handleLogs(deviceId, payload) {
+  console.log(`[MQTT] Log received from ${deviceId}:`, JSON.stringify(payload).slice(0, 200))
+  // Payload can be a single object or an array (batch)
+  const items = Array.isArray(payload) ? payload : [payload]
+  const docs = []
+  const validLevels = ['INFO', 'WARN', 'ERROR']
+
+  for (const item of items) {
+    if (!item.level || !item.msg) {
+      console.warn('[MQTT] Log item missing level or msg:', JSON.stringify(item).slice(0, 120))
+      continue
+    }
+    // Normalize level to uppercase; skip unknown levels
+    const level = String(item.level).toUpperCase()
+    if (!validLevels.includes(level)) {
+      console.warn('[MQTT] Log item unknown level:', item.level)
+      continue
+    }
+    const doc = {
+      device_id: deviceId,
+      level,
+      tag: item.tag || '',
+      msg: item.msg,
+      device_ts: item.ts || null,
+    }
+    docs.push(doc)
+
+    // Broadcast each log item to frontend via WebSocket
+    broadcast('device_log', {
+      device_id: deviceId,
+      level,
+      tag: doc.tag,
+      msg: doc.msg,
+      device_ts: doc.device_ts,
+      server_ts: new Date().toISOString(),
+    })
+  }
+
+  if (docs.length > 0) {
+    try {
+      await Log.insertMany(docs, { ordered: false })
+    } catch (err) {
+      // Duplicate key or validation errors are non-fatal for logs
+      if (err.code !== 11000) {
+        console.error('[MQTT] Log insertMany error:', err.message)
+      }
+    }
+  }
 }
 
 // ─── Kirim config command ke main module ──────────
