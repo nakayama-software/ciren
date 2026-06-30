@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <esp_task_wdt.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include "ciren_config.h"
@@ -368,7 +369,7 @@ static void tft_dot(int cx, int cy, uint16_t clr)
 
 // ─── Header & footer ─────────────────────────────────────────────────────────
 static const char *_page_titles[] = {
-  "Gateway", "WiFi", "SIM", "GPS", "Settings", "SIM Control"
+  "Gateway", "WiFi", "SIM", "Settings", "SIM Control"
 };
 
 static void tft_draw_header()
@@ -618,87 +619,6 @@ static void _draw_sim()
     y += 30;
     tft_hbar(PAD, y, 240, 12, pct, sc);
     y += 22;
-  }
-}
-
-// ─── Page: GPS ───────────────────────────────────────────────────────────────
-static bool _has_recent_gps()
-{
-  return sys_state.gps_fix && (millis() - sys_state.gps_fix_ms <= GPS_STALE_MS);
-}
-
-static void _draw_gps()
-{
-  int y = CONT_Y;
-
-  tft_section(PAD, y, "GPS STATUS");
-  y += 22;
-
-  if (!sys_state.sim_enabled) {
-    tft_badge(PAD, y, "SIM DISABLED", C_DARKRED, C_WHITE, 2);
-    y += 36;
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Need SIM module ");
-    return;
-  }
-
-  bool fix = _has_recent_gps();
-  tft_badge(PAD, y, fix ? "FIX OK" : "NO FIX",
-            fix ? 0x0320 : C_DARKRED, C_WHITE, 2);
-  y += 36;
-
-  if (fix) {
-    // Latitude
-    tft_section(PAD, y, "LATITUDE");
-    y += 22;
-    char latbuf[12]; snprintf(latbuf, sizeof(latbuf), "%.5f", sys_state.gps_lat);
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print(latbuf);
-    tft.setTextColor(C_BG, C_BG); tft.print("         ");  // clear
-    y += 24;
-
-    // Longitude
-    tft_section(PAD, y, "LONGITUDE");
-    y += 22;
-    char lonbuf[12]; snprintf(lonbuf, sizeof(lonbuf), "%.5f", sys_state.gps_lon);
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print(lonbuf);
-    tft.setTextColor(C_BG, C_BG); tft.print("         ");  // clear
-    y += 24;
-
-    // Alt + fix age
-    uint32_t age_s = (millis() - sys_state.gps_fix_ms) / 1000UL;
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Alt:");
-    tft.setTextColor(C_ACCENT, C_BG);
-    char altbuf[10]; snprintf(altbuf, sizeof(altbuf), "%.0fm", sys_state.gps_alt);
-    tft.print(altbuf);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.print("  Age:");
-    tft.setTextColor(age_s < 120 ? C_GREEN : C_YELLOW, C_BG);
-    char agebuf[8]; snprintf(agebuf, sizeof(agebuf), "%lus", age_s);
-    tft.print(agebuf);
-
-  } else {
-    tft.setTextSize(2);
-    tft.setTextColor(C_YELLOW, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Searching...    ");
-    y += 24;
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Go outdoors     ");
-    y += 24;
-    tft.setCursor(PAD, y);
-    tft.print("Clear sky needed");
   }
 }
 
@@ -1052,7 +972,6 @@ static void tft_draw()
     case PAGE_GATEWAY:  _draw_gateway();  break;
     case PAGE_WIFI:     _draw_wifi();     break;
     case PAGE_SIM:      _draw_sim();      break;
-    case PAGE_GPS:      _draw_gps();      break;
     case PAGE_SETTINGS: _draw_settings(); break;
     case PAGE_SIM_CTRL: _draw_sim_ctrl(); break;
   }
@@ -1137,6 +1056,7 @@ void btn_oled_init()
 // ─── Task ────────────────────────────────────────────────────────────────────
 void task_oled(void *param)
 {
+  esp_task_wdt_add(NULL);   // subscribe to Task Watchdog
   Preferences *prefs       = (Preferences *)param;
   uint32_t    last_draw_ms = 0;
 
@@ -1216,5 +1136,6 @@ void task_oled(void *param)
       last_draw_ms = millis();
       tft_draw();
     }
+    esp_task_wdt_reset();   // feed watchdog — loop every 20ms
   }
 }

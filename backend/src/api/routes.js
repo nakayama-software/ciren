@@ -3,6 +3,7 @@ const router     = express.Router()
 const SensorReading          = require('../models/SensorReading')
 const { SensorNode, Device } = require('../models/Device')
 const NodeConfig             = require('../models/NodeConfig')
+const Log                     = require('../models/Log')
 const { sendConfig, sendNodeConfig } = require('../mqtt/handler')
 const { STYPE_LABEL }        = require('../utils/constants')
 
@@ -353,6 +354,86 @@ router.get('/devices/:deviceId/node-config/verify', async (req, res) => {
     }
 
     res.json(results)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ══════════════════════════════════════════════════
+//  DEVICE LOGS
+// ══════════════════════════════════════════════════
+
+// GET /api/devices/:deviceId/logs
+// Log history for one device
+// Query: ?level=WARN,ERROR&tag=SIM&limit=200&from=ISO&to=ISO
+router.get('/devices/:deviceId/logs', async (req, res) => {
+  try {
+    const { level, tag, limit = 200, from, to } = req.query
+    const filter = { device_id: req.params.deviceId }
+    if (level) {
+      const levels = level.split(',').map(s => s.trim().toUpperCase())
+      filter.level = levels.length === 1 ? levels[0] : { $in: levels }
+    }
+    if (tag) filter.tag = tag
+    if (from || to) {
+      filter.server_ts = {}
+      if (from) filter.server_ts.$gte = new Date(from)
+      if (to)   filter.server_ts.$lte = new Date(to)
+    }
+    const logs = await Log
+      .find(filter)
+      .sort({ server_ts: -1 })
+      .limit(Math.min(Number(limit), 1000))
+      .lean()
+    res.json(logs)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// GET /api/logs
+// Global recent logs across all devices (for "All devices" view)
+// Query: ?device_ids=MM-001,MM-002&level=WARN,ERROR&tag=SIM&limit=200&from=ISO&to=ISO
+router.get('/logs', async (req, res) => {
+  try {
+    const { device_ids, level, tag, limit = 200, from, to } = req.query
+    const filter = {}
+    if (device_ids) {
+      filter.device_id = { $in: device_ids.split(',').map(s => s.trim()) }
+    }
+    if (level) {
+      const levels = level.split(',').map(s => s.trim().toUpperCase())
+      filter.level = levels.length === 1 ? levels[0] : { $in: levels }
+    }
+    if (tag) filter.tag = tag
+    if (from || to) {
+      filter.server_ts = {}
+      if (from) filter.server_ts.$gte = new Date(from)
+      if (to)   filter.server_ts.$lte = new Date(to)
+    }
+    const logs = await Log
+      .find(filter)
+      .sort({ server_ts: -1 })
+      .limit(Math.min(Number(limit), 1000))
+      .lean()
+    res.json(logs)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// DELETE /api/devices/:deviceId/logs
+// Clear logs for a device (optional level/tag/from/to filters)
+router.delete('/devices/:deviceId/logs', async (req, res) => {
+  try {
+    const { level, tag, from, to } = { ...req.query, ...req.body }
+    const filter = { device_id: req.params.deviceId }
+    if (level) {
+      const levels = level.split(',').map(s => s.trim().toUpperCase())
+      filter.level = levels.length === 1 ? levels[0] : { $in: levels }
+    }
+    if (tag) filter.tag = tag
+    if (from || to) {
+      filter.server_ts = {}
+      if (from) filter.server_ts.$gte = new Date(from)
+      if (to)   filter.server_ts.$lte = new Date(to)
+    }
+    const result = await Log.deleteMany(filter)
+    res.json({ ok: true, deleted: result.deletedCount })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 

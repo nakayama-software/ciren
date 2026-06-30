@@ -28,16 +28,22 @@ function loadRootConfig() {
 
 const cfg = loadRootConfig()
 
+// Build defineEnv: VITE_API_BASE always set; VITE_WS_URL only when explicitly configured
+// When VITE_WS_URL is not set, the frontend auto-derives the WS URL from VITE_API_BASE
+const apiBase = cfg.FRONTEND_API_BASE || 'http://localhost:3000'
+const defineEnv = {
+  'import.meta.env.VITE_API_BASE': JSON.stringify(apiBase),
+}
+if (cfg.FRONTEND_WS_URL) {
+  defineEnv['import.meta.env.VITE_WS_URL'] = JSON.stringify(cfg.FRONTEND_WS_URL)
+}
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
   ],
-  // Inject .config values as import.meta.env.VITE_* so existing frontend code needs no changes
-  define: {
-    'import.meta.env.VITE_API_BASE': JSON.stringify(cfg.FRONTEND_API_BASE || 'http://localhost:3000'),
-    'import.meta.env.VITE_WS_URL':   JSON.stringify(cfg.FRONTEND_WS_URL   || 'ws://localhost:3000'),
-  },
+  define: defineEnv,
   server: {
     host:  cfg.FRONTEND_DEV_HOST || 'localhost',
     port:  Number(cfg.FRONTEND_DEV_PORT) || 5173,

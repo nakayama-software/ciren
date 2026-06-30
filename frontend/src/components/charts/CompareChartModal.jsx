@@ -54,6 +54,11 @@ function sharedBounds(allValues) {
 function makeChartOpts(bounds, tickFmt, isDark, hours) {
   const tickColor = isDark ? 'rgba(148,163,184,0.8)' : 'rgba(71,85,105,0.8)'
   const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+
+  // Show the full selected time range on x-axis, not just the data range.
+  const xMax = Date.now()
+  const xMin = xMax - hours * 3600 * 1000
+
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -77,6 +82,8 @@ function makeChartOpts(bounds, tickFmt, isDark, hours) {
     scales: {
       x: {
         type: 'linear',
+        min: xMin,
+        max: xMax,
         ticks: { callback: v => fmtTick(Number(v), hours >= 24), maxTicksLimit: 8, color: tickColor },
         grid: { color: gridColor },
       },

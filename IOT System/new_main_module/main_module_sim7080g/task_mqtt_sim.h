@@ -13,6 +13,8 @@
 #include "ciren_config.h"
 #include "system_state.h"
 #include "task_publish.h"   // for publish_queue + PublishItem
+#include "task_logger.h"
+#include <esp_task_wdt.h>
 
 static bool     _smq_connected  = false;
 static uint32_t _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;
@@ -34,6 +36,7 @@ static void _smq_process_urcs(const char* buf) {
     xSemaphoreGive(state_mutex);
     state_set_connected(true);
     Serial.println("[SIM MQTT] Server heartbeat");
+    LOG_INFO("SIM_MQTT", "Server heartbeat received");
   }
 
   // Config: look for +SMSUB: with the config topic
@@ -85,6 +88,7 @@ static void _smq_process_urcs(const char* buf) {
 
       if (strstr(payload_buf, "reboot")) {
           Serial.println("[SIM MQTT] Remote reboot command — restarting in 500ms");
+          LOG_WARN("SIM_MQTT", "Remote reboot command received");
           delay(500);
           esp_restart();
       } else if (strstr(payload_buf, "set_node_interval")) {
@@ -97,9 +101,11 @@ static void _smq_process_urcs(const char* buf) {
         if (ctrl_id > 0 && port_num > 0 && interval_ms > 0) {
           Serial.printf("[SIM MQTT] set_node_interval: ctrl=%d port=%d interval=%lu ms\n",
                         ctrl_id, port_num, interval_ms);
+          LOG_INFO("SIM_MQTT", "set_node_interval: ctrl=%d port=%d interval=%lu ms", ctrl_id, port_num, interval_ms);
           nc_set((uint8_t)ctrl_id, (uint8_t)port_num, interval_ms);
         } else {
           Serial.printf("[SIM MQTT] Bad set_node_interval payload: %s\n", payload_buf);
+          LOG_WARN("SIM_MQTT", "Bad set_node_interval payload: %s", payload_buf);
         }
       }
     }
@@ -111,7 +117,12 @@ static void _smq_process_urcs(const char* buf) {
   if (strstr(buf, "+SMSTATE: 0")) {
     _smq_connected = false;
     state_set_connected(false);
+    // Clear stale heartbeat timestamp so it doesn't trigger false timeout after reconnect
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    sys_state.server_hb_ms = 0;
+    xSemaphoreGive(state_mutex);
     Serial.println("[SIM MQTT] Remote disconnect detected");
+    LOG_WARN("SIM_MQTT", "Remote disconnect detected");
   }
 }
 
@@ -161,8 +172,10 @@ static bool _smq_connect() {
   // Connect (can take up to 60s on first attempt)
   Serial.printf("[SIM MQTT] Connecting to %s:%d ...\n",
                 sys_state.mqtt_host, MQTT_PORT);
+  LOG_INFO("SIM_MQTT", "Connecting to %s:%d ...", sys_state.mqtt_host, MQTT_PORT);
   if (!_sim_sendAT("AT+SMCONN", "OK", 60000)) {
     Serial.println("[SIM MQTT] SMCONN failed");
+    LOG_ERROR("SIM_MQTT", "SMCONN failed — broker unreachable");
     return false;
   }
 
@@ -171,12 +184,15 @@ static bool _smq_connect() {
   snprintf(buf, sizeof(buf), "AT+SMSUB=\"%s\",0", TOPIC_SERVER_HB);
   bool hb_ok = _sim_sendAT(buf);
   Serial.printf("[SIM MQTT] Subscribe HB: %s\n", hb_ok ? "OK" : "FAIL");
+  if (!hb_ok) LOG_WARN("SIM_MQTT", "Subscribe HB topic failed");
 
   snprintf(buf, sizeof(buf), "AT+SMSUB=\"%s\",1", sys_state.topic_config);
   bool cfg_ok = _sim_sendAT(buf);
   Serial.printf("[SIM MQTT] Subscribe config: %s\n", cfg_ok ? "OK" : "FAIL");
+  if (!cfg_ok) LOG_WARN("SIM_MQTT", "Subscribe config topic failed");
 
   Serial.println("[SIM MQTT] Connected, subscribed");
+  LOG_INFO("SIM_MQTT", "Connected to broker, subscribed");
   return true;
 }
 
@@ -209,7 +225,7 @@ static bool _smq_pub(const char* topic, const char* payload, int len, uint8_t qo
     if (strstr(r, "ERROR")) return false;
     delay(10);
   }
-  if (!got_prompt) { Serial.println("[SIM MQTT] No > prompt"); return false; }
+  if (!got_prompt) { Serial.println("[SIM MQTT] No > prompt"); LOG_ERROR("SIM_MQTT", "No prompt for publish — timeout"); return false; }
 
   // Send exactly len bytes (no extra newline — modem counts bytes)
   _sim_ser.write((const uint8_t*)payload, len);
@@ -231,7 +247,10 @@ static bool _smq_pub(const char* topic, const char* payload, int len, uint8_t qo
 
 // ── Public: publish from external task (takes mutex) ─────────────────────────
 bool sim_mqtt_publish(const char* topic, const char* payload, uint8_t qos) {
-  if (!_smq_connected) return false;
+  if (!_smq_connected) {
+    LOG_WARN("SIM_MQTT", "Publish skipped — not connected");
+    return false;
+  }
   if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) return false;
   bool ok = _smq_pub(topic, payload, (int)strlen(payload), qos);
   xSemaphoreGive(sim_at_mutex);
@@ -242,6 +261,8 @@ void mqtt_sim_init() { /* no state to init */ }
 
 // ── Main task ─────────────────────────────────────────────────────────────────
 void mqtt_sim_task(void* param) {
+  esp_task_wdt_add(NULL);   // subscribe to Task Watchdog
+  static bool _was_gprs_down = false;   // track GPRS transitions for backoff reset
   for (;;) {
     // Only active when SIM mode + GPRS ready
     if (!sys_state.sim_enabled || !sys_state.sim_gprs) {
@@ -250,8 +271,16 @@ void mqtt_sim_task(void* param) {
         _smq_disconnect();
         xSemaphoreGive(sim_at_mutex);
       }
+      _was_gprs_down = true;    // mark that GPRS was down
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
+    }
+
+    // GPRS just came back up — reset backoff so MQTT reconnects immediately
+    if (_was_gprs_down) {
+      _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;
+      _was_gprs_down = false;
+      LOG_INFO("SIM_MQTT", "GPRS recovered — backoff reset");
     }
 
     char mode[8];
@@ -264,6 +293,7 @@ void mqtt_sim_task(void* param) {
         xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
         _smq_disconnect();
         xSemaphoreGive(sim_at_mutex);
+        LOG_INFO("SIM_MQTT", "Disconnected — switched to WiFi mode");
       }
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
@@ -273,8 +303,10 @@ void mqtt_sim_task(void* param) {
     if (!_smq_connected) {
       state_set_connected(false);
       Serial.printf("[SIM MQTT] Reconnecting (backoff=%lu ms)...\n", _smq_backoff_ms);
+      LOG_INFO("SIM_MQTT", "Reconnecting (backoff=%lu ms)...", _smq_backoff_ms);
       // Mutex held for the full connect sequence (can take ~60s)
       if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(65000)) == pdTRUE) {
+        esp_task_wdt_reset();   // feed watchdog before long connect sequence
         if (_smq_connect()) {
           _smq_connected  = true;
           _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;  // reset backoff on success
@@ -287,8 +319,10 @@ void mqtt_sim_task(void* param) {
             uint16_t flushed = 0;
             while (xQueueReceive(publish_queue, &_flush, 0) == pdTRUE) flushed++;
             Serial.printf("[SIM MQTT] Flushed %u stale items (queue was %u/64)\n", flushed, queued);
+            LOG_WARN("SIM_MQTT", "Flushed %u stale items (queue was %u/64)", flushed, queued);
           } else {
             Serial.printf("[SIM MQTT] Reconnected — keeping %u queued item(s)\n", queued);
+            LOG_INFO("SIM_MQTT", "Reconnected, %u items queued", queued);
           }
         }
         xSemaphoreGive(sim_at_mutex);
@@ -298,7 +332,12 @@ void mqtt_sim_task(void* param) {
         uint32_t d = _smq_backoff_ms;
         _smq_backoff_ms = _smq_backoff_ms * 2;
         if (_smq_backoff_ms > MQTT_BACKOFF_MAX_MS) _smq_backoff_ms = MQTT_BACKOFF_MAX_MS;
-        vTaskDelay(pdMS_TO_TICKS(d));
+        // Split long delay into 5s chunks to keep feeding watchdog
+        for (uint32_t _bd = 0; _bd < d; _bd += 5000) {
+          uint32_t _chunk = (d - _bd > 5000) ? 5000 : (d - _bd);
+          vTaskDelay(pdMS_TO_TICKS(_chunk));
+          esp_task_wdt_reset();
+        }
         continue;
       }
     }
@@ -310,6 +349,10 @@ void mqtt_sim_task(void* param) {
       xSemaphoreGive(state_mutex);
       if (hb_ms > 0 && (millis() - hb_ms) > SERVER_HB_TIMEOUT_MS) {
         state_set_connected(false);
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        sys_state.server_hb_ms = 0;   // clear stale timestamp
+        xSemaphoreGive(state_mutex);
+        LOG_WARN("SIM_MQTT", "Server heartbeat timeout — disconnecting");
       }
     }
 
@@ -332,6 +375,7 @@ void mqtt_sim_task(void* param) {
           _smq_connected = false;
           state_set_connected(false);
           Serial.println("[SIM MQTT] Publish failed — will reconnect");
+          LOG_ERROR("SIM_MQTT", "Publish failed — will reconnect");
           break;
         }
         xSemaphoreTake(state_mutex, portMAX_DELAY);
@@ -342,5 +386,6 @@ void mqtt_sim_task(void* param) {
     }
 
     vTaskDelay(pdMS_TO_TICKS(100));
+    esp_task_wdt_reset();   // feed watchdog — loop every ~100ms when connected
   }
 }

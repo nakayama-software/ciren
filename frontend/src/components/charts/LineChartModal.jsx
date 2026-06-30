@@ -294,6 +294,11 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
     const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
     const legendColor = isDark ? '#cbd5e1' : '#475569'
 
+    // Show the full selected time range on x-axis, not just the data range.
+    // Without this, selecting 7d with only 24h of data would show a 24h x-axis.
+    const xMax = Date.now()
+    const xMin = xMax - hours * 3600 * 1000
+
     const base = {
       responsive: true,
       maintainAspectRatio: false,
@@ -324,6 +329,8 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
       scales: {
         x: {
           type: 'linear',
+          min: xMin,
+          max: xMax,
           ticks: { callback: (v) => fmtTick(Number(v), hours >= 24), maxTicksLimit: 8, color: tickColor },
           grid: { color: gridColor },
         },

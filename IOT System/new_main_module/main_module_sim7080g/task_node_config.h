@@ -1,9 +1,11 @@
 #pragma once
 #include <Preferences.h>
 #include <esp_now.h>
+#include <esp_task_wdt.h>
 #include "ciren_config.h"
 #include "system_state.h"
 #include "ring_buffer.h"   // for SensorPacket
+#include "task_logger.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Node interval config — stores per-(ctrl_id, port_num) forward interval.
@@ -64,6 +66,7 @@ static void _nc_nvs_load() {
   }
   _nc_prefs.end();
   Serial.printf("[NC] Loaded %d node config(s) from NVS\n", _nc_count);
+  LOG_INFO("NC", "Loaded %d node config(s) from NVS", _nc_count);
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -94,6 +97,7 @@ void nc_set(uint8_t ctrl_id, uint8_t port_num, uint32_t interval_ms) {
     _nc_entries[_nc_count++] = { ctrl_id, port_num, interval_ms };
   } else {
     Serial.println("[NC] config table full");
+    LOG_WARN("NC", "Config table full — cannot add ctrl=%d port=%d", ctrl_id, port_num);
     xSemaphoreGive(_nc_mutex);
     return;
   }
@@ -113,6 +117,7 @@ void nc_on_ack(uint8_t ctrl_id, uint8_t port_num) {
         _pending_acks[i].port_num == port_num) {
       _pending_acks[i].active = false;
       Serial.printf("[NC] ACK ctrl=%d port=%d\n", ctrl_id, port_num);
+      LOG_INFO("NC", "ACK ctrl=%d port=%d", ctrl_id, port_num);
       return;
     }
   }
@@ -129,7 +134,10 @@ void nc_resync_ctrl(uint8_t ctrl_id) {
     }
   }
   xSemaphoreGive(_nc_mutex);
-  if (found) Serial.printf("[NC] Resync %d config(s) → ctrl=%d\n", found, ctrl_id);
+  if (found) {
+    Serial.printf("[NC] Resync %d config(s) → ctrl=%d\n", found, ctrl_id);
+    LOG_INFO("NC", "Resync %d config(s) to ctrl=%d", found, ctrl_id);
+  }
 }
 
 // ── Send ConfigPacket via ESP-NOW + register pending ACK ─────────────────────
@@ -145,6 +153,7 @@ void nc_send_espnow(uint8_t ctrl_id, uint8_t port_num, uint32_t interval_ms) {
   }
   if (slot < 0) {
     // Table full — overwrite oldest
+    LOG_WARN("NC", "ACK table full, overwriting oldest");
     slot = 0;
     for (int i = 1; i < MAX_PENDING_ACKS; i++) {
       if (_pending_acks[i].sent_at_ms < _pending_acks[slot].sent_at_ms) slot = i;
@@ -169,10 +178,12 @@ void nc_send_espnow(uint8_t ctrl_id, uint8_t port_num, uint32_t interval_ms) {
   esp_now_send(nullptr, (uint8_t*)&pkt, sizeof(pkt));
   Serial.printf("[NC] → ConfigPacket ctrl=%d port=%d interval=%lu ms\n",
                 ctrl_id, port_num, interval_ms);
+  LOG_INFO("NC", "Config sent: ctrl=%d port=%d interval=%lu", ctrl_id, port_num, interval_ms);
 }
 
 // ── Task: retry loop ──────────────────────────────────────────────────────────
 void task_node_config(void* param) {
+  esp_task_wdt_add(NULL);   // subscribe to Task Watchdog
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(200));
 
@@ -185,6 +196,7 @@ void task_node_config(void* param) {
       if (p.retries >= NODE_CONFIG_RETRIES) {
         Serial.printf("[NC] No ACK after %d retries ctrl=%d port=%d — giving up\n",
                       NODE_CONFIG_RETRIES, p.ctrl_id, p.port_num);
+        LOG_WARN("NC", "No ACK after %d retries ctrl=%d port=%d", NODE_CONFIG_RETRIES, p.ctrl_id, p.port_num);
         p.active = false;
         continue;
       }
@@ -201,5 +213,6 @@ void task_node_config(void* param) {
       esp_now_send(nullptr, (uint8_t*)&pkt, sizeof(pkt));
       Serial.printf("[NC] Retry %d ctrl=%d port=%d\n", p.retries, p.ctrl_id, p.port_num);
     }
+    esp_task_wdt_reset();   // feed watchdog — loop every 200ms
   }
 }

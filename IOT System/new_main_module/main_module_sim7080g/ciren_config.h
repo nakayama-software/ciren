@@ -30,6 +30,8 @@
 
 #define WIFI_TIMEOUT_MS    15000
 #define WIFI_COOLDOWN_MS   20000
+#define WIFI_RETRY_MIN_MS    1000    // initial retry delay after WiFi failure
+#define WIFI_RETRY_MAX_MS    30000   // max retry delay (cap at 30s)
 #define RECONNECT_DELAY_1  1000
 #define RECONNECT_DELAY_2  2000
 #define RECONNECT_DELAY_3  4000
@@ -47,33 +49,36 @@
 
 #define TFT_REFRESH_MS     200    // display refresh interval
 #define OLED_REFRESH_MS    TFT_REFRESH_MS   // compat alias
-#define OLED_TOTAL_PAGES   6
+#define OLED_TOTAL_PAGES   5
 
 #define PAGE_GATEWAY       0
 #define PAGE_WIFI          1
 #define PAGE_SIM           2
-#define PAGE_GPS           3
-#define PAGE_SETTINGS      4
-#define PAGE_SIM_CTRL      5
+#define PAGE_SETTINGS      3
+#define PAGE_SIM_CTRL      4
 
 #define PORTAL_PASS        "setup1234"
 #define PORTAL_PORT        80
 
-#define GPS_POLL_MS        60000
-#define GPS_STALE_MS       120000
 #define SIM_BOOT_WAIT_MS   8000
 #define SIM_RETRY_MS       60000
 #define SIM_SIGNAL_INT_MS  15000
+
+// ── Remote Logger ──────────────────────────────────────────────────────────────
+#define LOG_QUEUE_SIZE     32
+#define LOG_BATCH_MS       5000
+#define LOG_MAX_BATCH      16
+#define LOG_MAX_MSG        128
 
 #define PRIO_RX            5
 #define PRIO_CONN          4
 #define PRIO_AGG           3
 #define PRIO_PUBLISH       3
-#define PRIO_GPS           3
 #define PRIO_WATCHDOG      2
 #define PRIO_OLED          2
 #define PRIO_CONFIG        2
 #define PRIO_STATUS        2
+#define PRIO_LOGGER        2
 
 // ── Stack sizes ───────────────────────────────────────────────────────────────
 
@@ -81,13 +86,13 @@
 #define STACK_CONN         8192   // was 5120 — WiFi.begin() probe in SIM mode needs more stack
 #define STACK_AGG          6144
 #define STACK_PUBLISH      6144
-#define STACK_GPS          3072
 #define STACK_WATCHDOG     4096   // was 2048 — HWM monitor butuh ruang printf
 #define STACK_OLED         8192   // was 4096 — portal HTML builder
 #define STACK_CONFIG       3072
 #define STACK_STATUS       4096   // stat HWM was 652/3072 (21%) — naikkan headroom
 #define STACK_SIM_MGR      4096
 #define STACK_MQTT_SIM     4096
+#define STACK_LOGGER       6144
 
 #define STYPE_TEMPERATURE  0x01
 #define STYPE_HUMIDITY     0x02
@@ -115,13 +120,19 @@
 // TOPIC_SERVER_HB satu-satunya yang tetap static (bukan per-device)
 #define TOPIC_SERVER_HB    "ciren/server/heartbeat"
 
-#define SERVER_HB_TIMEOUT_MS  60000   // consider server offline after 60s no heartbeat
+#define SERVER_HB_TIMEOUT_MS  120000   // consider server offline after 120s no heartbeat (tolerate SIM latency)
 
-#define WD_CHECK_MS        30000
+#define WD_CHECK_MS        5000    // must be < TWDT timeout (15s) to feed in time
 #define RB_WARN_THRESHOLD  0.8f
 
-#define CTRL_TIMEOUT_MS    15000   // consider controller offline after 15s no packet
+#define CTRL_TIMEOUT_MS    30000   // consider controller offline after 30s no packet (matches HB_INTERVAL_MS)
 #define MAX_CTRL_IDS       16      // max distinct ctrl_id values tracked
+#define MAX_PORTS_PER_CTRL 8       // max ports tracked per controller
+#define MAX_STYPES_PER_PORT 9     // max sensor types per port (IMU = 9 axes)
+
+// ── Status message intervals ──────────────────────────────────────────────────
+#define STATUS_INTERVAL_WIFI_MS  10000   // status publish every 10s on WiFi
+#define STATUS_INTERVAL_SIM_MS   30000   // status publish every 30s on SIM (save bandwidth)
 
 // ── Node interval config ──────────────────────────────────────────────────────
 #define FTYPE_CONFIG        0x10  // main module → sensor controller
@@ -134,6 +145,10 @@
 // Both main module and sensor controllers must agree on this channel.
 // WiFi ch 1 is the default fallback — avoids roaming scan when unassociated.
 #define ESPNOW_FIXED_CHANNEL  1
+
+// ── NTP ───────────────────────────────────────────────────────────────────────
+#define NTP_SYNC_INTERVAL_MS  3600000   // re-sync setiap 1 jam
+#define NTP_TIMEOUT_MS        10000     // timeout untuk NTP request (WiFi)
 
 // ── SIM7080G (M5STAMP CatM) ───────────────────────────────────────────────────
 // CAT-M bands for Japan (NTT Docomo / SORACOM / IIJmio / etc.)
