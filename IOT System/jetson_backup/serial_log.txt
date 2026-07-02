@@ -1,0 +1,124 @@
+2026-07-01T23:38:06 [WD] rb=0% err=43 connected=yes uptime=203s
+2026-07-01T23:38:06 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:10 [SIM] Signal=31  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:38:11 [WD] rb=0% err=45 connected=yes uptime=208s
+2026-07-01T23:38:11 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:11 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:38:11 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:38:11 [SIM MQTT] Server heartbeat
+2026-07-01T23:38:16 [WD] rb=0% err=48 connected=yes uptime=213s
+2026-07-01T23:38:16 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:21 [WD] rb=0% err=50 connected=yes uptime=218s
+2026-07-01T23:38:21 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:21 [RX] ctrl=2 port=1 stype=0x01 val=25.8516 ftype=0x05
+2026-07-01T23:38:22 [RX] ctrl=2 port=1 stype=0x02 val=68.2380 ftype=0x05
+2026-07-01T23:38:25 [SIM] Signal=31  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:38:26 [WD] rb=0% err=53 connected=yes uptime=223s
+2026-07-01T23:38:26 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:31 [WD] rb=0% err=2 connected=yes uptime=228s
+2026-07-01T23:38:31 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:36 [WD] rb=0% err=5 connected=yes uptime=233s
+2026-07-01T23:38:36 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:40 [SIM] Signal=29  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:38:40 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:38:40 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:38:40 [SIM MQTT] Server heartbeat
+2026-07-01T23:38:41 [WD] rb=0% err=7 connected=yes uptime=238s
+2026-07-01T23:38:41 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:46 [WD] rb=0% err=10 connected=yes uptime=243s
+2026-07-01T23:38:46 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:51 [WD] rb=0% err=12 connected=yes uptime=248s
+2026-07-01T23:38:51 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:38:51 [RX] ctrl=2 port=1 stype=0x01 val=25.8913 ftype=0x05
+2026-07-01T23:38:52 [RX] ctrl=2 port=1 stype=0x02 val=68.2666 ftype=0x05
+2026-07-01T23:39:41 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:39:41 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:39:41 [SIM MQTT] Server heartbeat
+2026-07-01T23:39:41 [SIM] Signal=31  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:39:41 [WD] rb=0% err=37 connected=yes uptime=298s
+2026-07-01T23:39:41 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:39:46 [WD] rb=0% err=40 connected=yes uptime=303s
+2026-07-01T23:39:46 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:39:51 [WD] rb=0% err=42 connected=yes uptime=308s
+2026-07-01T23:39:51 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:39:51 [RX] ctrl=2 port=1 stype=0x01 val=25.9567 ftype=0x05
+2026-07-01T23:39:52 [RX] ctrl=2 port=1 stype=0x02 val=68.0973 ftype=0x05
+2026-07-01T23:39:56 [WD] rb=0% err=45 connected=yes uptime=313s
+2026-07-01T23:39:56 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:39:56 [SIM] Signal=30  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:40:01 [WD] rb=0% err=47 connected=yes uptime=318s
+2026-07-01T23:40:01 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:06 [WD] rb=0% err=50 connected=yes uptime=323s
+2026-07-01T23:40:06 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:10 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:40:10 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:40:10 [SIM MQTT] Server heartbeat
+2026-07-01T23:40:11 [WD] rb=0% err=52 connected=yes uptime=328s
+2026-07-01T23:40:11 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:11 [SIM] Signal=30  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:40:16 [WD] rb=0% err=3 connected=yes uptime=333s
+2026-07-01T23:40:16 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:21 [WD] rb=0% err=5 connected=yes uptime=338s
+2026-07-01T23:40:21 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:21 [RX] ctrl=2 port=1 stype=0x01 val=26.0027 ftype=0x05
+2026-07-01T23:40:22 [RX] ctrl=2 port=1 stype=0x02 val=67.8743 ftype=0x05
+2026-07-01T23:40:26 [WD] rb=0% err=8 connected=yes uptime=343s
+2026-07-01T23:40:26 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:28 [SIM] Signal=29  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:40:31 [WD] rb=0% err=10 connected=yes uptime=348s
+2026-07-01T23:40:31 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:36 [WD] rb=0% err=13 connected=yes uptime=353s
+2026-07-01T23:40:36 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:41 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:40:41 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:40:41 [SIM MQTT] Server heartbeat
+2026-07-01T23:40:41 [WD] rb=0% err=15 connected=yes uptime=358s
+2026-07-01T23:40:41 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:43 [SIM] Signal=30  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:40:46 [WD] rb=0% err=18 connected=yes uptime=363s
+2026-07-01T23:40:46 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:51 [WD] rb=0% err=20 connected=yes uptime=368s
+2026-07-01T23:40:51 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:51 [RX] ctrl=2 port=1 stype=0x01 val=26.0246 ftype=0x05
+2026-07-01T23:40:52 [RX] ctrl=2 port=1 stype=0x02 val=67.7595 ftype=0x05
+2026-07-01T23:40:56 [WD] rb=0% err=23 connected=yes uptime=373s
+2026-07-01T23:40:56 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:40:58 [SIM] Signal=29  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:41:01 [WD] rb=0% err=25 connected=yes uptime=378s
+2026-07-01T23:41:01 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:06 [WD] rb=0% err=28 connected=yes uptime=383s
+2026-07-01T23:41:06 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:11 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:41:11 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:41:11 [SIM MQTT] Server heartbeat
+2026-07-01T23:41:11 [WD] rb=0% err=30 connected=yes uptime=388s
+2026-07-01T23:41:11 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:13 [SIM] Signal=30  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:41:16 [WD] rb=0% err=33 connected=yes uptime=393s
+2026-07-01T23:41:16 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:21 [WD] rb=0% err=35 connected=yes uptime=398s
+2026-07-01T23:41:21 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:21 [RX] ctrl=2 port=1 stype=0x01 val=26.0580 ftype=0x05
+2026-07-01T23:41:22 [RX] ctrl=2 port=1 stype=0x02 val=67.9137 ftype=0x05
+2026-07-01T23:41:26 [WD] rb=0% err=38 connected=yes uptime=403s
+2026-07-01T23:41:26 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:28 [SIM] Signal=30  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:41:31 [WD] rb=0% err=40 connected=yes uptime=408s
+2026-07-01T23:41:31 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:36 [WD] rb=0% err=43 connected=yes uptime=413s
+2026-07-01T23:41:36 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:41 [SIM MQTT] URC received (40 bytes):
+2026-07-01T23:41:41 +SMSUB: "ciren/server/heartbeat","1"
+2026-07-01T23:41:41 [SIM MQTT] Server heartbeat
+2026-07-01T23:41:41 [WD] rb=0% err=45 connected=yes uptime=418s
+2026-07-01T23:41:41 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:43 [SIM] Signal=31  Op=NTT DOCOMO  GPRS=Y
+2026-07-01T23:41:46 [WD] rb=0% err=48 connected=yes uptime=423s
+2026-07-01T23:41:46 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:51 [WD] rb=0% err=50 connected=yes uptime=428s
+2026-07-01T23:41:51 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:51 [RX] ctrl=2 port=1 stype=0x01 val=26.0963 ftype=0x05
+2026-07-01T23:41:52 [RX] ctrl=2 port=1 stype=0x02 val=67.7552 ftype=0x05
+2026-07-01T23:41:56 [WD] rb=0% err=53 connected=yes uptime=433s
+2026-07-01T23:41:56 [WD] HWM(words) conn=0 rx=2868 oled=6232 pub=3064 agg=3292 stat=756 wd=1924
+2026-07-01T23:41:58 [SIM] Signal=31  Op=NTT DOCOMO  GPRS=Y

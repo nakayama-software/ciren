@@ -485,7 +485,7 @@ void on_data_recv(const uint8_t* mac, const uint8_t* data, int len) {
       uint8_t target_port = pkt.port_num;  // 0 = all ports
       uint32_t new_ms = (uint32_t)pkt.value;
       if (new_ms == 0) new_ms = INTERVAL_OTHER_MS;  // guard
-      if (new_ms > 60000) new_ms = INTERVAL_OTHER_MS;  // cap: reject stale/huge values
+      if (new_ms > 3600000) new_ms = INTERVAL_OTHER_MS;  // cap: max 1 hour, reject stale/huge values
 
       if (target_port == 0) {
         for (int i = 0; i < PORT_MAX; i++) {
