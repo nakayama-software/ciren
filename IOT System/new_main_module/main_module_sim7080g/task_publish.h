@@ -24,11 +24,11 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
   esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)event_data;
   switch (ev->event_id) {
     case MQTT_EVENT_CONNECTED:
-      // connected state sekarang ditentukan oleh heartbeat server, bukan MQTT broker connect
       esp_mqtt_client_subscribe(mqtt_client, sys_state.topic_config, MQTT_QOS);
       esp_mqtt_client_subscribe(mqtt_client, TOPIC_SERVER_HB, 0);
-      Serial.println("[MQTT] Connected — waiting for server heartbeat");
-      LOG_INFO("MQTT", "Broker connected — waiting for server heartbeat");
+      state_set_connected(true);     // mark connected immediately on broker connect
+      Serial.println("[MQTT] Connected — subscribed, waiting for server heartbeat");
+      LOG_INFO("MQTT", "Broker connected — subscribed, waiting for server heartbeat");
       break;
     case MQTT_EVENT_DISCONNECTED:
       {

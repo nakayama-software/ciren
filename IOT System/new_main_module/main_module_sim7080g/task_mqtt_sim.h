@@ -200,6 +200,11 @@ static bool _smq_connect() {
 static void _smq_disconnect() {
   _sim_sendAT("AT+SMDISC", "OK", 5000);
   _smq_connected = false;
+  state_set_connected(false);
+  // Clear stale heartbeat timestamp so it doesn't trigger false timeout after reconnect
+  xSemaphoreTake(state_mutex, portMAX_DELAY);
+  sys_state.server_hb_ms = 0;
+  xSemaphoreGive(state_mutex);
 }
 
 // ── Publish one item via AT+SMPUB ─────────────────────────────────────────────
@@ -309,6 +314,7 @@ void mqtt_sim_task(void* param) {
         esp_task_wdt_reset();   // feed watchdog before long connect sequence
         if (_smq_connect()) {
           _smq_connected  = true;
+          state_set_connected(true);                 // mark connected immediately on MQTT connect
           _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;  // reset backoff on success
           // Only flush if queue is nearly full (>= 48/64 slots) — means device was
           // offline long enough that queued data is truly stale. For brief reconnects
@@ -374,6 +380,10 @@ void mqtt_sim_task(void* param) {
           xQueueSendToFront(publish_queue, &item, 0);
           _smq_connected = false;
           state_set_connected(false);
+          // Clear stale heartbeat timestamp so it doesn't trigger false timeout after reconnect
+          xSemaphoreTake(state_mutex, portMAX_DELAY);
+          sys_state.server_hb_ms = 0;
+          xSemaphoreGive(state_mutex);
           Serial.println("[SIM MQTT] Publish failed — will reconnect");
           LOG_ERROR("SIM_MQTT", "Publish failed — will reconnect");
           break;
