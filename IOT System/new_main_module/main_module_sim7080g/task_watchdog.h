@@ -13,6 +13,8 @@ TaskHandle_t h_oled       = NULL;
 TaskHandle_t h_publish    = NULL;
 TaskHandle_t h_aggregator = NULL;
 TaskHandle_t h_status     = NULL;
+TaskHandle_t h_mqtt_sim   = NULL;    // CPU 1 — MQTT over SIM7080G
+TaskHandle_t h_sim_mgr    = NULL;    // CPU 0 — SIM manager
 
 void task_watchdog(void* param) {
   // Subscribe this task to the Task Watchdog Timer
@@ -44,21 +46,25 @@ void task_watchdog(void* param) {
     UBaseType_t hwm_pub   = h_publish    ? uxTaskGetStackHighWaterMark(h_publish)    : 0;
     UBaseType_t hwm_agg   = h_aggregator ? uxTaskGetStackHighWaterMark(h_aggregator) : 0;
     UBaseType_t hwm_stat  = h_status     ? uxTaskGetStackHighWaterMark(h_status)     : 0;
+    UBaseType_t hwm_msq   = h_mqtt_sim   ? uxTaskGetStackHighWaterMark(h_mqtt_sim)   : 0;
+    UBaseType_t hwm_sim   = h_sim_mgr    ? uxTaskGetStackHighWaterMark(h_sim_mgr)    : 0;
     UBaseType_t hwm_wd    = uxTaskGetStackHighWaterMark(NULL); // diri sendiri
 
     // Satu Serial.printf untuk semua — jauh lebih hemat stack daripada 7x printf
-    Serial.printf("[WD] HWM(words) conn=%u rx=%u oled=%u pub=%u agg=%u stat=%u wd=%u\n",
-                  hwm_conn, hwm_rx, hwm_oled, hwm_pub, hwm_agg, hwm_stat, hwm_wd);
+    Serial.printf("[WD] HWM conn=%u rx=%u oled=%u pub=%u agg=%u stat=%u msim=%u sim=%u wd=%u\n",
+                  hwm_conn, hwm_rx, hwm_oled, hwm_pub, hwm_agg, hwm_stat, hwm_msq, hwm_sim, hwm_wd);
 
     // Warning jika ada yang kritis (< 128 words = 512 bytes tersisa)
     // Guard with handle != NULL — NULL handle reports 0 but the task was simply not started
-    if (h_conn_mgr   && hwm_conn  < 128) { Serial.printf("[WD] WARN: conn_mgr   low stack! %u words\n", hwm_conn); LOG_ERROR("WD", "conn_mgr low stack! %u words", hwm_conn); }
-    if (h_espnow_rx  && hwm_rx    < 128) { Serial.printf("[WD] WARN: espnow_rx  low stack! %u words\n", hwm_rx); LOG_ERROR("WD", "espnow_rx low stack! %u words", hwm_rx); }
-    if (h_oled       && hwm_oled  < 128) { Serial.printf("[WD] WARN: oled       low stack! %u words\n", hwm_oled); LOG_ERROR("WD", "oled low stack! %u words", hwm_oled); }
-    if (h_publish    && hwm_pub   < 128) { Serial.printf("[WD] WARN: publish    low stack! %u words\n", hwm_pub); LOG_ERROR("WD", "publish low stack! %u words", hwm_pub); }
-    if (h_aggregator && hwm_agg   < 128) { Serial.printf("[WD] WARN: aggregator low stack! %u words\n", hwm_agg); LOG_ERROR("WD", "aggregator low stack! %u words", hwm_agg); }
-    if (h_status     && hwm_stat  < 128) { Serial.printf("[WD] WARN: status     low stack! %u words\n", hwm_stat); LOG_ERROR("WD", "status low stack! %u words", hwm_stat); }
-    if (hwm_wd    < 128) { Serial.printf("[WD] WARN: watchdog   low stack! %u words\n", hwm_wd); LOG_ERROR("WD", "watchdog low stack! %u words", hwm_wd); }
+    if (h_conn_mgr   && hwm_conn  < 128) { Serial.printf("[WD] WARN: conn_mgr   low stack! %u\n", hwm_conn); LOG_ERROR("WD", "conn_mgr low stack! %u", hwm_conn); }
+    if (h_espnow_rx  && hwm_rx    < 128) { Serial.printf("[WD] WARN: espnow_rx  low stack! %u\n", hwm_rx); LOG_ERROR("WD", "espnow_rx low stack! %u", hwm_rx); }
+    if (h_oled       && hwm_oled  < 128) { Serial.printf("[WD] WARN: oled       low stack! %u\n", hwm_oled); LOG_ERROR("WD", "oled low stack! %u", hwm_oled); }
+    if (h_publish    && hwm_pub   < 128) { Serial.printf("[WD] WARN: publish    low stack! %u\n", hwm_pub); LOG_ERROR("WD", "publish low stack! %u", hwm_pub); }
+    if (h_aggregator && hwm_agg   < 128) { Serial.printf("[WD] WARN: aggregator low stack! %u\n", hwm_agg); LOG_ERROR("WD", "aggregator low stack! %u", hwm_agg); }
+    if (h_status     && hwm_stat  < 128) { Serial.printf("[WD] WARN: status     low stack! %u\n", hwm_stat); LOG_ERROR("WD", "status low stack! %u", hwm_stat); }
+    if (h_mqtt_sim   && hwm_msq   < 128) { Serial.printf("[WD] WARN: mqtt_sim   low stack! %u\n", hwm_msq); LOG_ERROR("WD", "mqtt_sim low stack! %u", hwm_msq); }
+    if (h_sim_mgr    && hwm_sim   < 128) { Serial.printf("[WD] WARN: sim_mgr    low stack! %u\n", hwm_sim); LOG_ERROR("WD", "sim_mgr low stack! %u", hwm_sim); }
+    if (hwm_wd    < 128) { Serial.printf("[WD] WARN: watchdog   low stack! %u\n", hwm_wd); LOG_ERROR("WD", "watchdog low stack! %u", hwm_wd); }
 
     _wd_log_counter++;
     if (_wd_log_counter >= 5) {

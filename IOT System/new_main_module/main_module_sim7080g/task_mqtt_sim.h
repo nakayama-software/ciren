@@ -264,6 +264,19 @@ bool sim_mqtt_publish(const char* topic, const char* payload, uint8_t qos) {
 
 void mqtt_sim_init() { /* no state to init */ }
 
+// WDT-safe mutex take: feed watchdog while waiting for sim_at_mutex.
+// This prevents WDT timeout when the SIM manager holds the mutex for extended
+// periods (e.g. during network registration which can take 30-60 seconds).
+static bool _smq_take_mutex_wdt()
+{
+  for (int _wt = 0; _wt < 65; _wt++) {   // 65 × 1s = 65s total timeout
+    if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(1000)) == pdTRUE)
+      return true;
+    esp_task_wdt_reset();   // feed WDT while waiting
+  }
+  return false;   // timeout — mutex not acquired
+}
+
 // ── Main task ─────────────────────────────────────────────────────────────────
 void mqtt_sim_task(void* param) {
   esp_task_wdt_add(NULL);   // subscribe to Task Watchdog
@@ -272,9 +285,10 @@ void mqtt_sim_task(void* param) {
     // Only active when SIM mode + GPRS ready
     if (!sys_state.sim_enabled || !sys_state.sim_gprs) {
       if (_smq_connected) {
-        xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
-        _smq_disconnect();
-        xSemaphoreGive(sim_at_mutex);
+        if (_smq_take_mutex_wdt()) {
+          _smq_disconnect();
+          xSemaphoreGive(sim_at_mutex);
+        }
       }
       _was_gprs_down = true;    // mark that GPRS was down
       vTaskDelay(pdMS_TO_TICKS(5000));
@@ -296,9 +310,10 @@ void mqtt_sim_task(void* param) {
 
     if (strcmp(mode, "sim") != 0) {
       if (_smq_connected) {
-        xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
-        _smq_disconnect();
-        xSemaphoreGive(sim_at_mutex);
+        if (_smq_take_mutex_wdt()) {
+          _smq_disconnect();
+          xSemaphoreGive(sim_at_mutex);
+        }
         LOG_INFO("SIM_MQTT", "Disconnected — switched to WiFi mode");
       }
       vTaskDelay(pdMS_TO_TICKS(5000));
@@ -312,7 +327,7 @@ void mqtt_sim_task(void* param) {
       Serial.printf("[SIM MQTT] Reconnecting (backoff=%lu ms)...\n", _smq_backoff_ms);
       LOG_INFO("SIM_MQTT", "Reconnecting (backoff=%lu ms)...", _smq_backoff_ms);
       // Mutex held for the full connect sequence (can take ~60s)
-      if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(65000)) == pdTRUE) {
+      if (_smq_take_mutex_wdt()) {
         esp_task_wdt_reset();   // feed watchdog before long connect sequence
         if (_smq_connect()) {
           _smq_connected  = true;
@@ -375,7 +390,16 @@ void mqtt_sim_task(void* param) {
     PublishItem item;
     int drained = 0;
     while (drained < 16 && xQueueReceive(publish_queue, &item, 0) == pdTRUE) {
-      if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(12000)) == pdTRUE) {
+      // WDT-safe mutex take: try for 12s total, feeding WDT every 2s
+      bool _pub_mutex = false;
+      for (int _mt = 0; _mt < 6; _mt++) {
+        if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+          _pub_mutex = true;
+          break;
+        }
+        esp_task_wdt_reset();
+      }
+      if (_pub_mutex) {
         bool ok = _smq_pub(item.topic, item.payload, item.len, item.qos);
         xSemaphoreGive(sim_at_mutex);
         if (!ok) {

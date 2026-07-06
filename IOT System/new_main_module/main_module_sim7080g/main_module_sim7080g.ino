@@ -174,13 +174,13 @@ void setup()
   xTaskCreatePinnedToCore(task_espnow_rx,   "espnow_rx", STACK_RX,      NULL,   PRIO_RX,       &h_espnow_rx,  0);
   xTaskCreatePinnedToCore(task_watchdog,    "watchdog",  STACK_WATCHDOG,NULL,   PRIO_WATCHDOG, NULL,          0);
   xTaskCreatePinnedToCore(task_oled,        "oled",      STACK_OLED,    &prefs, PRIO_OLED,     &h_oled,       0);
-  xTaskCreatePinnedToCore(sim_manager_task, "sim_mgr",   STACK_SIM_MGR, NULL,   PRIO_CONN,     NULL,          0);
+  xTaskCreatePinnedToCore(sim_manager_task, "sim_mgr",   STACK_SIM_MGR, NULL,   PRIO_CONN,     &h_sim_mgr,    0);
 
   // Core 1: data processing
   xTaskCreatePinnedToCore(task_publish,     "publish",    STACK_PUBLISH,  NULL, PRIO_PUBLISH, &h_publish,    1);
   xTaskCreatePinnedToCore(task_aggregator,  "aggregator", STACK_AGG,      NULL, PRIO_AGG,     &h_aggregator, 1);
   xTaskCreatePinnedToCore(task_status,      "status",     STACK_STATUS,   NULL, PRIO_STATUS,  &h_status,     1);
-  xTaskCreatePinnedToCore(mqtt_sim_task,    "mqtt_sim",   STACK_MQTT_SIM, NULL, PRIO_CONN,    NULL,          1);
+  xTaskCreatePinnedToCore(mqtt_sim_task,    "mqtt_sim",   STACK_MQTT_SIM, NULL, PRIO_CONN,    &h_mqtt_sim,   1);
   xTaskCreatePinnedToCore(task_logger,     "logger",     STACK_LOGGER,   NULL, PRIO_LOGGER,  NULL,          1);
   xTaskCreatePinnedToCore(task_node_config, "node_cfg",   STACK_CONFIG,   NULL, PRIO_CONFIG,  NULL,          1);
   xTaskCreatePinnedToCore(task_ntp,        "ntp",         4096,           NULL, PRIO_STATUS,  NULL,          1);
