@@ -76,6 +76,45 @@ static int  tft_page       = PAGE_GATEWAY;
 static bool page_dirty     = true;   // force full redraw on first tick
 static bool hold_overlay   = false;  // hold-progress overlay is showing
 
+// ─── Thread-safe snapshot of sys_state for OLED drawing ──────────────────────
+// OLED task (Core 0) reads sys_state which is written by other tasks (Core 1)
+// without mutex in the original code. We snapshot once per frame under mutex
+// protection, then draw from the snapshot — no torn reads.
+typedef struct {
+  char     device_id[32];
+  char     conn_mode[8];
+  bool     is_connected;
+  int8_t   rssi;
+  bool     sim_enabled;
+  bool     sim_modem_ok;
+  bool     sim_gprs;
+  int8_t   sim_signal;
+  char     sim_operator[24];
+  uint16_t peer_count;
+} OledSnapshot;
+
+static OledSnapshot _snap;   // updated once per frame via _oled_snapshot()
+
+static void _oled_snapshot() {
+  if (!state_mutex) return;   // not yet created
+  xSemaphoreTake(state_mutex, portMAX_DELAY);
+  strncpy(_snap.device_id,   sys_state.device_id,   sizeof(_snap.device_id));
+  strncpy(_snap.conn_mode,   sys_state.conn_mode,    sizeof(_snap.conn_mode));
+  _snap.is_connected  = sys_state.is_connected;
+  _snap.rssi          = sys_state.rssi;
+  _snap.sim_enabled   = sys_state.sim_enabled;
+  _snap.sim_modem_ok  = sys_state.sim_modem_ok;
+  _snap.sim_gprs      = sys_state.sim_gprs;
+  _snap.sim_signal    = sys_state.sim_signal;
+  strncpy(_snap.sim_operator, sys_state.sim_operator, sizeof(_snap.sim_operator));
+  _snap.peer_count    = sys_state.peer_count;
+  xSemaphoreGive(state_mutex);
+  // Ensure null-termination for string fields
+  _snap.device_id[sizeof(_snap.device_id) - 1]   = '\0';
+  _snap.conn_mode[sizeof(_snap.conn_mode) - 1]     = '\0';
+  _snap.sim_operator[sizeof(_snap.sim_operator) - 1] = '\0';
+}
+
 // ─── WiFi provisioning portal ────────────────────────────────────────────────
 static WebServer portal_server(PORTAL_PORT);
 static bool     portal_active    = false;
@@ -83,6 +122,7 @@ static bool     reboot_pending   = false;
 static uint32_t reboot_at_ms     = 0;
 static String   portal_ssid      = "";
 static String   portal_scan_html = "";
+static bool     _scan_running    = false;   // true while async WiFi scan is in progress
 
 static String html_esc(const String &s)
 {
@@ -131,13 +171,19 @@ static String _signal_svg(int bars) {
   return s;
 }
 
-static String build_scan_html()
+// Build scan HTML from the results of a completed async scan.
+// Does NOT call WiFi.scanNetworks() — that must be started separately.
+static String build_scan_html_from_results()
 {
-  int n = WiFi.scanNetworks();
+  int n = WiFi.scanComplete();
+  if (n < 0) {
+    return "<div class='section-label'>Available Networks</div>"
+           "<div class='empty-state'>Scan failed — tap Refresh</div>";
+  }
 
   String h = "<div class='section-label'>Available Networks</div>";
 
-  if (n <= 0) {
+  if (n == 0) {
     h += "<div class='empty-state'>No networks found</div>";
   } else {
     h += "<div class='network-list'>";
@@ -165,6 +211,15 @@ static String build_scan_html()
   }
   WiFi.scanDelete();
   return h;
+}
+
+// Start an async WiFi scan (non-blocking). Results are collected in portal_tick().
+static void start_wifi_scan()
+{
+  if (_scan_running) return;   // scan already in progress
+  WiFi.scanDelete();           // clear any previous results
+  WiFi.scanNetworks(true);     // true = async, returns immediately
+  _scan_running = true;
 }
 
 static String _portal_mqtt_host;
@@ -257,8 +312,13 @@ static String build_portal_page(const String &msg = "", bool ok = false)
   // Form
   h += "<form method='POST' action='/save'>";
 
-  // Network list
-  h += portal_scan_html;
+  // Network list (show "Scanning..." if async scan is still in progress)
+  if (_scan_running && portal_scan_html.length() == 0) {
+    h += "<div class='section-label'>Available Networks</div>"
+         "<div class='empty-state'>Scanning... <a href='/refresh' style='color:#0ea5e9'>Refresh</a></div>";
+  } else {
+    h += portal_scan_html;
+  }
 
   // Refresh link
   h += "<div style='text-align:right;margin-bottom:20px'>"
@@ -409,7 +469,7 @@ static void tft_draw_footer()
   tft.setTextSize(1);
   tft.setTextColor(C_WHITE, C_BG);
   tft.setCursor(PAD, FTR_Y + 5);
-  tft.printf("%s  v%s", sys_state.device_id, FW_VERSION);
+  tft.printf("%s  v%s", _snap.device_id, FW_VERSION);
 
   // Company logo (right-aligned)
   int lx = TFT_WIDTH - LOGO_FOOTER_W - PAD;
@@ -441,8 +501,8 @@ static void _draw_gateway()
   tft_section(PAD, y, "CONNECTION");
   y += 22;
 
-  bool wifi_mode = (strncmp(sys_state.conn_mode, "wifi", 4) == 0);
-  bool conn      = sys_state.is_connected;
+  bool wifi_mode = (strncmp(_snap.conn_mode, "wifi", 4) == 0);
+  bool conn      = _snap.is_connected;
 
   tft_badge(PAD,       y, wifi_mode ? "WiFi" : "SIM",
             wifi_mode  ? 0x000F : 0x6000, C_WHITE, 2);
@@ -454,7 +514,7 @@ static void _draw_gateway()
   tft_section(PAD, y, "CONTROLLERS");
   y += 22;
 
-  uint16_t peers = sys_state.peer_count;
+  uint16_t peers = _snap.peer_count;
   char pbuf[4];  snprintf(pbuf, sizeof(pbuf), "%d", peers);
   tft.setTextSize(2);
   tft.setTextColor(peers > 0 ? C_ACCENT : C_GRAY, C_BG);
@@ -566,7 +626,7 @@ static void _draw_sim()
   tft_section(PAD, y, "SIM MODULE");
   y += 22;
 
-  if (!sys_state.sim_enabled) {
+  if (!_snap.sim_enabled) {
     tft_badge(PAD, y, "DISABLED", C_DARKRED, C_WHITE, 2);
     y += 36;
     tft.setTextSize(2);
@@ -581,21 +641,21 @@ static void _draw_sim()
   }
 
   // Modem status badge
-  tft_badge(PAD, y, sys_state.sim_modem_ok ? "MODEM OK" : "INIT...",
-            sys_state.sim_modem_ok ? 0x0320 : C_DGRAY, C_WHITE, 2);
-  bool active = (strncmp(sys_state.conn_mode, "sim", 3) == 0);
+  tft_badge(PAD, y, _snap.sim_modem_ok ? "MODEM OK" : "INIT...",
+            _snap.sim_modem_ok ? 0x0320 : C_DGRAY, C_WHITE, 2);
+  bool active = (strncmp(_snap.conn_mode, "sim", 3) == 0);
   if (active)
     tft_badge(PAD + 150, y, "ACTIVE", C_ACCENT, C_BG, 2);
   y += 36;
 
-  if (sys_state.sim_modem_ok) {
+  if (_snap.sim_modem_ok) {
     // Operator
     tft_section(PAD, y, "OPERATOR");
     y += 22;
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
     char opbuf[17];
-    snprintf(opbuf, sizeof(opbuf), "%-16s", sys_state.sim_operator);
+    snprintf(opbuf, sizeof(opbuf), "%-16s", _snap.sim_operator);
     tft.setCursor(PAD, y);
     tft.print(opbuf);
     y += 24;
@@ -603,7 +663,7 @@ static void _draw_sim()
     // Signal
     tft_section(PAD, y, "SIGNAL");
     y += 22;
-    int sig = sys_state.sim_signal;
+    int sig = _snap.sim_signal;
     // CSQ → dBm: rssi = -113 + csq*2  (valid range 0–31; 99 = unknown)
     int sim_dbm = (sig > 0 && sig < 99) ? (-113 + sig * 2) : 0;
     float pct = constrain(sig / 31.0f, 0.0f, 1.0f);
@@ -697,7 +757,7 @@ static void _draw_sim_ctrl()
   tft_section(PAD, y, "SIM CONTROL");
   y += 22;
 
-  bool enabled = sys_state.sim_enabled;
+  bool enabled = _snap.sim_enabled;
   tft_badge(PAD, y, enabled ? "ENABLED" : "DISABLED",
             enabled ? 0x0320 : C_DARKRED, C_WHITE, 2);
   y += 38;
@@ -706,15 +766,15 @@ static void _draw_sim_ctrl()
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y); tft.print("Modem:");
-    tft.setTextColor(sys_state.sim_modem_ok ? C_GREEN : C_YELLOW, C_BG);
-    tft.print(sys_state.sim_modem_ok ? "OK      " : "Init... ");
+    tft.setTextColor(_snap.sim_modem_ok ? C_GREEN : C_YELLOW, C_BG);
+    tft.print(_snap.sim_modem_ok ? "OK      " : "Init... ");
     y += 22;
     tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y); tft.print("GPRS: ");
-    tft.setTextColor(sys_state.sim_gprs ? C_GREEN : C_RED, C_BG);
-    tft.print(sys_state.sim_gprs ? "OK      " : "OFFLINE ");
+    tft.setTextColor(_snap.sim_gprs ? C_GREEN : C_RED, C_BG);
+    tft.print(_snap.sim_gprs ? "OK      " : "OFFLINE ");
     y += 22;
-    bool sim_active = (strncmp(sys_state.conn_mode, "sim", 3) == 0);
+    bool sim_active = (strncmp(_snap.conn_mode, "sim", 3) == 0);
     tft.setTextColor(C_WHITE, C_BG);
     tft.setCursor(PAD, y); tft.print("Mode: ");
     tft.setTextColor(sim_active ? C_ACCENT : C_WHITE, C_BG);
@@ -753,7 +813,7 @@ static void _draw_hold_overlay(uint32_t held_ms)
   tft.setTextColor(C_ACCENT, C_BG);
   tft.setCursor(PAD + 8, inner_y);
   if (tft_page == PAGE_SIM_CTRL) {
-    tft.print(sys_state.sim_enabled ? "Release = Disable SIM Module    " :
+    tft.print(_snap.sim_enabled ? "Release = Disable SIM Module    " :
                                       "Release = Enable SIM Module     ");
   } else {
     tft.print("Release = Reset WiFi + Reboot   ");
@@ -846,13 +906,13 @@ static void portal_start(Preferences *prefs)
   WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
                     IPAddress(255, 255, 255, 0));
   WiFi.softAP(portal_ssid.c_str(), portal_pass_buf, 1, 0, 4);
-  portal_scan_html = build_scan_html();
+  start_wifi_scan();   // start async scan — results collected in portal_tick()
 
   portal_server.on("/", HTTP_GET, []() {
     portal_server.send(200, "text/html", build_portal_page());
   });
   portal_server.on("/refresh", HTTP_GET, []() {
-    portal_scan_html = build_scan_html();
+    start_wifi_scan();   // non-blocking: start async scan, redirect immediately
     portal_server.sendHeader("Location", "/");
     portal_server.send(302, "text/plain", "");
   });
@@ -920,7 +980,25 @@ static void portal_start(Preferences *prefs)
 
 static void portal_tick()
 {
-  if (portal_active) portal_server.handleClient();
+  if (!portal_active) {
+    if (reboot_pending && millis() >= reboot_at_ms) esp_restart();
+    return;
+  }
+
+  // ── Collect async WiFi scan results ──────────────────────────────────────
+  if (_scan_running) {
+    int16_t n = WiFi.scanComplete();
+    if (n >= 0) {
+      // Scan finished — build HTML from results
+      _scan_running = false;
+      portal_scan_html = build_scan_html_from_results();
+      page_dirty = true;   // force TFT redraw to show updated info
+    }
+    // If n == WIFI_SCAN_RUNNING (-1), scan is still in progress — skip
+  }
+
+  portal_server.handleClient();
+
   if (reboot_pending && millis() >= reboot_at_ms) esp_restart();
 }
 
@@ -928,6 +1006,9 @@ static void portal_tick()
 static void tft_draw()
 {
   if (!tft_ready) return;
+
+  // Snapshot sys_state under mutex protection — prevents torn reads
+  _oled_snapshot();
 
   // Hold is always active when WiFi is configured (to reset from any page),
   // or specifically on SIM_CTRL page.
@@ -1076,8 +1157,10 @@ void task_oled(void *param)
     // Button di-poll setiap 20ms (50Hz) agar press pendek tidak terlewat.
     // TFT hanya di-refresh setiap TFT_REFRESH_MS (200ms).
     vTaskDelay(pdMS_TO_TICKS(20));
+    esp_task_wdt_reset();   // feed watchdog — top of loop
 
     portal_tick();
+    esp_task_wdt_reset();   // feed watchdog — after portal_tick (which can be slow)
 
     BtnAction act = btn_tick();
 
@@ -1088,7 +1171,7 @@ void task_oled(void *param)
     }
     else if (act == BA_HOLD5) {
       if (tft_page == PAGE_SIM_CTRL) {
-        bool new_val = !sys_state.sim_enabled;
+        bool new_val = !_snap.sim_enabled;
         if (prefs) {
           prefs->begin("ciren", false);
           prefs->putBool("sim_en", new_val);
@@ -1103,8 +1186,12 @@ void task_oled(void *param)
         tft.setTextSize(1);
         tft.setTextColor(C_WHITE, C_BG);
         tft.setCursor(PAD, CONT_Y + 58);
-        tft.print("Rebooting in 1.5 s...");
-        delay(1500);
+        tft.print("Rebooting...");
+        // WDT-safe reboot delay — feed watchdog every 100ms
+        for (int i = 0; i < 15; i++) {
+          esp_task_wdt_reset();
+          vTaskDelay(pdMS_TO_TICKS(100));
+        }
         esp_restart();
       }
       else if (!portal_active) {
@@ -1126,7 +1213,11 @@ void task_oled(void *param)
         tft.setTextColor(C_WHITE, C_BG);
         tft.setCursor(PAD, CONT_Y + 58);
         tft.print("Rebooting...");
-        delay(1500);
+        // WDT-safe reboot delay — feed watchdog every 100ms
+        for (int i = 0; i < 15; i++) {
+          esp_task_wdt_reset();
+          vTaskDelay(pdMS_TO_TICKS(100));
+        }
         esp_restart();
       }
     }
@@ -1136,6 +1227,6 @@ void task_oled(void *param)
       last_draw_ms = millis();
       tft_draw();
     }
-    esp_task_wdt_reset();   // feed watchdog — loop every 20ms
+    esp_task_wdt_reset();   // feed watchdog — end of loop
   }
 }
