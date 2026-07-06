@@ -61,6 +61,7 @@ static bool _sim_sendAT(const char* cmd, const char* expect = "OK",
       _sim_fail_count++;
       return false;
     }
+    esp_task_wdt_reset();   // feed watchdog during long AT waits (SMCONN can take 60s)
     delay(10);
   }
   if (verbose) Serial.printf("[AT<<TO] %s\n", _sim_rxbuf);
