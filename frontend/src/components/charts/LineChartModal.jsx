@@ -40,18 +40,17 @@ const RANGE_OPTIONS = [
 // ── Table view component ─────────────────────────────────────────────────────
 const PAGE_SIZE = 200
 
-function DataTableSection({ label, labelColor, rows, unit, isDark }) {
+function DataTableSection({ label, labelColor, rows, unit, isDark, hours }) {
   const [page, setPage] = useState(0)
 
   // Reset to first page when the dataset changes (new range / new fetch)
   useEffect(() => { setPage(0) }, [rows])
 
-  // Single pass: detect multiDay + reverse + pre-format all timestamps
-  // Avoids calling toLocaleTimeString() 15,000× per render
   const { sorted, multiDay } = useMemo(() => {
     if (rows.length === 0) return { sorted: [], multiDay: false }
-    const isMultiDay = rows.length >= 2 &&
-      new Date(rows[0].ts).toDateString() !== new Date(rows[rows.length - 1].ts).toDateString()
+    // Show date column when range is 24h or more (data spans multiple days)
+    const isMultiDay = hours >= 24
+
     const rev = [...rows].reverse()
     const formatted = rev.map(r => {
       const d = new Date(r.ts)
@@ -62,7 +61,7 @@ function DataTableSection({ label, labelColor, rows, unit, isDark }) {
       return { value: r.value, fmtTs }
     })
     return { sorted: formatted, multiDay: isMultiDay }
-  }, [rows])
+  }, [rows, hours])
 
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const offset = page * PAGE_SIZE
@@ -294,8 +293,6 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
     const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
     const legendColor = isDark ? '#cbd5e1' : '#475569'
 
-    // Show the full selected time range on x-axis, not just the data range.
-    // Without this, selecting 7d with only 24h of data would show a 24h x-axis.
     const xMax = Date.now()
     const xMin = xMax - hours * 3600 * 1000
 
@@ -375,7 +372,7 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
               <X className="w-4 h-4" />
             </button>
           </div>
-          {/* Controls: range + view toggle */}
+
           <div className="flex items-center gap-2 shrink-0">
             <div className="inline-flex rounded-md border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-0.5 gap-0.5">
               {RANGE_OPTIONS.map((opt) => (
@@ -443,6 +440,7 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
                     rows={tempRows}
                     unit="°C"
                     isDark={isDark}
+                    hours={hours}
                   />
                   <div className="border-t border-black/10 dark:border-white/10 my-2" />
                   <DataTableSection
@@ -451,6 +449,7 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
                     rows={humRows}
                     unit="%RH"
                     isDark={isDark}
+                    hours={hours}
                   />
                 </>
               ) : (
@@ -460,6 +459,7 @@ export default function LineChartModal({ open, onClose, deviceId, ctrlId, portNu
                   rows={rows}
                   unit={info.unit}
                   isDark={isDark}
+                  hours={hours}
                 />
               )}
             </div>
