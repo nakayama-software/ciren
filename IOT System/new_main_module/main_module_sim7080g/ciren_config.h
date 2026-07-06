@@ -87,7 +87,7 @@
 #define STACK_AGG          6144
 #define STACK_PUBLISH      6144
 #define STACK_WATCHDOG     4096   // was 2048 — HWM monitor butuh ruang printf
-#define STACK_OLED         8192   // was 4096 — portal HTML builder
+#define STACK_OLED         16384  // was 8192 — portal HTML builder + String ops need headroom
 #define STACK_CONFIG       3072
 #define STACK_STATUS       4096   // stat HWM was 652/3072 (21%) — naikkan headroom
 #define STACK_SIM_MGR      4096
@@ -122,7 +122,8 @@
 
 #define SERVER_HB_TIMEOUT_MS  120000   // consider server offline after 120s no heartbeat (tolerate SIM latency)
 
-#define WD_CHECK_MS        5000    // must be < TWDT timeout (15s) to feed in time
+#define TWDT_TIMEOUT_MS   30000   // 30s — portal mode needs more headroom for HTTP/SVG operations
+#define WD_CHECK_MS        10000   // must be < TWDT_TIMEOUT_MS
 #define RB_WARN_THRESHOLD  0.8f
 
 #define CTRL_TIMEOUT_MS    30000   // consider controller offline after 30s no packet (matches HB_INTERVAL_MS)

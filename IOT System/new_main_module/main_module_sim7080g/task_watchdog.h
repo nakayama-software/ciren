@@ -20,7 +20,7 @@ void task_watchdog(void* param) {
 
   static uint8_t _wd_log_counter = 0;
   for (;;) {
-    esp_task_wdt_reset();   // feed the watchdog — must reset every 15s
+    esp_task_wdt_reset();   // feed the watchdog — must reset within TWDT_TIMEOUT_MS
     vTaskDelay(pdMS_TO_TICKS(WD_CHECK_MS));
 
     float usage = rb_usage();

@@ -153,59 +153,77 @@ static int _rssi_bars(int rssi) {
 }
 
 // Render SVG signal bars (4 bars, filled sesuai kekuatan sinyal)
+// Uses snprintf to avoid ~20 temporary String allocations per call (heap corruption fix)
 static String _signal_svg(int bars) {
-  // 4 bar dengan tinggi 4/7/10/13px
-  String s = "<svg width='20' height='14' viewBox='0 0 20 14' style='vertical-align:middle;margin-right:6px'>";
-  int heights[] = {4, 7, 10, 14};
-  const char* filled_clr  = "#22c55e";  // green
-  const char* empty_clr   = "#334155";  // slate
-  for (int i = 0; i < 4; i++) {
-    int x  = i * 5;
-    int h  = heights[i];
-    int y  = 14 - h;
-    s += "<rect x='" + String(x) + "' y='" + String(y) +
-         "' width='4' height='" + String(h) +
-         "' rx='1' fill='" + (i < bars ? filled_clr : empty_clr) + "'/>";
-  }
-  s += "</svg>";
-  return s;
+  static const int heights[] = {4, 7, 10, 14};
+  static const char* filled_clr = "#22c55e";  // green
+  static const char* empty_clr  = "#334155";  // slate
+  char buf[320];  // large enough for 4 rect elements + svg wrapper
+  int len = snprintf(buf, sizeof(buf),
+    "<svg width='20' height='14' viewBox='0 0 20 14' style='vertical-align:middle;margin-right:6px'>"
+    "<rect x='0' y='%d' width='4' height='%d' rx='1' fill='%s'/>"
+    "<rect x='5' y='%d' width='4' height='%d' rx='1' fill='%s'/>"
+    "<rect x='10' y='%d' width='4' height='%d' rx='1' fill='%s'/>"
+    "<rect x='15' y='%d' width='4' height='%d' rx='1' fill='%s'/>"
+    "</svg>",
+    14 - heights[0], heights[0], bars > 0 ? filled_clr : empty_clr,
+    14 - heights[1], heights[1], bars > 1 ? filled_clr : empty_clr,
+    14 - heights[2], heights[2], bars > 2 ? filled_clr : empty_clr,
+    14 - heights[3], heights[3], bars > 3 ? filled_clr : empty_clr);
+  (void)len;  // suppress unused warning
+  return String(buf);
 }
 
 // Build scan HTML from the results of a completed async scan.
 // Does NOT call WiFi.scanNetworks() — that must be started separately.
+// Uses snprintf + reserve() to avoid excessive temporary String allocations.
 static String build_scan_html_from_results()
 {
+  esp_task_wdt_reset();   // feed WDT — this can be slow with many networks
+
   int n = WiFi.scanComplete();
   if (n < 0) {
     return "<div class='section-label'>Available Networks</div>"
            "<div class='empty-state'>Scan failed — tap Refresh</div>";
   }
 
-  String h = "<div class='section-label'>Available Networks</div>";
+  // Cap displayed networks to limit HTML size and heap usage
+  const int MAX_DISPLAY_NETS = 10;
+  if (n > MAX_DISPLAY_NETS) n = MAX_DISPLAY_NETS;
+
+  String h;
+  h.reserve(512 + (size_t)n * 300);   // pre-allocate to reduce fragmentation
+  h = "<div class='section-label'>Available Networks</div>";
 
   if (n == 0) {
     h += "<div class='empty-state'>No networks found</div>";
   } else {
     h += "<div class='network-list'>";
+    char item[512];   // per-network item buffer (stack, not heap)
     for (int i = 0; i < n; i++) {
-      int    rssi  = WiFi.RSSI(i);
-      int    bars  = _rssi_bars(rssi);
-      bool   open  = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
-      String ssid  = html_esc(WiFi.SSID(i));
-      String idstr = "net" + String(i);
+      int  rssi = WiFi.RSSI(i);
+      int  bars = _rssi_bars(rssi);
+      bool open  = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+      String ssid = html_esc(WiFi.SSID(i));    // one String per network (unavoidable — SSID is variable-length)
+      String svg  = _signal_svg(bars);           // one String per network (uses snprintf internally now)
 
-      h += "<label class='network-item' for='" + idstr + "'>";
-      h += "<input type='radio' id='" + idstr +
-           "' name='ssid' value='" + ssid + "'>";
-      h += "<span class='check-dot'></span>";
-      h += "<span class='network-info'>";
-      h += _signal_svg(bars);
-      h += "<span class='network-name'>" + ssid + "</span>";
-      if (!open) h += "<span class='lock-icon'>&#x1F512;</span>";
-      h += "</span>";
-      h += "<span class='network-meta'>" + String(rssi) + " dBm &bull; " +
-           _rssi_label(rssi) + "</span>";
-      h += "</label>";
+      snprintf(item, sizeof(item),
+        "<label class='network-item' for='net%d'>"
+        "<input type='radio' id='net%d' name='ssid' value='%s'>"
+        "<span class='check-dot'></span>"
+        "<span class='network-info'>%s"
+        "<span class='network-name'>%s</span>%s</span>"
+        "<span class='network-meta'>%d dBm &bull; %s</span>"
+        "</label>",
+        i, i, ssid.c_str(),
+        svg.c_str(),
+        ssid.c_str(),
+        open ? "" : "<span class='lock-icon'>&#x1F512;</span>",
+        rssi, _rssi_label(rssi));
+      h += item;
+
+      // Feed WDT every 4 networks to prevent timeout on large scans
+      if ((i & 3) == 3) esp_task_wdt_reset();
     }
     h += "</div>";
   }
@@ -230,7 +248,10 @@ static String _portal_device_id;
 
 static String build_portal_page(const String &msg = "", bool ok = false)
 {
+  esp_task_wdt_reset();   // feed WDT — this function builds a large String
+
   String h;
+  h.reserve(4096);   // pre-allocate to reduce heap fragmentation
   h += F("<!doctype html><html lang='en'><head>"
          "<meta charset='utf-8'>"
          "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -293,11 +314,11 @@ static String build_portal_page(const String &msg = "", bool ok = false)
          "</style>"
          "</head><body><div class='card'>");
 
-  // Header
+  // Header — use _snap.device_id (mutex-protected) instead of direct sys_state access
   h += "<div class='header'>"
        "<div class='header-dot'>&#x1F4F6;</div>"
        "<h1>CIREN WiFi Setup</h1>"
-       "<p>Device: " + String(sys_state.device_id) + " &nbsp;&bull;&nbsp; Firmware v" + String(FW_VERSION) + "</p>"
+       "<p>Device: " + String(_snap.device_id) + " &nbsp;&bull;&nbsp; Firmware v" + String(FW_VERSION) + "</p>"
        "</div>";
 
   h += "<div class='body'>";
@@ -996,6 +1017,10 @@ static void portal_tick()
     }
     // If n == WIFI_SCAN_RUNNING (-1), scan is still in progress — skip
   }
+
+  // Refresh snapshot before portal handler reads it (build_portal_page uses _snap)
+  _oled_snapshot();
+  esp_task_wdt_reset();   // feed WDT before handleClient (can be slow)
 
   portal_server.handleClient();
 
