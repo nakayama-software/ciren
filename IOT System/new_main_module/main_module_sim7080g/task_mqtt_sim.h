@@ -278,6 +278,7 @@ void mqtt_sim_task(void* param) {
       }
       _was_gprs_down = true;    // mark that GPRS was down
       vTaskDelay(pdMS_TO_TICKS(5000));
+      esp_task_wdt_reset();      // feed watchdog while waiting for GPRS
       continue;
     }
 
@@ -301,6 +302,7 @@ void mqtt_sim_task(void* param) {
         LOG_INFO("SIM_MQTT", "Disconnected — switched to WiFi mode");
       }
       vTaskDelay(pdMS_TO_TICKS(5000));
+      esp_task_wdt_reset();      // feed watchdog while in WiFi mode
       continue;
     }
 
