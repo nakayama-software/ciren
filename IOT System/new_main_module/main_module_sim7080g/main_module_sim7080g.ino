@@ -117,12 +117,17 @@ void setup()
   // ── Task Watchdog Timer ────────────────────────────────────────────────────
   // 15s timeout — if any subscribed task fails to feed, system panics and reboots.
   // This ensures automatic recovery from task hangs (e.g., mutex deadlock, infinite loop).
+  // ESP32 core v3.x uses struct-based API; v2.x uses positional args.
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = 15000,
     .idle_core_mask = 0,
     .trigger_panic = true,
   };
-  esp_task_wdt_init(&wdt_config);   // panic=true → reboot on timeout
+  esp_task_wdt_init(&wdt_config);
+#else
+  esp_task_wdt_init(15, true);   // timeout=15s, panic=true
+#endif
   esp_task_wdt_add(NULL);         // subscribe the setup/loop task
   LOG_INFO("SETUP", "Task Watchdog initialized (15s timeout, panic on timeout)");
 
