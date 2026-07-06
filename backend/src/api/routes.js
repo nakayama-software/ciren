@@ -200,13 +200,15 @@ router.get('/devices/:deviceId/data/history', async (req, res) => {
 
     const maxPoints = Math.min(Number(req.query.limit) || 2000, 5000)
 
+    // Sort descending to get the MOST RECENT data first, then reverse
+    // so the client receives chronologically ordered data with recent points guaranteed.
     const data = await SensorReading
       .find(filter)
-      .sort({ server_ts: 1 })
+      .sort({ server_ts: -1 })
       .limit(maxPoints)
       .lean()
 
-    res.json(data)
+    res.json(data.reverse())
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
