@@ -34,7 +34,7 @@ static void _smq_process_urcs(const char* buf) {
     xSemaphoreTake(state_mutex, portMAX_DELAY);
     sys_state.server_hb_ms = millis();
     xSemaphoreGive(state_mutex);
-    state_set_connected(true);
+    state_set_connected(true);   // confirm liveness regardless of mode
     Serial.println("[SIM MQTT] Server heartbeat");
     LOG_INFO("SIM_MQTT", "Server heartbeat received");
   }
@@ -113,16 +113,30 @@ static void _smq_process_urcs(const char* buf) {
     sub_ptr += 7;
   }
 
+  // Capture +CNTP: URC for the NTP task (it releases the AT mutex while waiting
+  // for this URC, so _smq_drain() may consume it before the NTP task can read it)
+  const char* cntp = strstr(buf, "+CNTP:");
+  if (cntp) {
+    int code = -1; long epoch = 0;
+    if (sscanf(cntp, "+CNTP: %d,%ld", &code, &epoch) == 2) {
+      _ntp_urc_code  = code;
+      _ntp_urc_epoch = epoch;
+      _ntp_urc_ready = true;
+      Serial.printf("[SIM MQTT] Captured +CNTP URC: code=%d epoch=%ld\n", code, epoch);
+    }
+  }
+
   // Detect remote disconnect URC
   if (strstr(buf, "+SMSTATE: 0")) {
     _smq_connected = false;
     state_set_connected(false);
+    _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;  // reset backoff on disconnect so reconnect is fast
     // Clear stale heartbeat timestamp so it doesn't trigger false timeout after reconnect
     xSemaphoreTake(state_mutex, portMAX_DELAY);
     sys_state.server_hb_ms = 0;
     xSemaphoreGive(state_mutex);
-    Serial.println("[SIM MQTT] Remote disconnect detected");
-    LOG_WARN("SIM_MQTT", "Remote disconnect detected");
+    Serial.println("[SIM MQTT] Remote disconnect detected — backoff reset");
+    LOG_WARN("SIM_MQTT", "Remote disconnect detected — backoff reset");
   }
 }
 
@@ -301,7 +315,6 @@ void mqtt_sim_task(void* param) {
 
     // ── (Re)connect ───────────────────────────────────────────────────────────
     if (!_smq_connected) {
-      state_set_connected(false);
       Serial.printf("[SIM MQTT] Reconnecting (backoff=%lu ms)...\n", _smq_backoff_ms);
       LOG_INFO("SIM_MQTT", "Reconnecting (backoff=%lu ms)...", _smq_backoff_ms);
       // Mutex held for the full connect sequence (can take ~60s)
@@ -310,6 +323,10 @@ void mqtt_sim_task(void* param) {
         if (_smq_connect()) {
           _smq_connected  = true;
           _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;  // reset backoff on success
+          // Mark connected immediately so HELLO/status can be sent without
+          // waiting for first server heartbeat. Heartbeat timeout will still
+          // catch cases where backend is down but broker is up.
+          state_set_connected(true);
           // Only flush if queue is nearly full (>= 48/64 slots) — means device was
           // offline long enough that queued data is truly stale. For brief reconnects
           // (signal blip, <30s) keep queued items so no sensor readings are lost.
@@ -352,7 +369,10 @@ void mqtt_sim_task(void* param) {
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.server_hb_ms = 0;   // clear stale timestamp
         xSemaphoreGive(state_mutex);
-        LOG_WARN("SIM_MQTT", "Server heartbeat timeout — disconnecting");
+        // Don't force disconnect — the broker connection stays up. When the
+        // backend recovers and sends a heartbeat, is_connected becomes true again.
+        // If the broker also goes down, +SMSTATE: 0 URC will trigger reconnect.
+        LOG_WARN("SIM_MQTT", "Server heartbeat timeout");
       }
     }
 

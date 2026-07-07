@@ -69,8 +69,9 @@ void state_build_topics() {
 
 void state_init() {
   memset(&sys_state, 0, sizeof(sys_state));
-  sys_state.agg_window_ms = 50;
+  sys_state.agg_window_ms = AGG_WINDOW_MS;  // use config define (10ms), not hardcoded
   sys_state.sim_enabled   = true;
+  sys_state.batt_pct      = 100;  // mains-powered gateway — no battery ADC yet
   strncpy(sys_state.conn_mode, "wifi", sizeof(sys_state.conn_mode));
 }
 

@@ -31,8 +31,11 @@ void task_status(void* param) {
 
     bool connected = state_is_connected();
 
-    // Reset hello_sent saat koneksi drop → akan dikirim ulang saat reconnect
-    if (was_connected && !connected) {
+    // Reset hello_sent on ANY connection state change:
+    // - Drop (was_connected && !connected): device went offline, need new HELLO on reconnect
+    // - Rise (!was_connected && connected): device came online, must send HELLO immediately
+    // This ensures HELLO is always sent after backend restart / reconnect.
+    if (was_connected != connected) {
       hello_sent = false;
     }
     was_connected = connected;

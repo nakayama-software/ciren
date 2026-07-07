@@ -19,6 +19,13 @@
 static HardwareSerial& _sim_ser = Serial2;
 SemaphoreHandle_t sim_at_mutex  = NULL;   // shared with task_mqtt_sim
 
+// ── Shared NTP URC result (set by _smq_process_urcs or _sim_flush when they
+//    capture +CNTP: URC on behalf of task_ntp, which releases the AT mutex
+//    while waiting for the URC) ──
+static volatile bool  _ntp_urc_ready = false;
+static int            _ntp_urc_code  = -1;
+static long           _ntp_urc_epoch = 0;
+
 // ── Shared AT response buffer — no heap alloc/free on every AT command ────────
 static char _sim_rxbuf[512];
 
@@ -33,7 +40,29 @@ static uint8_t _sim_fail_count = 0;
 
 static void _sim_flush() {
   delay(20);
-  while (_sim_ser.available()) _sim_ser.read();
+  // Read and discard pending data, but capture +CNTP: URC for the NTP task
+  // before it's lost. _smq_drain() might not run before _sim_flush() is called
+  // (e.g., before _smq_pub()), so we check here as a safety net.
+  char flush_buf[256];
+  size_t flush_pos = 0;
+  while (_sim_ser.available()) {
+    char c = (char)_sim_ser.read();
+    if (flush_pos < sizeof(flush_buf) - 1) flush_buf[flush_pos++] = c;
+  }
+  flush_buf[flush_pos] = '\0';
+  // Check for +CNTP: URC in the flushed data
+  if (flush_pos > 0) {
+    const char* cntp = strstr(flush_buf, "+CNTP:");
+    if (cntp) {
+      int code = -1; long epoch = 0;
+      if (sscanf(cntp, "+CNTP: %d,%ld", &code, &epoch) == 2) {
+        _ntp_urc_code  = code;
+        _ntp_urc_epoch = epoch;
+        _ntp_urc_ready = true;
+        Serial.printf("[SIM] Captured +CNTP in flush: code=%d epoch=%ld\n", code, epoch);
+      }
+    }
+  }
 }
 
 // Send AT command, return true if expected string appears in response within ms.

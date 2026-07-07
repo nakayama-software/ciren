@@ -24,11 +24,14 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
   esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)event_data;
   switch (ev->event_id) {
     case MQTT_EVENT_CONNECTED:
-      // connected state sekarang ditentukan oleh heartbeat server, bukan MQTT broker connect
+      // Mark connected immediately so HELLO/status can be sent without waiting
+      // for the first server heartbeat. Heartbeat timeout will still catch cases
+      // where the backend is down but the broker is up.
+      state_set_connected(true);
       esp_mqtt_client_subscribe(mqtt_client, sys_state.topic_config, MQTT_QOS);
       esp_mqtt_client_subscribe(mqtt_client, TOPIC_SERVER_HB, 0);
-      Serial.println("[MQTT] Connected — waiting for server heartbeat");
-      LOG_INFO("MQTT", "Broker connected — waiting for server heartbeat");
+      Serial.println("[MQTT] Broker connected — marked connected, subscribing");
+      LOG_INFO("MQTT", "Broker connected — marked connected, subscribing");
       break;
     case MQTT_EVENT_DISCONNECTED:
       {
@@ -47,19 +50,13 @@ static void mqtt_event_handler(void* arg, esp_event_base_t base,
       LOG_WARN("MQTT", "Broker disconnected");
       break;
     case MQTT_EVENT_DATA:
-      // Cek apakah ini heartbeat dari server
+      // Cek apakah ini heartbeat dari server — update timestamp liveness
       if (ev->topic_len > 0 &&
           strncmp(ev->topic, TOPIC_SERVER_HB, ev->topic_len) == 0) {
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.server_hb_ms = millis();
         xSemaphoreGive(state_mutex);
-        char hb_mode[8];
-        xSemaphoreTake(state_mutex, portMAX_DELAY);
-        strncpy(hb_mode, sys_state.conn_mode, sizeof(hb_mode));
-        xSemaphoreGive(state_mutex);
-        if (strcmp(hb_mode, "wifi") == 0) {
-          state_set_connected(true);
-        }
+        state_set_connected(true);
         Serial.println("[MQTT] Server heartbeat received");
         LOG_INFO("MQTT", "Server heartbeat received");
       }
@@ -153,6 +150,8 @@ void task_publish(void* param) {
 
     if (strcmp(current_mode, "wifi") == 0) {
       // Cek heartbeat timeout — anggap server offline jika tidak ada HB > timeout
+      // Set is_connected=false to stop publishing; connection stays up.
+      // When backend recovers and sends heartbeat, is_connected becomes true again.
       xSemaphoreTake(state_mutex, portMAX_DELAY);
       uint32_t hb_ms = sys_state.server_hb_ms;
       xSemaphoreGive(state_mutex);
@@ -161,7 +160,7 @@ void task_publish(void* param) {
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.server_hb_ms = 0;   // clear stale timestamp
         xSemaphoreGive(state_mutex);
-        LOG_WARN("MQTT", "Server heartbeat timeout — disconnecting");
+        LOG_WARN("MQTT", "Server heartbeat timeout");
       }
 
       if (xQueueReceive(publish_queue, &item, pdMS_TO_TICKS(5000)) == pdTRUE) {

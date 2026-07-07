@@ -82,9 +82,10 @@ static bool _ntp_sync_wifi() {
 }
 
 // ── Try NTP sync via SIM7080G AT+CNTP ──────────────────────────────────────────
-// AT+CNTP="ntp.nict.jp",123
-// Response: +CNTP: <code>,<timestamp>
-//   code 1 = success, timestamp = epoch seconds
+// AT+CNTP on SIM7080G:
+//   AT+CNTP="server",tz   — configure NTP server (does NOT start query)
+//   AT+CNTP               — start NTP query using configured server
+// Response: "OK" immediately, then "+CNTP: <code>,<epoch>" as a URC seconds later.
 // Requires sim_at_mutex (shared with task_sim_manager / task_mqtt_sim).
 static bool _ntp_sync_sim() {
   if (!sys_state.sim_enabled || !sys_state.sim_gprs) return false;
@@ -94,51 +95,183 @@ static bool _ntp_sync_sim() {
   }
   esp_task_wdt_reset();
 
-  // Configure NTP server
-  // AT+CNTP second parameter is timezone in units of 15 minutes (not port!).
-  // JST = UTC+9 → 9 * 4 = 36
+  // Clear any stale NTP URC result from a previous attempt
+  _ntp_urc_ready = false;
+
+  // Step 1: Configure NTP server.
+  // AT+CNTP second parameter is timezone in units of 15 minutes (quarter-hours).
+  // JST = UTC+9 → 9 * 4 = 36. SIM7080G accepts timezone, NOT port number.
   #define NTP_TZ_QUARTERS  36
   char cmd[64];
   snprintf(cmd, sizeof(cmd), "AT+CNTP=\"%s\",%d", NTP_SERVERS[0], NTP_TZ_QUARTERS);
-  if (!_sim_sendAT(cmd, "OK", 5000)) {
+  Serial.printf("[NTP] SIM: %s\n", cmd);
+  bool config_ok = _sim_sendAT(cmd, "OK", 5000, true);
+  if (!config_ok) {
     // Try fallback server
     snprintf(cmd, sizeof(cmd), "AT+CNTP=\"%s\",%d", NTP_SERVERS[1], NTP_TZ_QUARTERS);
-    if (!_sim_sendAT(cmd, "OK", 5000)) {
+    Serial.printf("[NTP] SIM: %s\n", cmd);
+    config_ok = _sim_sendAT(cmd, "OK", 5000, true);
+  }
+  if (!config_ok) {
+    xSemaphoreGive(sim_at_mutex);
+    LOG_WARN("NTP", "SIM NTP — CNTP config failed");
+    return false;
+  }
+
+  // Step 2: Start NTP query.
+  // AT+CNTP (without parameters) triggers the actual NTP request.
+  // _sim_sendAT internally calls _sim_flush() which captures any pending +CNTP: URC
+  // from a previous attempt, and reads the "OK" response into _sim_rxbuf.
+  Serial.println("[NTP] SIM: AT+CNTP (start query)");
+  if (!_sim_sendAT("AT+CNTP", "OK", 3000, true)) {
+    xSemaphoreGive(sim_at_mutex);
+    LOG_WARN("NTP", "SIM NTP — AT+CNTP start failed");
+    return false;
+  }
+
+  // Step 3: Check if +CNTP: arrived very quickly (within the _sim_sendAT read window).
+  // _sim_sendAT reads all available Serial2 data into _sim_rxbuf. If the NTP server
+  // responded very fast, +CNTP: could already be in _sim_rxbuf.
+  const char* cntp_rx = strstr(_sim_rxbuf, "+CNTP:");
+  if (cntp_rx) {
+    int code = -1; long epoch = 0;
+    if (sscanf(cntp_rx, "+CNTP: %d,%ld", &code, &epoch) == 2) {
+      if (code == 1 && epoch > 1700000000) {
+        uint32_t ms = millis();
+        int64_t offset_ms = (int64_t)epoch * 1000LL - (int64_t)ms;
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        sys_state.ntp_epoch_offset_ms = offset_ms;
+        sys_state.ntp_synced = true;
+        xSemaphoreGive(state_mutex);
+        xSemaphoreGive(sim_at_mutex);
+        Serial.printf("[NTP] SIM sync OK (immediate): epoch=%ld offset_ms=%lld\n", epoch, (long long)offset_ms);
+        LOG_INFO("NTP", "SIM sync OK (immediate): epoch=%ld offset=%lldms", epoch, (long long)offset_ms);
+        return true;
+      }
+      // +CNTP arrived but with error code — log and fail
       xSemaphoreGive(sim_at_mutex);
-      LOG_WARN("NTP", "SIM NTP — CNTP config failed");
+      Serial.printf("[NTP] SIM NTP failed — immediate code=%d epoch=%ld\n", code, epoch);
+      LOG_WARN("NTP", "SIM sync failed — CNTP code=%d epoch=%ld", code, epoch);
       return false;
     }
   }
 
-  // Start NTP query
-  // AT+CNTP can take up to 30s on poor networks
-  const char* reply = _sim_atReply("AT+CNTP", 30000);
-  // Expected: +CNTP: 1,<epoch_seconds>  (code 1 = success)
-  const char* cntp = strstr(reply, "+CNTP:");
-  if (cntp) {
-    int code = 0;
-    long epoch = 0;
-    // Parse: +CNTP: <code>,<timestamp>
-    if (sscanf(cntp, "+CNTP: %d,%ld", &code, &epoch) == 2 && code == 1 && epoch > 1700000000) {
-      uint32_t ms = millis();
-      int64_t offset_ms = (int64_t)epoch * 1000LL - (int64_t)ms;
+  // Step 4: +CNTP: not yet arrived — release mutex and wait for it via shared variables.
+  // The URC arrives seconds later as an unsolicited response. _smq_drain() in
+  // mqtt_sim_task will capture it and set _ntp_urc_ready. _sim_flush() (called
+  // before AT commands) also captures it as a safety net.
+  xSemaphoreGive(sim_at_mutex);
+  Serial.println("[NTP] SIM: waiting for CNTP URC (mutex released)...");
+  LOG_INFO("NTP", "SIM: AT+CNTP sent, waiting for URC (mutex released)");
 
-      xSemaphoreGive(sim_at_mutex);
+  uint32_t t = millis();
+  bool got_cntp = false;
+  int cntp_code = -1;
+  long cntp_epoch = 0;
 
-      xSemaphoreTake(state_mutex, portMAX_DELAY);
-      sys_state.ntp_epoch_offset_ms = offset_ms;
-      sys_state.ntp_synced = true;
-      xSemaphoreGive(state_mutex);
-
-      Serial.printf("[NTP] SIM sync OK: epoch=%ld offset_ms=%lld\n", epoch, (long long)offset_ms);
-      LOG_INFO("NTP", "SIM sync OK: epoch=%ld offset=%lldms", epoch, (long long)offset_ms);
-      return true;
+  // Wait up to 30s for the +CNTP: URC (without holding the mutex).
+  // All Serial2 data goes through _smq_drain() → _smq_process_urcs(),
+  // which detects +CNTP: and sets _ntp_urc_ready. We never read Serial2 directly
+  // to avoid data fragmentation between tasks.
+  while (millis() - t < 30000) {
+    if (_ntp_urc_ready) {
+      cntp_code  = _ntp_urc_code;
+      cntp_epoch = _ntp_urc_epoch;
+      got_cntp   = true;
+      _ntp_urc_ready = false;
+      Serial.println("[NTP] SIM: +CNTP URC captured via mqtt_sim");
+      LOG_INFO("NTP", "SIM: +CNTP URC captured via mqtt_sim");
+      break;
     }
+    esp_task_wdt_reset();
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 
-  xSemaphoreGive(sim_at_mutex);
-  Serial.printf("[NTP] SIM NTP failed — reply: %.80s\n", reply);
-  LOG_WARN("NTP", "SIM sync failed");
+  if (got_cntp && cntp_code == 1 && cntp_epoch > 1700000000) {
+    uint32_t ms = millis();
+    int64_t offset_ms = (int64_t)cntp_epoch * 1000LL - (int64_t)ms;
+
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    sys_state.ntp_epoch_offset_ms = offset_ms;
+    sys_state.ntp_synced = true;
+    xSemaphoreGive(state_mutex);
+
+    Serial.printf("[NTP] SIM sync OK: epoch=%ld offset_ms=%lld\n", cntp_epoch, (long long)offset_ms);
+    LOG_INFO("NTP", "SIM sync OK: epoch=%ld offset=%lldms", cntp_epoch, (long long)offset_ms);
+    return true;
+  }
+
+  // CNTP failed — try AT+CCLK as fallback (network-synced modem clock)
+  // AT+CCLK returns the modem's RTC time, which is set from the network
+  // during registration. Less accurate than NTP but reliable on Cat-M.
+  Serial.println("[NTP] SIM: CNTP failed, trying AT+CCLK fallback");
+  LOG_INFO("NTP", "SIM: CNTP failed, trying AT+CCLK fallback");
+
+  if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+    const char* cclk = _sim_atReply("AT+CCLK?", 3000);
+    xSemaphoreGive(sim_at_mutex);
+
+    // Parse +CCLK: "yy/MM/dd,HH:mm:ss+TZ" or "yy/MM/dd,HH:mm:ss"
+    // Example: +CCLK: "25/07/07,14:30:00+36"
+    const char* q1 = strchr(cclk, '"');
+    if (q1) {
+      const char* q2 = strchr(q1 + 1, '"');
+      if (q2 && q2 > q1 + 1) {
+        char timebuf[32];
+        size_t tlen = (size_t)(q2 - q1 - 1);
+        if (tlen >= sizeof(timebuf)) tlen = sizeof(timebuf) - 1;
+        memcpy(timebuf, q1 + 1, tlen);
+        timebuf[tlen] = '\0';
+
+        struct tm tm_buf;
+        memset(&tm_buf, 0, sizeof(tm_buf));
+        int tz_quarters = 0;
+        int parsed = sscanf(timebuf, "%d/%d/%d,%d:%d:%d%d",
+                            &tm_buf.tm_year, &tm_buf.tm_mon, &tm_buf.tm_mday,
+                            &tm_buf.tm_hour, &tm_buf.tm_min, &tm_buf.tm_sec,
+                            &tz_quarters);
+        if (parsed >= 6) {
+          tm_buf.tm_year += 2000 - 1900;  // "25" → 2025 - 1900 = 125
+          tm_buf.tm_mon -= 1;  // months are 0-11
+          tm_buf.tm_isdst = 0;  // no DST
+
+          // Set timezone to UTC so mktime() interprets struct tm as UTC
+          // (configTime may have set it to JST from WiFi NTP)
+          setenv("TZ", "UTC0", 1);
+          tzset();
+          time_t utc_epoch = mktime(&tm_buf);
+
+          // Adjust for timezone: CCLK time is in local timezone (e.g., JST = +36)
+          // Since mktime() treats struct tm as UTC, we subtract the local offset
+          // to get true UTC. e.g., 14:30 JST → mktime gives epoch of 14:30 UTC,
+          // but actual UTC is 05:30, so subtract 9 hours (36 * 15min = 9h).
+          int32_t tz_offset_s = tz_quarters * 15 * 60;
+          utc_epoch -= tz_offset_s;
+
+          if (utc_epoch > 1700000000) {
+            uint32_t ms = millis();
+            int64_t offset_ms = (int64_t)utc_epoch * 1000LL - (int64_t)ms;
+
+            xSemaphoreTake(state_mutex, portMAX_DELAY);
+            sys_state.ntp_epoch_offset_ms = offset_ms;
+            sys_state.ntp_synced = true;
+            xSemaphoreGive(state_mutex);
+
+            Serial.printf("[NTP] SIM sync OK (CCLK): epoch=%ld offset_ms=%lld\n",
+                          (long)utc_epoch, (long long)offset_ms);
+            LOG_INFO("NTP", "SIM sync OK (CCLK): epoch=%ld offset=%lldms",
+                     (long)utc_epoch, (long long)offset_ms);
+            return true;
+          }
+        }
+        Serial.printf("[NTP] SIM: CCLK parse failed: %s\n", timebuf);
+        LOG_WARN("NTP", "SIM: CCLK parse failed: %s", timebuf);
+      }
+    }
+    Serial.printf("[NTP] SIM: CCLK response: %.80s\n", cclk);
+    LOG_WARN("NTP", "SIM: CCLK response: %.80s", cclk);
+  }
+
   return false;
 }
 
