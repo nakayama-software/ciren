@@ -14,6 +14,16 @@ TaskHandle_t h_publish    = NULL;
 TaskHandle_t h_aggregator = NULL;
 TaskHandle_t h_status     = NULL;
 
+// ── LoRa staleness recovery ────────────────────────────────────────────────
+// task_lora.h didefinisikan setelah file ini di-include — forward declare saja.
+// g_lora_last_iter_ms & h_lora didefinisikan di sana (extern di sini).
+extern volatile uint32_t g_lora_last_iter_ms;
+extern TaskHandle_t      h_lora;
+void lora_reinit(void);
+void task_lora(void *param);
+
+#define LORA_STALE_MS 6000   // longgar di atas durasi RecieveFrame normal (~1000ms)
+
 void task_watchdog(void* param) {
   // Subscribe this task to the Task Watchdog Timer
   esp_task_wdt_add(NULL);
@@ -33,6 +43,23 @@ void task_watchdog(void* param) {
     uint16_t errs = sys_state.err_counter;
     if (errs > 50) sys_state.err_counter = 0;
     xSemaphoreGive(state_mutex);
+
+    // ── LoRa staleness recovery ──────────────────────────────────────────────
+    // RecieveFrame() bisa hang total (kemungkinan noise/EMI dari modem SIM saat
+    // radio seluler aktif). task_lora sengaja TIDAK subscribe ke Task Watchdog
+    // sendiri (biar hang di situ tidak crash seluruh device) — jadi supervisi
+    // dilakukan manual di sini: kalau task_lora tidak lapor progres selama
+    // LORA_STALE_MS, restart cuma UART + task LoRa-nya, bukan seluruh device.
+    if (h_lora != NULL && g_lora_last_iter_ms != 0 &&
+        (millis() - g_lora_last_iter_ms) > LORA_STALE_MS) {
+      Serial.println("[WD] LoRa stale — restarting task_lora + UART");
+      LOG_WARN("WD", "LoRa stale >%dms — restarting", LORA_STALE_MS);
+      vTaskDelete(h_lora);
+      h_lora = NULL;
+      lora_reinit();
+      g_lora_last_iter_ms = millis();   // reset penanda supaya tidak langsung re-trigger
+      xTaskCreatePinnedToCore(task_lora, "lora", 4096, NULL, PRIO_STATUS, &h_lora, 1);
+    }
 
     Serial.printf("[WD] rb=%.0f%% err=%d connected=%s uptime=%lus\n",
       usage * 100, errs, state_is_connected() ? "yes" : "no", millis() / 1000);

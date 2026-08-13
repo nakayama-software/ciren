@@ -4,8 +4,6 @@
 #define FW_VERSION         "1.0.0"
 
 // ── TFT SPI 2.4" 320×240 (ILI9341) — ESP32-S3 ──────────────────────────────
-// Eksplisit SPI pins (ESP32-S3 tidak punya GPIO22-32, tidak ada pin23 klasik)
-// Gunakan SPI2/FSPI dengan pin bebas:
 #define PIN_TFT_SCK        12    // SPI Clock
 #define PIN_TFT_MOSI       11    // SPI MOSI (Master Out)
 #define PIN_TFT_MISO       13    // SPI MISO (-1 jika tidak disambung)
@@ -14,16 +12,19 @@
 #define PIN_TFT_RST        8     // Reset
 #define TFT_WIDTH          320
 #define TFT_HEIGHT         240
-#define TFT_ROTATION       1     // landscape (USB port on left)
+#define TFT_ROTATION       1     
 
 // ── Button ──────────────────────────────────────────────────────────────────
-// GPIO 0 = BOOT button pada ESP32-S3, active-LOW, internal pullup
 #define PIN_BTN            4
 
 #define PIN_MODEM_RX       16
 #define PIN_MODEM_TX       17
 #define PIN_MODEM_PWRKEY   5
 #define MODEM_BAUD         115200
+
+// LORA
+#define UART_TX_LORA       7
+#define UART_RX_LORA       6
 
 #define RB_SIZE            128
 #define AGG_WINDOW_MS      10

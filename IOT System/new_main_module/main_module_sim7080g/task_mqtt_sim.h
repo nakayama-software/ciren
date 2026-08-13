@@ -287,6 +287,7 @@ void mqtt_sim_task(void* param) {
       }
       _was_gprs_down = true;    // mark that GPRS was down
       vTaskDelay(pdMS_TO_TICKS(5000));
+      esp_task_wdt_reset();     // feed watchdog — loop bawah tidak tercapai lewat jalur ini
       continue;
     }
 
@@ -317,8 +318,16 @@ void mqtt_sim_task(void* param) {
     if (!_smq_connected) {
       Serial.printf("[SIM MQTT] Reconnecting (backoff=%lu ms)...\n", _smq_backoff_ms);
       LOG_INFO("SIM_MQTT", "Reconnecting (backoff=%lu ms)...", _smq_backoff_ms);
-      // Mutex held for the full connect sequence (can take ~60s)
-      if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(65000)) == pdTRUE) {
+      // Mutex held for the full connect sequence (can take ~60s).
+      // Acquire in 1s chunks so we keep feeding the watchdog while waiting our
+      // turn — task_sim_manager can legitimately hold this mutex for >15s
+      // during modem bring-up (boot wait + network registration + PDP activation).
+      bool got_at_mutex = false;
+      for (uint32_t _mw = 0; _mw < 65000 && !got_at_mutex; _mw += 1000) {
+        got_at_mutex = (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(1000)) == pdTRUE);
+        esp_task_wdt_reset();
+      }
+      if (got_at_mutex) {
         esp_task_wdt_reset();   // feed watchdog before long connect sequence
         if (_smq_connect()) {
           _smq_connected  = true;

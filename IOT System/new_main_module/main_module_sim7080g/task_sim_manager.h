@@ -16,7 +16,7 @@
 #include "task_logger.h"
 
 // ── Shared AT bus ─────────────────────────────────────────────────────────────
-static HardwareSerial& _sim_ser = Serial2;
+static HardwareSerial& _sim_ser = Serial1;
 SemaphoreHandle_t sim_at_mutex  = NULL;   // shared with task_mqtt_sim
 
 // ── Shared NTP URC result (set by _smq_process_urcs or _sim_flush when they
@@ -442,6 +442,7 @@ void sim_manager_task(void* param) {
   if (!sys_state.sim_enabled) {
     Serial.println("[SIM] sim_enabled=false, task exit");
     LOG_WARN("SIM", "SIM disabled — task exiting");
+    esp_task_wdt_delete(NULL);   // unsubscribe dulu — kalau tidak, watchdog nyimpen handle basi
     vTaskDelete(NULL);
     return;
   }
