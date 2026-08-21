@@ -103,11 +103,27 @@ void task_lora(void *param)
             {
                 Serial.printf("[LoRa] SIZE MISMATCH — expected %d, got %d (dropped)\n",
                               (int)sizeof(GpsPacket), data.recv_data_len);
+                Serial.print("[LoRa] raw bytes: ");
+                for (int i = 0; i < data.recv_data_len; i++) Serial.printf("%02X ", data.recv_data[i]);
+                Serial.println();
                 continue;
             }
             else
             {
                 GpsPacket *gpsPacket = (GpsPacket *)data.recv_data;
+
+                // Length matching sizeof(GpsPacket) isn't proof the bytes ARE a
+                // GpsPacket — noise/collisions can coincidentally hit the same
+                // length. magic+crc8 catch that before we trust node_id/lat/lon.
+                if (!gps_packet_valid(gpsPacket))
+                {
+                    Serial.printf("[LoRa] INVALID PACKET — magic/crc8 check failed (dropped)\n");
+                    Serial.print("[LoRa] raw bytes: ");
+                    for (int i = 0; i < data.recv_data_len; i++) Serial.printf("%02X ", data.recv_data[i]);
+                    Serial.println();
+                    continue;
+                }
+
                 Serial.printf("[LoRa RX] node=%u seq=%u lat=%.6f lon=%.6f sat=%d\n",
                               gpsPacket->node_id, gpsPacket->seq,
                               gpsPacket->latitude, gpsPacket->longitude,

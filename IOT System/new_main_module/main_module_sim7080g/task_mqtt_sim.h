@@ -396,6 +396,12 @@ void mqtt_sim_task(void* param) {
     PublishItem item;
     int drained = 0;
     while (drained < 16 && xQueueReceive(publish_queue, &item, 0) == pdTRUE) {
+      // Feed the watchdog every iteration — the mutex wait below (up to 12s)
+      // plus a stalled _smq_pub() (up to 5s "> " wait + 10s "OK" wait = 15s)
+      // can alone exceed the 15s TWDT timeout, and nothing else in this loop
+      // resets it. Under modem trouble (re-registration, no ">" prompt) this
+      // starved the watchdog and force-aborted the whole device.
+      esp_task_wdt_reset();
       if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(12000)) == pdTRUE) {
         bool ok = _smq_pub(item.topic, item.payload, item.len, item.qos);
         xSemaphoreGive(sim_at_mutex);

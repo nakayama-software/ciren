@@ -4,6 +4,8 @@ const SensorReading          = require('../models/SensorReading')
 const { SensorNode, Device } = require('../models/Device')
 const NodeConfig             = require('../models/NodeConfig')
 const Log                     = require('../models/Log')
+const GpsReading             = require('../models/GpsReading')
+const Area                   = require('../models/Area')
 const { sendConfig, sendNodeConfig } = require('../mqtt/handler')
 const { STYPE_LABEL }        = require('../utils/constants')
 
@@ -234,6 +236,83 @@ router.delete('/devices/:deviceId/data', async (req, res) => {
     // Hapus SensorNode juga
     await SensorNode.deleteMany(filter)
 
+    res.json({ ok: true, deleted: result.deletedCount })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ══════════════════════════════════════════════════
+//  GPS TRACKING (forklift, via LoRa)
+// ══════════════════════════════════════════════════
+
+// GET /api/devices/:deviceId/gps/latest
+// Posisi terkini SEMUA forklift (node_id) yang pernah lapor lewat device ini
+router.get('/devices/:deviceId/gps/latest', async (req, res) => {
+  try {
+    const latest = await GpsReading.aggregate([
+      { $match: { device_id: req.params.deviceId } },
+      { $sort:  { server_ts: -1 } },
+      { $group: {
+          _id: '$node_id',
+          doc: { $first: '$$ROOT' }
+      }},
+      { $replaceRoot: { newRoot: '$doc' } },
+      { $sort: { node_id: 1 } },
+    ])
+    res.json(latest)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// GET /api/devices/:deviceId/gps/history
+// Riwayat posisi — buat trail/route nanti. Query: ?node_id=1&hours=1&limit=2000
+router.get('/devices/:deviceId/gps/history', async (req, res) => {
+  try {
+    const { node_id, hours = 1 } = req.query
+    const from = new Date(Date.now() - Number(hours) * 3600 * 1000)
+
+    const filter = { device_id: req.params.deviceId, server_ts: { $gte: from } }
+    if (node_id) filter.node_id = Number(node_id)
+
+    const maxPoints = Math.min(Number(req.query.limit) || 2000, 5000)
+
+    const data = await GpsReading
+      .find(filter)
+      .sort({ server_ts: -1 })
+      .limit(maxPoints)
+      .lean()
+
+    res.json(data.reverse())
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ══════════════════════════════════════════════════
+//  AREAS (labeled zones drawn on the GPS map, per device)
+// ══════════════════════════════════════════════════
+
+// GET /api/devices/:deviceId/areas
+router.get('/devices/:deviceId/areas', async (req, res) => {
+  try {
+    const areas = await Area.find({ device_id: req.params.deviceId }).sort({ created_at: 1 }).lean()
+    res.json(areas)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// POST /api/devices/:deviceId/areas
+// Body: { label, points: [[lat, lng], ...] }
+router.post('/devices/:deviceId/areas', async (req, res) => {
+  try {
+    const { label, points } = req.body
+    if (!label || !Array.isArray(points) || points.length < 3) {
+      return res.status(400).json({ error: 'label and at least 3 points required' })
+    }
+    const area = await Area.create({ device_id: req.params.deviceId, label, points })
+    res.json(area)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// DELETE /api/devices/:deviceId/areas/:areaId
+router.delete('/devices/:deviceId/areas/:areaId', async (req, res) => {
+  try {
+    const result = await Area.deleteOne({ _id: req.params.areaId, device_id: req.params.deviceId })
     res.json({ ok: true, deleted: result.deletedCount })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })

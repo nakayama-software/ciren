@@ -268,7 +268,7 @@ static void IRAM_ATTR espnow_recv_cb(const uint8_t *mac,
 // ────────────────────────────────────────────────────────────────────────────
 void task_espnow_rx(void *param)
 {
-  esp_task_wdt_add(NULL);   // subscribe to Task Watchdog
+  esp_task_wdt_add(NULL); 
   espnow_log_queue = xQueueCreate(16, sizeof(EspNowLog));
   espnow_ack_queue = xQueueCreate(4, sizeof(PendingAck));
 

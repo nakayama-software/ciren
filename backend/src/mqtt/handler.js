@@ -3,6 +3,7 @@ const SensorReading          = require('../models/SensorReading')
 const { SensorNode, Device } = require('../models/Device')
 const NodeConfig             = require('../models/NodeConfig')
 const Log                     = require('../models/Log')
+const GpsReading             = require('../models/GpsReading')
 const { broadcast }          = require('../websocket/ws')
 const { FTYPE }              = require('../utils/constants')
 
@@ -11,6 +12,7 @@ const { FTYPE }              = require('../utils/constants')
 //   ciren/data/{device_id}     — data sensor (satu frame per message)
 //   ciren/status/{device_id}   — heartbeat device (GPS, batt, signal)
 //   ciren/hello/{device_id}    — saat pertama konek / setelah reboot
+//   ciren/gps/{device_id}      — posisi GPS forklift tracker (via LoRa)
 //
 // Backend publish ke main module:
 //   ciren/config/{device_id}   — remote config (mode, reboot, dll)
@@ -20,6 +22,7 @@ const TOPICS = [
   'ciren/status/+',
   'ciren/hello/+',
   'ciren/log/+',
+  'ciren/gps/+',
 ]
 
 let client = null
@@ -248,6 +251,7 @@ async function handleMessage(topic, message) {
   if (topicType === 'status') return handleDeviceStatus(deviceId, payload)
   if (topicType === 'hello')  return handleDeviceHello(deviceId, payload)
   if (topicType === 'log')    return handleLogs(deviceId, payload)
+  if (topicType === 'gps')    return handleGpsData(deviceId, payload)
 }
 
 // ─── Sensor data dari main module ─────────────────
@@ -549,6 +553,53 @@ async function handleLogs(deviceId, payload) {
         console.error('[MQTT] Log insertMany error:', err.message)
       }
     }
+  }
+}
+
+// Sane upper bound for a forklift node_id — a corrupted/collided LoRa frame
+// reinterpreted as a GpsPacket can carry a wildly out-of-range node_id
+// (e.g. 2097699, 84226866) instead of a real forklift ID. Adjust via env if
+// the fleet grows past this; real IDs are expected to be small integers.
+const GPS_NODE_ID_MAX = Number(process.env.GPS_NODE_ID_MAX) || 100
+
+// ─── GPS dari forklift tracker (via LoRa → main module) ───
+// Payload: { device_id, type:"gps", node_id, seq, lat, lon, alt, speed, heading, hdop, sat, timestamp }
+// Bisa juga array (batch) — sama seperti handleLogs.
+async function handleGpsData(deviceId, payload) {
+  const items = Array.isArray(payload) ? payload : [payload]
+
+  for (const item of items) {
+    if (item.lat == null || item.lon == null) {
+      console.warn(`[MQTT] GPS item missing lat/lon from ${deviceId}:`, JSON.stringify(item).slice(0, 120))
+      continue
+    }
+
+    if (!Number.isInteger(item.node_id) || item.node_id < 1 || item.node_id > GPS_NODE_ID_MAX) {
+      console.warn(`[MQTT] GPS item has invalid node_id from ${deviceId}: ${item.node_id}`)
+      continue
+    }
+
+    const doc = {
+      device_id: deviceId,
+      node_id:   item.node_id,
+      seq:       item.seq,
+      lat:       item.lat,
+      lon:       item.lon,
+      alt:       item.alt,
+      speed:     item.speed,
+      heading:   item.heading,
+      hdop:      item.hdop,
+      sat:       item.sat,
+      device_ts: item.timestamp,
+    }
+
+    try {
+      await GpsReading.create(doc)
+    } catch (e) {
+      console.error('[MQTT] GPS save error:', e.message)
+    }
+
+    broadcast('gps_data', { ...doc, server_ts: new Date().toISOString() })
   }
 }
 

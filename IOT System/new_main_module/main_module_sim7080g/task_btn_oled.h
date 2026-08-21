@@ -1005,21 +1005,11 @@ void btn_oled_init()
 {
   pinMode(PIN_BTN, INPUT_PULLUP);
 
-  // ESP32-S3: eksplisit set SPI pins — harus dilakukan SEBELUM tft.begin()
-  // agar hardware SPI menggunakan pin yang benar (ESP32-S3 tidak ada pin 23)
   SPI.begin(PIN_TFT_SCK, PIN_TFT_MISO, PIN_TFT_MOSI, -1);
   tft.begin(40000000UL);   // 40 MHz SPI
   tft.setRotation(TFT_ROTATION);
   tft.fillScreen(C_BG);
   tft_ready = true;
-
-  // ── Boot splash ──────────────────────────────────────────────────────────
-  // Layout (content area: y 37–221 = 185px tall):
-  //   Logo  56px  y=62
-  //   Title 16px  y=128  (size 2, 18 chars × 12px = 216px → x=52)
-  //   ─────────── y=150
-  //   Device 8px  y=158  (size 1, ~24 chars × 6px = 144px → x=88)
-  //   Boot   8px  y=174  (size 1, 10 chars × 6px = 60px → x=130)
 
   // Logo — horizontally centred
   tft.drawRGBBitmap(
@@ -1060,21 +1050,15 @@ void task_oled(void *param)
   Preferences *prefs       = (Preferences *)param;
   uint32_t    last_draw_ms = 0;
 
-  // Reinisialisasi TFT di Core 0 context (task ini berjalan di Core 0,
-  // sedangkan btn_oled_init() berjalan di Core 1/setup). Beberapa versi
-  // Adafruit + ESP32-S3 perlu SPI di-init ulang dari core yang sama dengan
-  // core yang menggunakannya.
-  vTaskDelay(pdMS_TO_TICKS(50));  // beri waktu system settle dulu
+  vTaskDelay(pdMS_TO_TICKS(50)); 
   SPI.begin(PIN_TFT_SCK, PIN_TFT_MISO, PIN_TFT_MOSI, -1);
   tft.begin(40000000UL);
   tft.setRotation(TFT_ROTATION);
   tft_ready  = true;
-  page_dirty = true;   // paksa full redraw setelah reinit
+  page_dirty = true;   
   Serial.println("[TFT] Task reinit OK (Core 0)");
 
   for (;;) {
-    // Button di-poll setiap 20ms (50Hz) agar press pendek tidak terlewat.
-    // TFT hanya di-refresh setiap TFT_REFRESH_MS (200ms).
     vTaskDelay(pdMS_TO_TICKS(20));
 
     portal_tick();

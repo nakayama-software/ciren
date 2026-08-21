@@ -14,7 +14,7 @@ typedef struct {
   char     topic[64];
   char     payload[PQ_MAX_PAYLOAD];
   uint16_t len;
-  uint8_t  qos;   // 0 = fire-and-forget, 1 = confirmed
+  uint8_t  qos;  
 } PublishItem;
 
 static esp_mqtt_client_handle_t mqtt_client = NULL;

@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "ciren_config.h"
+#include "ciren_frame.h"   // reuse ciren_crc8() for GpsPacket validation
 
 typedef struct
 {
@@ -12,8 +13,20 @@ typedef struct
   uint8_t ftype;
 } __attribute__((packed)) SensorPacket;
 
+// GPS packet (forklift tracker → LoRa → main module).
+// magic + crc8 guard against a corrupted/collided radio frame being silently
+// reinterpreted as a valid packet just because its length happens to match
+// sizeof(GpsPacket) — a length-only check let garbled frames through and
+// they showed up on the dashboard as phantom nodes with garbage IDs
+// (e.g. node 2097699, 84226866) since whatever raw bytes landed at the
+// node_id offset were trusted as-is.
+// Transmitter contract: set magic = GPS_PACKET_MAGIC and
+// crc8 = ciren_crc8((uint8_t*)&pkt, sizeof(GpsPacket) - 1) before sending.
+#define GPS_PACKET_MAGIC 0xA5
+
 typedef struct
 {
+  uint8_t  magic;
   uint32_t node_id;
   uint32_t seq;
   float latitude;
@@ -24,7 +37,14 @@ typedef struct
   float hdop;
   uint8_t satellites;
   uint8_t flags;
+  uint8_t crc8;   // CRC8 over bytes [magic..flags] — must stay the last field
 } __attribute__((packed)) GpsPacket;
+
+inline bool gps_packet_valid(const GpsPacket *pkt)
+{
+  if (pkt->magic != GPS_PACKET_MAGIC) return false;
+  return ciren_crc8((const uint8_t *)pkt, sizeof(GpsPacket) - 1) == pkt->crc8;
+}
 
 static portMUX_TYPE rb_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE rb_gps_mux = portMUX_INITIALIZER_UNLOCKED;
