@@ -43,6 +43,7 @@ extern SemaphoreHandle_t state_mutex;
 // Build topic strings dari device_id yang sudah diset — panggil setelah device_id di-set
 void state_build_topics() {
   snprintf(sys_state.topic_data,   sizeof(sys_state.topic_data),   "ciren/data/%s",   sys_state.device_id);
+  snprintf(sys_state.topic_gps,   sizeof(sys_state.topic_gps),   "ciren/gps/%s",   sys_state.device_id);
   snprintf(sys_state.topic_status, sizeof(sys_state.topic_status), "ciren/status/%s", sys_state.device_id);
   snprintf(sys_state.topic_hello,  sizeof(sys_state.topic_hello),  "ciren/hello/%s",  sys_state.device_id);
   snprintf(sys_state.topic_config, sizeof(sys_state.topic_config), "ciren/config/%s", sys_state.device_id);

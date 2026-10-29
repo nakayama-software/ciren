@@ -62,8 +62,12 @@ const PasswordInput = ({ id, value, onChange, placeholder, show, onToggle, autoC
   </div>
 )
 
-export default function RegisterPage({ onLogin, onGoLogin, theme, toggleTheme }) {
-  const [language, setLanguage] = useState('ja')
+export default function RegisterPage({ onLogin, onGoLogin, theme, toggleTheme, lang, setLang }) {
+  // Shared with the rest of the app (App.jsx, persisted to localStorage) so the
+  // language choice carries over across Login/Register/Devices/Dashboard instead
+  // of each page silently resetting back to its own independent default.
+  const language = lang
+  const setLanguage = setLang
   const t = translations[language]
 
   const [tourActive, setTourActive] = useState(() => getStage() === 'register')

@@ -1,0 +1,169 @@
+#pragma once
+
+#define DEVICE_ID_PREFIX   "MM"     // prefix untuk auto-generated device ID
+#define FW_VERSION         "1.0.0"
+
+// ── TFT SPI 2.4" 320×240 (ILI9341) — ESP32-S3 ──────────────────────────────
+#define PIN_TFT_SCK        12    // SPI Clock
+#define PIN_TFT_MOSI       11    // SPI MOSI (Master Out)
+#define PIN_TFT_MISO       13    // SPI MISO (-1 jika tidak disambung)
+#define PIN_TFT_CS         10    // Chip Select
+#define PIN_TFT_DC         9     // Data/Command
+#define PIN_TFT_RST        8     // Reset
+#define TFT_WIDTH          320
+#define TFT_HEIGHT         240
+#define TFT_ROTATION       1     
+
+// ── Button ──────────────────────────────────────────────────────────────────
+#define PIN_BTN            4
+
+#define PIN_MODEM_RX       16
+#define PIN_MODEM_TX       17
+#define PIN_MODEM_PWRKEY   5
+#define MODEM_BAUD         115200
+
+// LORA
+#define UART_TX_LORA       7
+#define UART_RX_LORA       6
+
+#define RB_SIZE            128
+#define AGG_WINDOW_MS      10
+
+// ── Store-and-forward flash buffer (overflow for publish_queue, DATA/DATA_TYPED only) ──
+#define FLASH_BUFFER_PATH      "/fb_ring.bin"
+#define FLASH_BUFFER_CAPACITY  2048        // records — ~7 days at today's 20-min interval, 4 series
+#define FB_MIN_VALID_EPOCH_S   1577836800  // 2020-01-01T00:00:00Z — same guard as the backend's eventMs
+
+#define WIFI_TIMEOUT_MS    15000
+#define WIFI_COOLDOWN_MS   20000
+#define WIFI_RETRY_MIN_MS    1000    // initial retry delay after WiFi failure
+#define WIFI_RETRY_MAX_MS    30000   // max retry delay (cap at 30s)
+#define RECONNECT_DELAY_1  1000
+#define RECONNECT_DELAY_2  2000
+#define RECONNECT_DELAY_3  4000
+
+#define MQTT_PORT          1883
+#define MQTT_QOS           1     // untuk HELLO/STATUS (penting, harus delivered)
+#define SIM_MQTT_QOS       MQTT_QOS
+#define MQTT_QOS_DATA      0     // untuk sensor data (high-freq, fire-and-forget)
+#define MQTT_KEEPALIVE     30     // reduced from 60 for faster disconnect detection
+#define MQTT_BACKOFF_MIN_MS  10000   // initial reconnect delay after failure
+#define MQTT_BACKOFF_MAX_MS  120000  // max reconnect delay (2 min)
+// If MQTT stays disconnected this long continuously, stop just retrying the
+// socket-level connect and escalate to a full modem reset (_sim_reset_modem)
+// — a flaky-signal episode can otherwise retry at the MQTT layer for hours
+// without ever re-registering on the network. See mm_db59b0_signal_instability
+// investigation (2026-09/10 outages) for why this was added.
+#define MQTT_STUCK_RESET_MS  300000  // 5 min of continuous disconnect → escalate
+
+#define BTN_HOLD_MS        5000
+#define BTN_DEBOUNCE_MS    30
+
+#define TFT_REFRESH_MS     200    // display refresh interval
+#define OLED_REFRESH_MS    TFT_REFRESH_MS   // compat alias
+#define OLED_TOTAL_PAGES   4
+
+#define PAGE_GATEWAY       0
+#define PAGE_WIFI          1
+#define PAGE_SIM           2
+#define PAGE_SETTINGS      3
+// SIM enable/disable moved to the WiFi-setup web portal (Advanced section) —
+// PAGE_SIM_CTRL removed.
+
+#define PORTAL_PASS        "setup1234"
+#define PORTAL_PORT        80
+
+#define SIM_BOOT_WAIT_MS   8000
+#define SIM_RETRY_MS       60000
+#define SIM_SIGNAL_INT_MS  15000
+
+// ── Remote Logger ──────────────────────────────────────────────────────────────
+#define LOG_QUEUE_SIZE     32
+#define LOG_BATCH_MS       5000
+#define LOG_MAX_BATCH      16
+#define LOG_MAX_MSG        128
+
+#define PRIO_RX            5
+#define PRIO_CONN          4
+#define PRIO_AGG           3
+#define PRIO_PUBLISH       3
+#define PRIO_WATCHDOG      2
+#define PRIO_OLED          2
+#define PRIO_CONFIG        2
+#define PRIO_STATUS        2
+#define PRIO_LOGGER        2
+
+// ── Stack sizes ───────────────────────────────────────────────────────────────
+
+#define STACK_RX           5120   // was 4096
+#define STACK_CONN         8192   // was 5120 — WiFi.begin() probe in SIM mode needs more stack
+#define STACK_AGG          6144
+#define STACK_PUBLISH      6144
+#define STACK_WATCHDOG     4096   // was 2048 — HWM monitor butuh ruang printf
+#define STACK_OLED         16384  // was 8192 — portal HTML builder + String ops need headroom
+#define STACK_CONFIG       3072
+#define STACK_STATUS       4096   // stat HWM was 652/3072 (21%) — naikkan headroom
+#define STACK_SIM_MGR      4096
+#define STACK_MQTT_SIM     4096
+#define STACK_LOGGER       6144
+
+#define STYPE_TEMPERATURE  0x01
+#define STYPE_HUMIDITY     0x02
+#define STYPE_ACCEL_X      0x03
+#define STYPE_ACCEL_Y      0x04
+#define STYPE_ACCEL_Z      0x05
+#define STYPE_GYRO_X       0x06
+#define STYPE_GYRO_Y       0x07
+#define STYPE_GYRO_Z       0x08
+#define STYPE_DISTANCE     0x09
+#define STYPE_TEMP_1WIRE   0x0A
+#define STYPE_PITCH        0x10
+#define STYPE_ROLL         0x11
+#define STYPE_YAW          0x12
+
+#define FTYPE_DATA         0x01
+#define FTYPE_HELLO        0x02
+#define FTYPE_HEARTBEAT    0x03
+#define FTYPE_DATA_TYPED   0x04
+#define FTYPE_HB_TYPED     0x05
+#define FTYPE_ERROR        0xFF
+#define FTYPE_STALE        0xFE
+
+// TOPIC_* dibuild runtime dari sys_state.device_id — lihat state_build_topics()
+// TOPIC_SERVER_HB satu-satunya yang tetap static (bukan per-device)
+#define TOPIC_SERVER_HB    "ciren/server/heartbeat"
+
+#define SERVER_HB_TIMEOUT_MS  120000   // consider server offline after 120s no heartbeat (tolerate SIM latency)
+
+#define TWDT_TIMEOUT_MS   30000   // 30s — portal mode needs more headroom for HTTP/SVG operations
+#define WD_CHECK_MS        10000   // must be < TWDT_TIMEOUT_MS
+#define RB_WARN_THRESHOLD  0.8f
+
+#define CTRL_TIMEOUT_MS    30000   // consider controller offline after 30s no packet (matches HB_INTERVAL_MS)
+#define MAX_CTRL_IDS       16      // max distinct ctrl_id values tracked
+#define MAX_PORTS_PER_CTRL 8       // max ports tracked per controller
+#define MAX_STYPES_PER_PORT 9     // max sensor types per port (IMU = 9 axes)
+
+// ── Status message intervals ──────────────────────────────────────────────────
+#define STATUS_INTERVAL_WIFI_MS  10000   // status publish every 10s on WiFi
+#define STATUS_INTERVAL_SIM_MS   30000   // status publish every 30s on SIM (save bandwidth)
+
+// ── Node interval config ──────────────────────────────────────────────────────
+#define FTYPE_CONFIG        0x10  // main module → sensor controller
+#define FTYPE_CONFIG_ACK    0x11  // sensor controller → main module
+#define MAX_NODE_CONFIGS    72    // 9 ctrl × 8 ports
+#define NODE_CONFIG_ACK_MS  600   // wait this long for ACK before retry
+#define NODE_CONFIG_RETRIES 3     // max retries per config send
+
+// ── ESP-NOW fixed channel (used when WiFi is not connected / SIM mode) ────────
+// Both main module and sensor controllers must agree on this channel.
+// WiFi ch 1 is the default fallback — avoids roaming scan when unassociated.
+#define ESPNOW_FIXED_CHANNEL  1
+
+// ── NTP ───────────────────────────────────────────────────────────────────────
+#define NTP_SYNC_INTERVAL_MS  3600000   // re-sync setiap 1 jam
+#define NTP_TIMEOUT_MS        10000     // timeout untuk NTP request (WiFi)
+
+// ── SIM7080G (M5STAMP CatM) ───────────────────────────────────────────────────
+// CAT-M bands for Japan (NTT Docomo / SORACOM / IIJmio / etc.)
+#define SIM_CATM_BANDS        "1,3,8,18,19,26"

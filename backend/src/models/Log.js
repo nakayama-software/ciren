@@ -17,7 +17,7 @@ logSchema.index({ device_id: 1, server_ts: -1 })
 // Query index: level-filtered queries
 logSchema.index({ device_id: 1, level: 1, server_ts: -1 })
 
-// TTL index: auto-delete logs after 7 days
-logSchema.index({ server_ts: 1 }, { expireAfterSeconds: 604800 })
+// TTL index: auto-delete logs after 30 days
+logSchema.index({ server_ts: 1 }, { expireAfterSeconds: 2592000 })
 
 module.exports = mongoose.model('Log', logSchema)

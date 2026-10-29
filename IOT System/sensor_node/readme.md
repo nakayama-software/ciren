@@ -16,6 +16,13 @@ Seeeduino XIAO firmware for the sensor node layer. Reads sensor data and sends C
 - **Frame type:** `FTYPE_DATA_TYPED` with shared timestamp for both values
 - **STYPE:** `STYPE_TEMPERATURE` (0x01), `STYPE_HUMIDITY` (0x02)
 
+### `node_sht45`
+- **Sensor:** Sensirion SHT45 (I2C, address 0x44)
+- **Output:** Temperature (°C) + Humidity (%RH)
+- **Frame type:** `FTYPE_DATA_TYPED` with shared timestamp for both values
+- **STYPE:** `STYPE_TEMPERATURE` (0x01), `STYPE_HUMIDITY` (0x02) — same STYPE IDs as `node_dht20`; a drop-in alternative sensor for the same measurement, no controller/backend change needed
+- **Note:** no field calibration fit yet (unlike `node_dht20`'s unit-specific fit) — ships raw, relying on Sensirion's rated ±1.0°C / ±1.0%RH accuracy
+
 ### `node_mpu6050`
 - **Sensor:** MPU6050 (I2C, address 0x68)
 - **Output:** Acceleration XYZ (m/s²), Gyro XYZ (rad/s), Pitch/Roll/Yaw (°)
