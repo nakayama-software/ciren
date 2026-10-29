@@ -92,6 +92,29 @@ export function getLatest(id) {
   return apiFetch(`/api/devices/${id}/data/latest`)
 }
 
+// GPS — posisi terkini semua forklift (node_id) untuk satu device
+export function getGpsLatest(id) {
+  return apiFetch(`/api/devices/${id}/gps/latest`)
+}
+
+// Areas — zona yang digambar & dilabeli user di peta GPS, per device
+export function getAreas(deviceId) {
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/areas`)
+}
+
+export function createArea(deviceId, { label, points }) {
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/areas`, {
+    method: 'POST',
+    body: JSON.stringify({ label, points }),
+  })
+}
+
+export function deleteArea(deviceId, areaId) {
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/areas/${encodeURIComponent(areaId)}`, {
+    method: 'DELETE',
+  })
+}
+
 // Get recent data (multi-stype) for initial IMU snapshot
 export function getDeviceData(id, ctrl_id, port_num, limit = 50) {
   let url = `/api/devices/${id}/data?limit=${limit}`

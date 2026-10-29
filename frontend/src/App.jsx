@@ -18,7 +18,7 @@ import {
   ScrollText,
 } from 'lucide-react'
 import {
-  getDevice, getLatest, getUserDevices, clearToken, getToken,
+  getDevice, getLatest, getUserDevices, getGpsLatest, clearToken, getToken,
 } from './lib/api'
 import { getNodeKey, getReadingKey, isIMUSensor, countDisplayNodes } from './utils/sensors'
 import { translations } from './utils/translation'
@@ -29,6 +29,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DeviceManagementPage from './pages/DeviceManagementPage'
 import LogsPage from './pages/LogsPage'
+import GpsControllersSection from './components/GpsControllersSection'
 import OnboardingTour, { getStage, setStage } from './components/OnboardingTour'
 
 // Build WebSocket URL from env or derive from VITE_API_BASE
@@ -113,6 +114,7 @@ export default function App() {
     setDevices({})
     setLatestData({})
     setNodeStatus({})
+    setGpsData({})
     setLiveLogs([])
     setSelectedDeviceId(null)
     setSelectedCtrlId(null)
@@ -125,6 +127,8 @@ export default function App() {
   // latestData: { [deviceId]: { [getReadingKey(ctrl_id, port_num, sensor_type)]: reading } }
   const [latestData, setLatestData] = useState({})
   const [nodeStatus, setNodeStatus] = useState({})
+  // gpsData: { [deviceId]: { [node_id]: reading } } — forklift positions, live-merged over WS
+  const [gpsData, setGpsData] = useState({})
   const [selectedDeviceId, setSelectedDeviceId] = useState(null)
   const [selectedCtrlId, setSelectedCtrlId] = useState(null)
   const [wsStatus, setWsStatus] = useState('connecting')
@@ -149,14 +153,16 @@ export default function App() {
 
       const devMap = {}
       const latMap = {}
+      const gpsMap = {}
 
       await Promise.allSettled(
         userDevIds.map(async (deviceId) => {
           try {
             // getLatest returns one reading per (ctrl_id, port_num, sensor_type) — correct for all sensor types
-            const [detail, latestArr] = await Promise.all([
+            const [detail, latestArr, gpsArr] = await Promise.all([
               getDevice(deviceId),
               getLatest(deviceId),
+              getGpsLatest(deviceId).catch(() => []),
             ])
             const { nodes, ...deviceFields } = detail
             devMap[deviceId] = { device: deviceFields, nodes: nodes || [] }
@@ -172,9 +178,19 @@ export default function App() {
               })
             }
             latMap[deviceId] = nodeReadings
+
+            // Build gpsData map keyed by node_id
+            const nodeGps = {}
+            if (Array.isArray(gpsArr)) {
+              gpsArr.forEach((r) => {
+                if (r.node_id != null) nodeGps[r.node_id] = { ...r, device_id: deviceId }
+              })
+            }
+            gpsMap[deviceId] = nodeGps
           } catch {
             devMap[deviceId] = { device: { device_id: deviceId }, nodes: [] }
             latMap[deviceId] = {}
+            gpsMap[deviceId] = {}
           }
         })
       )
@@ -182,6 +198,7 @@ export default function App() {
       if (!mountedRef.current) return
       setDevices(devMap)
       setLatestData(latMap)
+      setGpsData(gpsMap)
 
       const firstId = Object.keys(devMap)[0]
       if (firstId) setSelectedDeviceId(firstId)
@@ -361,6 +378,16 @@ export default function App() {
               } catch { /* ignore */ }
             }, 1000)
           }
+        } else if (type === 'gps_data') {
+          // Forklift GPS position — merged by node_id, keyed per device.
+          // Handled here (not in a child's own WS listener) so it stays
+          // bound to the CURRENT socket across reconnects.
+          const { device_id, node_id } = payload
+          if (device_id == null || node_id == null) return
+          setGpsData((prev) => ({
+            ...prev,
+            [device_id]: { ...(prev[device_id] || {}), [node_id]: payload },
+          }))
         } else if (type === 'device_log') {
           // Real-time log entry from firmware
           setLiveLogs(prev => [...prev.slice(-999), payload])
@@ -397,6 +424,7 @@ export default function App() {
   const selectedNodes = selectedEntry?.nodes || []
   const selectedLatest = selectedDeviceId ? (latestData[selectedDeviceId] || {}) : {}
   const selectedNodeStatus = selectedDeviceId ? (nodeStatus[selectedDeviceId] || {}) : {}
+  const selectedForklifts = selectedDeviceId ? Object.values(gpsData[selectedDeviceId] || {}) : []
 
   const deviceIds = Object.keys(devices)
 
@@ -656,6 +684,8 @@ export default function App() {
         onGoRegister={() => setPage(PAGE_REGISTER)}
         theme={theme}
         toggleTheme={toggleTheme}
+        lang={lang}
+        setLang={setLang}
       />
     )
   }
@@ -667,6 +697,8 @@ export default function App() {
         onGoLogin={() => setPage(PAGE_LOGIN)}
         theme={theme}
         toggleTheme={toggleTheme}
+        lang={lang}
+        setLang={setLang}
       />
     )
   }
@@ -679,6 +711,8 @@ export default function App() {
         onLogout={handleLogout}
         theme={theme}
         toggleTheme={toggleTheme}
+        lang={lang}
+        setLang={setLang}
       />
     )
   }
@@ -752,6 +786,9 @@ export default function App() {
       {/* Device overview */}
       {!devicesLoading && selectedDevice && (
         <>
+          {/* GPS Controllers — forklift positions for this main module, above Sensor Controllers */}
+          <GpsControllersSection deviceId={selectedDeviceId} forklifts={selectedForklifts} lang={lang} />
+
           {/* Top: Controller cards (left) + Main Module Status (right compact) */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
 
