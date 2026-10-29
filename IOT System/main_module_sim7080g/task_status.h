@@ -44,6 +44,8 @@ void task_status(void* param) {
 
     PublishItem item;
     item.qos = MQTT_QOS;   // QoS=1 untuk HELLO dan STATUS
+    item.from_flash  = false;   // never a replayed record — see task_flash_store.h
+    item.flash_count = 0;
 
     if (!hello_sent) {
       strncpy(item.topic, sys_state.topic_hello, sizeof(item.topic));

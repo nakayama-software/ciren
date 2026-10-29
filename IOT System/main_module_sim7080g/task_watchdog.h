@@ -42,6 +42,8 @@ void task_watchdog(void* param) {
     xSemaphoreTake(state_mutex, portMAX_DELAY);
     uint16_t errs = sys_state.err_counter;
     if (errs > 50) sys_state.err_counter = 0;
+    int8_t sim_signal = sys_state.sim_signal;   // CSQ, -1 if never polled yet
+    bool   sim_gprs   = sys_state.sim_gprs;
     xSemaphoreGive(state_mutex);
 
     // ── LoRa staleness recovery ──────────────────────────────────────────────
@@ -91,7 +93,14 @@ void task_watchdog(void* param) {
     if (_wd_log_counter >= 5) {
       _wd_log_counter = 0;
       uint32_t uptime_s = millis() / 1000;
-      LOG_INFO("WD", "rb=%d%% err=%d conn=%s up=%lus", (int)(usage * 100), errs, state_is_connected() ? "yes" : "no", uptime_s);
+      // sim_signal/sim_gprs logged every cycle here (not just on FAIR/UNKNOWN
+      // transition in task_sim_manager.h) so a continuous CSQ timeline exists
+      // for correlating future long outages with signal quality — previously
+      // only transition events were logged, which went silent during a sustained
+      // bad-signal episode (no new transition = no new log line).
+      LOG_INFO("WD", "rb=%d%% err=%d conn=%s up=%lus sig=%d pdp=%s",
+               (int)(usage * 100), errs, state_is_connected() ? "yes" : "no", uptime_s,
+               (int)sim_signal, sim_gprs ? "up" : "down");
     }
   }
 }

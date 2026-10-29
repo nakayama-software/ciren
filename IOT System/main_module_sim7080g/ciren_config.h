@@ -29,6 +29,11 @@
 #define RB_SIZE            128
 #define AGG_WINDOW_MS      10
 
+// ── Store-and-forward flash buffer (overflow for publish_queue, DATA/DATA_TYPED only) ──
+#define FLASH_BUFFER_PATH      "/fb_ring.bin"
+#define FLASH_BUFFER_CAPACITY  2048        // records — ~7 days at today's 20-min interval, 4 series
+#define FB_MIN_VALID_EPOCH_S   1577836800  // 2020-01-01T00:00:00Z — same guard as the backend's eventMs
+
 #define WIFI_TIMEOUT_MS    15000
 #define WIFI_COOLDOWN_MS   20000
 #define WIFI_RETRY_MIN_MS    1000    // initial retry delay after WiFi failure
@@ -44,19 +49,26 @@
 #define MQTT_KEEPALIVE     30     // reduced from 60 for faster disconnect detection
 #define MQTT_BACKOFF_MIN_MS  10000   // initial reconnect delay after failure
 #define MQTT_BACKOFF_MAX_MS  120000  // max reconnect delay (2 min)
+// If MQTT stays disconnected this long continuously, stop just retrying the
+// socket-level connect and escalate to a full modem reset (_sim_reset_modem)
+// — a flaky-signal episode can otherwise retry at the MQTT layer for hours
+// without ever re-registering on the network. See mm_db59b0_signal_instability
+// investigation (2026-09/10 outages) for why this was added.
+#define MQTT_STUCK_RESET_MS  300000  // 5 min of continuous disconnect → escalate
 
 #define BTN_HOLD_MS        5000
 #define BTN_DEBOUNCE_MS    30
 
 #define TFT_REFRESH_MS     200    // display refresh interval
 #define OLED_REFRESH_MS    TFT_REFRESH_MS   // compat alias
-#define OLED_TOTAL_PAGES   5
+#define OLED_TOTAL_PAGES   4
 
 #define PAGE_GATEWAY       0
 #define PAGE_WIFI          1
 #define PAGE_SIM           2
 #define PAGE_SETTINGS      3
-#define PAGE_SIM_CTRL      4
+// SIM enable/disable moved to the WiFi-setup web portal (Advanced section) —
+// PAGE_SIM_CTRL removed.
 
 #define PORTAL_PASS        "setup1234"
 #define PORTAL_PORT        80

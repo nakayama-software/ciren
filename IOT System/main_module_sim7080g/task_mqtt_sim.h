@@ -14,10 +14,16 @@
 #include "system_state.h"
 #include "task_publish.h"   // for publish_queue + PublishItem
 #include "task_logger.h"
+#include "task_flash_store.h"   // for fb_confirm() — see PublishItem.from_flash
 #include <esp_task_wdt.h>
 
 static bool     _smq_connected  = false;
 static uint32_t _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;
+// 0 = currently connected (or not yet tracking); set to millis() the moment
+// we first notice we're disconnected, cleared back to 0 on successful connect.
+// Used to escalate to a full modem reset if stuck disconnected too long —
+// see MQTT_STUCK_RESET_MS in ciren_config.h.
+static uint32_t _smq_disconnected_since_ms = 0;
 
 // ── Shared drain buffer — no heap alloc/free per URC poll cycle ───────────────
 static char _smq_drainbuf[1024];
@@ -281,9 +287,19 @@ void mqtt_sim_task(void* param) {
     // Only active when SIM mode + GPRS ready
     if (!sys_state.sim_enabled || !sys_state.sim_gprs) {
       if (_smq_connected) {
-        xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
-        _smq_disconnect();
-        xSemaphoreGive(sim_at_mutex);
+        // Bounded, watchdog-fed wait — GPRS-not-ready and task_sim_manager
+        // holding sim_at_mutex for 15s+ during modem bring-up are likely to
+        // coincide (both happen right after boot/reconnect), so an unbounded
+        // portMAX_DELAY here risked the same watchdog starvation as below.
+        bool got_mutex = false;
+        for (uint32_t _mw = 0; _mw < 30000 && !got_mutex; _mw += 1000) {
+          got_mutex = (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(1000)) == pdTRUE);
+          esp_task_wdt_reset();
+        }
+        if (got_mutex) {
+          _smq_disconnect();
+          xSemaphoreGive(sim_at_mutex);
+        }
       }
       _was_gprs_down = true;    // mark that GPRS was down
       vTaskDelay(pdMS_TO_TICKS(5000));
@@ -305,17 +321,30 @@ void mqtt_sim_task(void* param) {
 
     if (strcmp(mode, "sim") != 0) {
       if (_smq_connected) {
-        xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
-        _smq_disconnect();
-        xSemaphoreGive(sim_at_mutex);
-        LOG_INFO("SIM_MQTT", "Disconnected — switched to WiFi mode");
+        // Bounded, watchdog-fed wait — sim_at_mutex can legitimately be held
+        // by task_sim_manager for 15s+ during modem bring-up. portMAX_DELAY
+        // here (with no reset in this branch at all) let that starve the
+        // watchdog and abort() the device — same bug class as the publish
+        // drain loop and _sim_sendAT() fixed earlier.
+        bool got_mutex = false;
+        for (uint32_t _mw = 0; _mw < 30000 && !got_mutex; _mw += 1000) {
+          got_mutex = (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(1000)) == pdTRUE);
+          esp_task_wdt_reset();
+        }
+        if (got_mutex) {
+          _smq_disconnect();
+          xSemaphoreGive(sim_at_mutex);
+          LOG_INFO("SIM_MQTT", "Disconnected — switched to WiFi mode");
+        }
       }
       vTaskDelay(pdMS_TO_TICKS(5000));
+      esp_task_wdt_reset();
       continue;
     }
 
     // ── (Re)connect ───────────────────────────────────────────────────────────
     if (!_smq_connected) {
+      if (_smq_disconnected_since_ms == 0) _smq_disconnected_since_ms = millis();
       Serial.printf("[SIM MQTT] Reconnecting (backoff=%lu ms)...\n", _smq_backoff_ms);
       LOG_INFO("SIM_MQTT", "Reconnecting (backoff=%lu ms)...", _smq_backoff_ms);
       // Mutex held for the full connect sequence (can take ~60s).
@@ -332,6 +361,7 @@ void mqtt_sim_task(void* param) {
         if (_smq_connect()) {
           _smq_connected  = true;
           _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;  // reset backoff on success
+          _smq_disconnected_since_ms = 0;         // reset stuck-timer on success
           // Mark connected immediately so HELLO/status can be sent without
           // waiting for first server heartbeat. Heartbeat timeout will still
           // catch cases where backend is down but broker is up.
@@ -343,7 +373,14 @@ void mqtt_sim_task(void* param) {
           if (queued >= 48) {
             PublishItem _flush;
             uint16_t flushed = 0;
-            while (xQueueReceive(publish_queue, &_flush, 0) == pdTRUE) flushed++;
+            while (xQueueReceive(publish_queue, &_flush, 0) == pdTRUE) {
+              flushed++;
+              // A replayed flash batch discarded here was never actually
+              // sent — release its in-flight mark (don't confirm) so the
+              // same backlog gets re-peeked and retried later, instead of
+              // leaving fb_peek_batch() permanently blocked.
+              if (_flush.from_flash) fb_release_peek();
+            }
             Serial.printf("[SIM MQTT] Flushed %u stale items (queue was %u/64)\n", flushed, queued);
             LOG_WARN("SIM_MQTT", "Flushed %u stale items (queue was %u/64)", flushed, queued);
           } else {
@@ -354,6 +391,28 @@ void mqtt_sim_task(void* param) {
         xSemaphoreGive(sim_at_mutex);
       }
       if (!_smq_connected) {
+        // ── Escalation: stuck disconnected too long ────────────────────────
+        // Plain MQTT-level retry (above) assumes the modem/PDP is fine and
+        // only AT+SMCONN is failing. But a flaky-signal episode can leave the
+        // modem itself wedged (lost registration, stuck PDP) for hours — in
+        // that case no amount of AT+SMCONN retrying helps, yet the old code
+        // just kept backing off forever at this layer. If we've been
+        // disconnected continuously for MQTT_STUCK_RESET_MS, stop retrying
+        // softly and force a full modem reset instead (same reset path as
+        // the AT-failure-count trigger in task_sim_manager.h).
+        uint32_t stuck_ms = millis() - _smq_disconnected_since_ms;
+        if (stuck_ms >= MQTT_STUCK_RESET_MS) {
+          Serial.printf("[SIM MQTT] Stuck disconnected %lu ms — forcing modem reset\n", stuck_ms);
+          LOG_ERROR("SIM_MQTT", "Stuck disconnected %lu ms (>= %dms) — forcing modem reset",
+                    stuck_ms, MQTT_STUCK_RESET_MS);
+          // sim_at_mutex was already released above (or never acquired) — safe to call.
+          _sim_reset_modem();
+          _smq_disconnected_since_ms = millis();   // restart the clock after escalating
+          _smq_backoff_ms = MQTT_BACKOFF_MIN_MS;   // retry promptly right after a reset
+          esp_task_wdt_reset();
+          continue;
+        }
+
         // Exponential backoff: double each failure, cap at max
         uint32_t d = _smq_backoff_ms;
         _smq_backoff_ms = _smq_backoff_ms * 2;
@@ -413,6 +472,11 @@ void mqtt_sim_task(void* param) {
           LOG_ERROR("SIM_MQTT", "Publish failed — will reconnect");
           break;
         }
+        // Only now — genuine publish success, not just "reached the front of
+        // the queue" — may a replayed batch's flash slots be reclaimed. A
+        // failure above leaves confirmed_idx untouched, so the same backlog
+        // is offered again next cycle (see fb_confirm()'s contract).
+        if (item.from_flash) fb_confirm(item.flash_count);
         xSemaphoreTake(state_mutex, portMAX_DELAY);
         sys_state.last_publish_ms = millis();
         xSemaphoreGive(state_mutex);

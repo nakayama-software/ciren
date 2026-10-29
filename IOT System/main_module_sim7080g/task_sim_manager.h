@@ -533,11 +533,19 @@ void sim_manager_task(void* param) {
       xSemaphoreGive(state_mutex);
 
       xSemaphoreTake(sim_at_mutex, portMAX_DELAY);
-      // Re-register if needed — consume cereg before next AT call
+      // Re-register if needed — consume cereg before next AT call.
+      // Tagged explicitly (shallow "PDP only" vs deeper "lost network
+      // registration") so a log search can tell the two failure classes
+      // apart instead of both looking like the same generic "PDP lost".
       {
         const char* cereg = _sim_atReply("AT+CEREG?", 3000);
         bool registered = (strstr(cereg, ",1") != nullptr || strstr(cereg, ",5") != nullptr);
-        if (!registered) _sim_wait_registered(90000UL);
+        if (!registered) {
+          LOG_WARN("SIM", "Network registration lost (not just PDP) — re-registering, may take longer");
+          _sim_wait_registered(90000UL);
+        } else {
+          LOG_INFO("SIM", "Still network-registered — PDP-only reactivation (shallow recovery)");
+        }
       }
       bool ok = _sim_activate_pdp();
       xSemaphoreGive(sim_at_mutex);

@@ -89,7 +89,17 @@ static bool _ntp_sync_wifi() {
 // Requires sim_at_mutex (shared with task_sim_manager / task_mqtt_sim).
 static bool _ntp_sync_sim() {
   if (!sys_state.sim_enabled || !sys_state.sim_gprs) return false;
-  if (!xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(15000))) {
+
+  // Bounded, watchdog-fed wait — a single 15s xSemaphoreTake with zero resets
+  // during it can by itself exactly exhaust the 15s TWDT timeout when
+  // sim_at_mutex is contended (task_sim_manager can hold it 15s+ during modem
+  // bring-up). Same bug class already fixed in task_mqtt_sim.h/_sim_sendAT().
+  bool got_mutex = false;
+  for (uint32_t _mw = 0; _mw < 15000 && !got_mutex; _mw += 1000) {
+    got_mutex = (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(1000)) == pdTRUE);
+    esp_task_wdt_reset();
+  }
+  if (!got_mutex) {
     LOG_WARN("NTP", "SIM NTP — cannot take AT mutex");
     return false;
   }
@@ -207,7 +217,12 @@ static bool _ntp_sync_sim() {
   Serial.println("[NTP] SIM: CNTP failed, trying AT+CCLK fallback");
   LOG_INFO("NTP", "SIM: CNTP failed, trying AT+CCLK fallback");
 
-  if (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+  bool got_cclk_mutex = false;
+  for (uint32_t _mw = 0; _mw < 5000 && !got_cclk_mutex; _mw += 1000) {
+    got_cclk_mutex = (xSemaphoreTake(sim_at_mutex, pdMS_TO_TICKS(1000)) == pdTRUE);
+    esp_task_wdt_reset();
+  }
+  if (got_cclk_mutex) {
     const char* cclk = _sim_atReply("AT+CCLK?", 3000);
     xSemaphoreGive(sim_at_mutex);
 

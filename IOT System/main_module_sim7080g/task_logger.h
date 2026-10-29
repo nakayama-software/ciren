@@ -7,7 +7,7 @@
 // Forward declarations — avoid circular include dependency.
 // Actual definitions are in task_publish.h and task_mqtt_sim.h,
 // which are included in the main .ino in the correct order.
-void mqtt_publish_raw(const char* topic, const char* payload, int len, int qos);
+bool mqtt_publish_raw(const char* topic, const char* payload, int len, int qos);
 bool sim_mqtt_publish(const char* topic, const char* payload, uint8_t qos);
 
 // ─────────────────────────────────────────────────────────────────────────────

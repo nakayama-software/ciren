@@ -80,6 +80,31 @@ function _isDuplicate(deviceId, ctrlId, portNum, sensorType, serverTs) {
   return false
 }
 
+// ─── Event-time resolution (device clock vs arrival time) ──────────────────
+// Historically every reading was stamped with Date.now() (arrival time) —
+// fine when the device publishes live, but wrong for a reading that was
+// buffered on-device during a connectivity outage and sent late: it would
+// land in the dashboard bunched up at the reconnect moment instead of at its
+// real original time. The firmware already attaches an NTP-synced epoch
+// ("timestamp", seconds) to each reading — we just weren't using it.
+//
+// MIN_VALID_EPOCH_S guards against two cases where "timestamp" is NOT a
+// trustworthy wall-clock value: legacy firmware sends monotonic
+// milliseconds-since-boot in "timestamp_ms" (which handleSensorData still
+// accepts as a device_ts fallback, but it is never an epoch and must never
+// drive server_ts), and a device whose NTP sync hasn't completed yet may send
+// a small monotonic seconds-since-boot value in "timestamp" itself. Both read
+// as "around 1970" once converted to a Date, so anything below this floor
+// (2020-01-01T00:00Z) is rejected and the caller falls back to arrival time.
+const MIN_VALID_EPOCH_S = 1577836800
+
+function _resolveEventMs(timestamp) {
+  if (typeof timestamp === 'number' && timestamp >= MIN_VALID_EPOCH_S) {
+    return timestamp * 1000
+  }
+  return null
+}
+
 // Clean stale dedup entries every 60s
 setInterval(() => {
   const now = Date.now()
@@ -211,7 +236,11 @@ async function handleMessage(topic, message) {
   if (topicType === 'data') {
     if (Array.isArray(payload)) {
       // Align timestamps for HumTemp pairs (0x01+0x02 on same ctrl+port) within the batch
-      // so both readings share the same server_ts and broadcast ts
+      // so both readings share the same server_ts and broadcast ts.
+      // Prefer the device's own NTP-synced reading (so a batch replayed late —
+      // e.g. buffered during an outage, sent once reconnected — still lands at
+      // its real original time); only fall back to "now" (arrival time) when
+      // the batch itself carries no trustworthy device clock, same as before.
       const humTempGroups = {}
       for (const item of payload) {
         if ((item.sensor_type === 0x01 || item.sensor_type === 0x02) && item.ctrl_id && item.port_num) {
@@ -226,7 +255,8 @@ async function handleMessage(topic, message) {
         const has01 = items.some(i => i.sensor_type === 0x01)
         const has02 = items.some(i => i.sensor_type === 0x02)
         if (has01 && has02) {
-          sharedTs[key] = Date.now()
+          const deviceEventMs = _resolveEventMs(items[0].timestamp)
+          sharedTs[key] = deviceEventMs != null ? deviceEventMs : Date.now()
         }
       }
 
@@ -239,10 +269,15 @@ async function handleMessage(topic, message) {
         await handleSensorData(deviceId, item)
       }
     } else {
-      // Single-object payload — align HumTemp timestamps using cache
+      // Single-object payload — align HumTemp timestamps. Prefer the device's
+      // own NTP-synced timestamp (see _resolveEventMs); only fall back to the
+      // arrival-time pairing cache when the device clock isn't trustworthy.
       if ((payload.sensor_type === 0x01 || payload.sensor_type === 0x02) &&
           payload.ctrl_id != null && payload.port_num != null) {
-        payload._shared_ts = _humTempSharedTs(payload.ctrl_id, payload.port_num)
+        const deviceEventMs = _resolveEventMs(payload.timestamp)
+        payload._shared_ts = deviceEventMs != null
+          ? deviceEventMs
+          : _humTempSharedTs(payload.ctrl_id, payload.port_num)
       }
       return handleSensorData(deviceId, payload)
     }
@@ -262,7 +297,17 @@ async function handleMessage(topic, message) {
 async function handleSensorData(deviceId, data) {
   const { ctrl_id, port_num, sensor_type, value, timestamp, timestamp_ms, ftype, _shared_ts } = data
   // Prefer epoch seconds ("timestamp"), fall back to legacy milliseconds ("timestamp_ms")
+  // — stored as-is in device_ts for reference, unrelated to the event-time
+  // resolution below (timestamp_ms is a monotonic boot counter, never a wall clock).
   const deviceTs = timestamp ?? timestamp_ms
+
+  // Authoritative "when did this actually happen" (ms since epoch), used for
+  // server_ts and the live broadcast — NOT just device_ts storage. _shared_ts
+  // (set upstream for HumTemp pairs) already prefers the device's synced
+  // clock; for every other reading this resolves it directly here. Falls back
+  // to arrival time (old behavior) only when the device hasn't given us a
+  // trustworthy clock reading yet.
+  const eventMs = _shared_ts || _resolveEventMs(timestamp) || Date.now()
 
   if (ctrl_id == null || ctrl_id === 0) {
     console.warn(`[WARN] Dropped frame with null/zero ctrl_id from ${deviceId}`)
@@ -358,7 +403,7 @@ async function handleSensorData(deviceId, data) {
       device_id: deviceId,
       ctrl_id, port_num, sensor_type,
       value, ftype,
-      ts: _shared_ts || Date.now(),
+      ts: eventMs,
     })
   }
 
@@ -384,15 +429,20 @@ async function handleSensorData(deviceId, data) {
 
     console.log(`[DATA] ${deviceId} ctrl=${ctrl_id} port=${port_num} stype=${sensor_type} val=${value} ftype=0x${ftype?.toString(16)}`)
 
-    // Simpan reading (skip jika duplikat dalam 5 detik terakhir)
-    const serverTs = _shared_ts || Date.now()
-    if (!_isDuplicate(deviceId, ctrl_id, port_num, sensor_type, serverTs)) {
+    // Simpan reading (skip jika duplikat dalam 5 detik terakhir).
+    // server_ts is the device's real sample time when trustworthy (eventMs),
+    // not just "whenever this happened to arrive" — see eventMs resolution
+    // above. This is what makes a reading buffered on-device during a
+    // connectivity outage (future store-and-forward firmware) land at its
+    // true original time once backfilled, instead of bunching up at the
+    // moment the device finally reconnected.
+    if (!_isDuplicate(deviceId, ctrl_id, port_num, sensor_type, eventMs)) {
       await SensorReading.create({
         device_id: deviceId,
         ctrl_id, port_num, sensor_type,
         value, ftype,
         device_ts: deviceTs,
-        server_ts: new Date(serverTs),
+        server_ts: new Date(eventMs),
       })
     }
 

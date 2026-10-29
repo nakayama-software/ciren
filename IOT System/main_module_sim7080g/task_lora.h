@@ -22,9 +22,17 @@ TaskHandle_t h_lora = NULL;
 
 uint32_t counter = 0;
 
-void lora_init(void)
+// `enabled` = false skips the actual radio bring-up (no UART config, no
+// SendFrame/RecieveFrame ever attempted) — M5.begin() still runs unconditionally
+// since it's needed for SPI bus ordering before the TFT/OLED driver claims it,
+// completely independent of whether the LoRa radio itself is wanted.
+void lora_init(bool enabled)
 {
     M5.begin();   // library M5_LoRa_E220_JP bergantung pada ini — dikonfirmasi dari gateway sketch yang works
+    if (!enabled) {
+        Serial.println("[LoRa] lora_enabled=false — radio not initialized");
+        return;
+    }
     lora.Init(&Serial2, CONFIG_MODE_BAUD, SERIAL_8N1, UART_RX_LORA, UART_TX_LORA);
     lora.SetDefaultConfigValue(config);
 }

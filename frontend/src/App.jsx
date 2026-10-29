@@ -684,6 +684,8 @@ export default function App() {
         onGoRegister={() => setPage(PAGE_REGISTER)}
         theme={theme}
         toggleTheme={toggleTheme}
+        lang={lang}
+        setLang={setLang}
       />
     )
   }
@@ -695,6 +697,8 @@ export default function App() {
         onGoLogin={() => setPage(PAGE_LOGIN)}
         theme={theme}
         toggleTheme={toggleTheme}
+        lang={lang}
+        setLang={setLang}
       />
     )
   }
@@ -707,6 +711,8 @@ export default function App() {
         onLogout={handleLogout}
         theme={theme}
         toggleTheme={toggleTheme}
+        lang={lang}
+        setLang={setLang}
       />
     )
   }

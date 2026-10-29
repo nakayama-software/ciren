@@ -5,6 +5,7 @@
 #include <esp_task_wdt.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
+#include <U8g2_for_Adafruit_GFX.h>
 #include "ciren_config.h"
 #include "ring_buffer.h"
 #include "system_state.h"
@@ -16,6 +17,92 @@
 // sebelum tft.begin() dipanggil.
 static Adafruit_ILI9341 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
 static bool tft_ready = false;
+
+// ─── Japanese text (U8g2_for_Adafruit_GFX layered on the existing tft canvas) ──
+// Adafruit_GFX's built-in font is ASCII-only, so all Japanese UI text renders
+// through this instead. u8g2_font_unifont_t_japanese1 is a bundled, pre-made
+// bitmap font (hiragana/katakana + common kanji) — no glyph data authored here.
+static U8G2_FOR_ADAFRUIT_GFX u8f;
+#define JP_FONT  u8g2_font_unifont_t_japanese1
+
+static void jp_font_init()
+{
+  u8f.begin(tft);
+  u8f.setFontMode(1);   // transparent glyph draw — caller/jp_print clears the box itself
+  u8f.setFontDirection(0);
+  u8f.setFont(JP_FONT);
+}
+
+// ─── Draw cache — avoids the blank-then-redraw flicker ──────────────────────
+// tft_draw() re-invokes every page's draw function on every ~200ms tick (not
+// just on page change), so live values stay fresh. jp_print()/tft_badge()
+// clear their own box before drawing (unlike tft.print(fg,bg), which erases
+// and draws in one atomic pass) — redoing that every tick for text that
+// hasn't actually changed produced a constant blank/redraw blink, especially
+// visible on static section headers and rarely-changing badges. This cache
+// skips the whole redraw (erase included) when the same (x,y) already shows
+// the same text/colors. Must be cleared with ui_cache_clear() any time
+// something else bulk-clears the screen/area behind these positions —
+// otherwise a real screen wipe wouldn't be caught and text would go missing.
+#define UI_CACHE_SIZE 32
+struct UiCacheEntry { int16_t x, y; char text[40]; uint16_t fg, bg; };
+static UiCacheEntry _ui_cache[UI_CACHE_SIZE];
+static uint8_t      _ui_cache_count = 0;
+
+static void ui_cache_clear() { _ui_cache_count = 0; }
+
+// Returns true if (x,y,text,fg,bg) is already on screen (caller should skip
+// redrawing). Otherwise records/updates the entry and returns false.
+static bool ui_cache_hit(int x, int y, const char *text, uint16_t fg, uint16_t bg)
+{
+  for (uint8_t i = 0; i < _ui_cache_count; i++) {
+    UiCacheEntry &e = _ui_cache[i];
+    if (e.x == x && e.y == y) {
+      if (e.fg == fg && e.bg == bg && strncmp(e.text, text, sizeof(e.text) - 1) == 0)
+        return true;
+      strncpy(e.text, text, sizeof(e.text) - 1);
+      e.text[sizeof(e.text) - 1] = '\0';
+      e.fg = fg; e.bg = bg;
+      return false;
+    }
+  }
+  if (_ui_cache_count < UI_CACHE_SIZE) {
+    UiCacheEntry &e = _ui_cache[_ui_cache_count++];
+    e.x = x; e.y = y;
+    strncpy(e.text, text, sizeof(e.text) - 1);
+    e.text[sizeof(e.text) - 1] = '\0';
+    e.fg = fg; e.bg = bg;
+  }
+  return false;
+}
+
+// Draw UTF-8 text (Japanese or mixed) at top-left (x,y), same convention as
+// tft.setCursor()+print(). U8g2 positions by baseline, not top-left, so this
+// clears its own bounding box with `bg` first and offsets by font ascent —
+// callers can treat it as a drop-in replacement for the tft.print() pattern.
+// Only one font size is loaded (JP_FONT) — no tft-style sz multiplier exists
+// for u8g2 bitmap fonts, so every call renders at that font's fixed size.
+static void jp_print(int x, int y, const char *utf8, uint16_t fg, uint16_t bg)
+{
+  if (ui_cache_hit(x, y, utf8, fg, bg)) return;
+  u8f.setForegroundColor(fg);
+  u8f.setBackgroundColor(bg);
+  int asc = u8f.getFontAscent();
+  int desc = u8f.getFontDescent();   // negative
+  int h = asc - desc;
+  int w = u8f.getUTF8Width(utf8);
+  tft.fillRect(x, y, w, h, bg);
+  u8f.setCursor(x, y + asc);
+  u8f.print(utf8);
+}
+
+// Language-aware print — picks `en` or `ja` based on sys_state.lang_ja and
+// draws it via jp_print (unifont covers plain ASCII too, so English mode
+// still renders through the same path, just with the English string).
+static void ui_print(int x, int y, const char *en, const char *ja, uint16_t fg, uint16_t bg)
+{
+  jp_print(x, y, sys_state.lang_ja ? ja : en, fg, bg);
+}
 
 // ─── Color palette (RGB565) ──────────────────────────────────────────────────
 #define C_BG         0x0000   // black background
@@ -100,6 +187,12 @@ static String html_esc(const String &s)
 
 // Konversi RSSI ke jumlah bar (0–4) dan label kualitas
 static const char* _rssi_label(int rssi) {
+  if (sys_state.lang_ja) {
+    if (rssi >= -50) return "最高";
+    if (rssi >= -65) return "良好";
+    if (rssi >= -75) return "普通";
+    return "弱い";
+  }
   if (rssi >= -50) return "Excellent";
   if (rssi >= -65) return "Good";
   if (rssi >= -75) return "Fair";
@@ -135,10 +228,10 @@ static String build_scan_html()
 {
   int n = WiFi.scanNetworks();
 
-  String h = "<div class='section-label'>Available Networks</div>";
+  String h = "<div class='section-label'>" + String(sys_state.lang_ja ? "利用可能なネットワーク" : "Available Networks") + "</div>";
 
   if (n <= 0) {
-    h += "<div class='empty-state'>No networks found</div>";
+    h += "<div class='empty-state'>" + String(sys_state.lang_ja ? "ネットワークが見つかりません" : "No networks found") + "</div>";
   } else {
     h += "<div class='network-list'>";
     for (int i = 0; i < n; i++) {
@@ -172,14 +265,26 @@ static String _portal_sim_apn;
 static String _portal_sim_user;
 static String _portal_sim_pass;
 static String _portal_device_id;
+static bool   _portal_sim_enabled = true;
+static bool   _portal_lora_enabled = true;
 
 static String build_portal_page(const String &msg = "", bool ok = false)
 {
+  // Pick English or Japanese for a given string pair based on the current
+  // language setting — shared with the OLED (sys_state.lang_ja), so switching
+  // it here also changes what the physical screen shows on its next redraw.
+  auto PL = [](const char *en, const char *ja) { return String(sys_state.lang_ja ? ja : en); };
+  const bool ja = sys_state.lang_ja;
+
   String h;
-  h += F("<!doctype html><html lang='en'><head>"
+  h += F("<!doctype html><html lang='");
+  h += (ja ? "ja" : "en");
+  h += F("'><head>"
          "<meta charset='utf-8'>"
          "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-         "<title>CIREN Setup</title>"
+         "<title>");
+  h += PL("CIREN Setup", "CIREN セットアップ");
+  h += F("</title>"
          "<style>"
          "*{box-sizing:border-box;margin:0;padding:0}"
          "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
@@ -235,14 +340,34 @@ static String build_portal_page(const String &msg = "", bool ok = false)
          ".alert-err{background:#2d0a0a;border:1px solid #7f1d1d;color:#f87171}"
          ".alert-icon{font-size:16px;flex-shrink:0}"
          ".meta{font-size:11px;color:#475569;text-align:center;margin-top:16px}"
+         "details summary{cursor:pointer;list-style:none;user-select:none;"
+                          "display:flex;align-items:center;gap:6px}"
+         "details summary::-webkit-details-marker{display:none}"
+         "details .details-arrow{display:inline-block;transition:transform .15s;font-size:10px}"
+         "details[open] .details-arrow{transform:rotate(90deg)}"
+         "details .field{margin-top:12px}"
+         ".checkbox-row{display:flex;align-items:center;gap:8px;margin-bottom:16px;"
+                        "font-size:13px;color:#e2e8f0;cursor:pointer}"
+         ".checkbox-row input{width:16px;height:16px;accent-color:#0ea5e9;cursor:pointer}"
+         ".lang-switch{position:absolute;top:14px;right:14px;font-size:13px;font-weight:700;"
+                       "color:#fff;text-decoration:none;letter-spacing:.02em;"
+                       "background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.55);"
+                       "padding:7px 14px;border-radius:20px;display:inline-flex;"
+                       "align-items:center;gap:5px;box-shadow:0 2px 8px rgba(0,0,0,.2);"
+                       "transition:background .15s}"
+         ".lang-switch:active{background:rgba(255,255,255,.4)}"
+         ".header{position:relative}"
          "</style>"
          "</head><body><div class='card'>");
 
   // Header
   h += "<div class='header'>"
+       "<a class='lang-switch' href='/lang?set=" + String(ja ? "en" : "ja") + "'>"
+       "&#x1F310; " + (ja ? "EN" : "日本語") + "</a>"
        "<div class='header-dot'>&#x1F4F6;</div>"
-       "<h1>CIREN WiFi Setup</h1>"
-       "<p>Device: " + String(sys_state.device_id) + " &nbsp;&bull;&nbsp; Firmware v" + String(FW_VERSION) + "</p>"
+       "<h1>" + PL("CIREN WiFi Setup", "CIREN WiFi設定") + "</h1>"
+       "<p>" + PL("Device: ", "デバイス: ") + String(sys_state.device_id) +
+       " &nbsp;&bull;&nbsp; " + PL("Firmware v", "ファームウェア v") + String(FW_VERSION) + "</p>"
        "</div>";
 
   h += "<div class='body'>";
@@ -263,50 +388,63 @@ static String build_portal_page(const String &msg = "", bool ok = false)
   // Refresh link
   h += "<div style='text-align:right;margin-bottom:20px'>"
        "<a href='/refresh' style='font-size:12px;color:#0ea5e9;text-decoration:none'>"
-       "&#x21BB; Refresh networks</a></div>";
+       "&#x21BB; " + PL("Refresh networks", "ネットワークを更新") + "</a></div>";
 
   // Divider
-  h += "<div class='divider'>or enter manually</div>";
+  h += "<div class='divider'>" + PL("or enter manually", "または手動で入力") + "</div>";
 
   // Manual SSID
-  h += "<div class='field'><label>Network Name (SSID)</label>"
-       "<input name='ssid_m' placeholder='Enter WiFi name' autocomplete='off'></div>";
+  h += "<div class='field'><label>" + PL("Network Name (SSID)", "ネットワーク名 (SSID)") + "</label>"
+       "<input name='ssid_m' placeholder='" + PL("Enter WiFi name", "WiFi名を入力") + "' autocomplete='off'></div>";
 
   // Password (shown as plain text for easy entry on mobile)
-  h += "<div class='field'><label>Password</label>"
-       "<input type='text' name='pass' placeholder='Enter WiFi password' autocomplete='off'></div>";
+  h += "<div class='field'><label>" + PL("Password", "パスワード") + "</label>"
+       "<input type='text' name='pass' placeholder='" + PL("Enter WiFi password", "WiFiパスワードを入力") + "' autocomplete='off'></div>";
 
-  // Advanced: Device ID + MQTT + SIM APN
+  // Advanced: Device ID + MQTT + SIM/LoRa enable/disable — collapsed by
+  // default behind a <details> dropdown
   h += "<div style='margin:20px 0 16px;border-top:1px solid #334155;padding-top:16px'>"
-       "<p class='section-label'>Advanced</p>"
-       "<div class='field'><label>Device ID <span style='color:#475569'>(leave blank for auto-generated)</span></label>"
+       "<details>"
+       "<summary class='section-label'><span class='details-arrow'>&#x25B8;</span>" + PL("Advanced", "詳細設定") + "</summary>"
+       "<div class='field'><label>" + PL("Device ID", "デバイスID") + " <span style='color:#475569'>" +
+       PL("(leave blank for auto-generated)", "（空欄で自動生成）") + "</span></label>"
        "<input type='text' name='device_id' value='" + html_esc(_portal_device_id) + "' "
-       "placeholder='e.g. MM-A1B2C3' autocomplete='off' maxlength='31'></div>"
-       "<div class='field'><label>MQTT Broker IP</label>"
+       "placeholder='" + PL("e.g. MM-A1B2C3", "例: MM-A1B2C3") + "' autocomplete='off' maxlength='31'></div>"
+       "<div class='field'><label>" + PL("MQTT Broker IP", "MQTTブローカーIP") + "</label>"
        "<input type='text' name='mqtt_host' value='" + html_esc(_portal_mqtt_host) + "' "
-       "placeholder='e.g. 118.22.31.254' autocomplete='off'></div>"
+       "placeholder='" + PL("e.g. 118.22.31.254", "例: 118.22.31.254") + "' autocomplete='off'></div>"
+       "<label class='checkbox-row'>"
+       "<input type='checkbox' name='sim_enabled' value='1'" + String(_portal_sim_enabled ? " checked" : "") + ">"
+       + PL("Enable SIM (cellular fallback)", "SIMを有効にする（モバイル回線フォールバック）") + "</label>"
+       "<label class='checkbox-row'>"
+       "<input type='checkbox' name='lora_enabled' value='1'" + String(_portal_lora_enabled ? " checked" : "") + ">"
+       + PL("Enable LoRa (GPS receiver)", "LoRaを有効にする（GPS受信）") + "</label>"
+       "</details>"
        "</div>"
        "<div style='margin:0 0 16px;border-top:1px solid #334155;padding-top:16px'>"
-       "<p class='section-label'>SIM Card APN</p>"
+       "<p class='section-label'>" + PL("SIM Card APN", "SIMカード APN") + "</p>"
        "<div class='field'><label>APN</label>"
        "<input type='text' name='sim_apn' value='" + html_esc(_portal_sim_apn) + "' "
-       "placeholder='e.g. internet' autocomplete='off'></div>"
-       "<div class='field'><label>APN Username <span style='color:#475569'>(leave blank if none)</span></label>"
+       "placeholder='" + PL("e.g. internet", "例: internet") + "' autocomplete='off'></div>"
+       "<div class='field'><label>" + PL("APN Username", "APNユーザー名") + " <span style='color:#475569'>" +
+       PL("(leave blank if none)", "（なければ空欄）") + "</span></label>"
        "<input type='text' name='sim_user' value='" + html_esc(_portal_sim_user) + "' "
-       "placeholder='optional' autocomplete='off'></div>"
-       "<div class='field'><label>APN Password <span style='color:#475569'>(leave blank if none)</span></label>"
+       "placeholder='" + PL("optional", "任意") + "' autocomplete='off'></div>"
+       "<div class='field'><label>" + PL("APN Password", "APNパスワード") + " <span style='color:#475569'>" +
+       PL("(leave blank if none)", "（なければ空欄）") + "</span></label>"
        "<input type='text' name='sim_pass' value='" + html_esc(_portal_sim_pass) + "' "
-       "placeholder='optional' autocomplete='off'></div>"
+       "placeholder='" + PL("optional", "任意") + "' autocomplete='off'></div>"
        "</div>";
 
   // Buttons
   h += "<div class='btn-row'>"
-       "<button type='submit' class='btn btn-primary'>Save &amp; Reboot</button>"
+       "<button type='submit' class='btn btn-primary'>" + PL("Save &amp; Reboot", "保存して再起動") + "</button>"
        "</div>";
 
   h += "</form>";
 
-  h += "<p class='meta'>After saving, reconnect to your usual WiFi network.</p>";
+  h += "<p class='meta'>" + PL("After saving, reconnect to your usual WiFi network.",
+                                "保存後、通常お使いのWiFiネットワークに再接続してください。") + "</p>";
 
   h += "</div></div></body></html>";
   return h;
@@ -326,26 +464,34 @@ static void tft_hbar(int x, int y, int w, int h, float pct, uint16_t clr)
     tft.fillRect(x + 2 + fill, y + 2, inner - fill, h - 4, C_BG);
 }
 
-// Filled pill badge
-static void tft_badge(int x, int y, const char *text, uint16_t bg, uint16_t fg, uint8_t sz = 1)
+// Filled pill badge — sized from the actual UTF-8 glyph width (not byte
+// length) so it works for both ASCII and Japanese text through the same u8g2
+// font as jp_print/ui_print.
+static void tft_badge(int x, int y, const char *text, uint16_t bg, uint16_t fg)
 {
-  int tw = (int)strlen(text) * sz * 6;
-  int th = sz * 8;
+  if (ui_cache_hit(x, y, text, fg, bg)) return;
+  u8f.setForegroundColor(fg);
+  u8f.setBackgroundColor(bg);
+  int asc = u8f.getFontAscent();
+  int desc = u8f.getFontDescent();
+  int th = asc - desc;
+  int tw = u8f.getUTF8Width(text);
   tft.fillRoundRect(x, y, tw + 12, th + 8, 4, bg);
-  tft.setTextSize(sz);
-  tft.setTextColor(fg, bg);
-  tft.setCursor(x + 6, y + 4);
-  tft.print(text);
+  u8f.setCursor(x + 6, y + 4 + asc);
+  u8f.print(text);
 }
 
-// Section label — large cyan text, easy to read for elderly users
-static void tft_section(int x, int y, const char *label)
+// Language-aware badge — picks `en`/`ja` based on sys_state.lang_ja.
+static void ui_badge(int x, int y, const char *en, const char *ja, uint16_t bg, uint16_t fg)
 {
-  tft.setTextSize(2);
-  tft.setTextColor(C_ACCENT, C_BG);
-  tft.setCursor(x, y);
-  tft.print(label);
-  // Callers should add y += 22 after this (16px text + 6px gap)
+  tft_badge(x, y, sys_state.lang_ja ? ja : en, bg, fg);
+}
+
+// Section label — cyan text, easy to read for elderly users
+static void tft_section(int x, int y, const char *en, const char *ja)
+{
+  ui_print(x, y, en, ja, C_ACCENT, C_BG);
+  // Callers should add y += 22 after this
 }
 
 // WiFi/SIM signal bars (5 vertical bars)
@@ -368,9 +514,8 @@ static void tft_dot(int cx, int cy, uint16_t clr)
 }
 
 // ─── Header & footer ─────────────────────────────────────────────────────────
-static const char *_page_titles[] = {
-  "Gateway", "WiFi", "SIM", "Settings", "SIM Control"
-};
+static const char *_page_titles_en[] = { "Gateway", "WiFi", "SIM", "Settings" };
+static const char *_page_titles_ja[] = { "ゲートウェイ", "WiFi", "SIM", "設定" };
 
 static void tft_draw_header()
 {
@@ -384,11 +529,8 @@ static void tft_draw_header()
   tft.setCursor(28, (HDR_H - 16) / 2);
   tft.print("CIREN");
   // Page title
-  tft.setTextSize(1);
-  tft.setTextColor(C_ACCENT, C_HDR_BG);
-  tft.setCursor(90, (HDR_H - 8) / 2 + 2);
   if (tft_page >= 0 && tft_page < OLED_TOTAL_PAGES)
-    tft.print(_page_titles[tft_page]);
+    ui_print(90, (HDR_H - 8) / 2 - 2, _page_titles_en[tft_page], _page_titles_ja[tft_page], C_ACCENT, C_HDR_BG);
   // Page indicator dots
   for (int i = 0; i < OLED_TOTAL_PAGES; i++) {
     int dx = TFT_WIDTH - (OLED_TOTAL_PAGES - i) * 14 + 4;
@@ -423,7 +565,7 @@ static void _draw_gateway()
   int y = CONT_Y;
 
   // ── Device MAC ──
-  tft_section(PAD, y, "DEVICE");
+  tft_section(PAD, y, "DEVICE", "デバイス");
   y += 22;
 
   tft.setTextSize(1);
@@ -438,20 +580,19 @@ static void _draw_gateway()
   y += 22;
 
   // ── Connection mode + server status ──
-  tft_section(PAD, y, "CONNECTION");
+  tft_section(PAD, y, "CONNECTION", "接続");
   y += 22;
 
   bool wifi_mode = (strncmp(sys_state.conn_mode, "wifi", 4) == 0);
   bool conn      = sys_state.is_connected;
 
-  tft_badge(PAD,       y, wifi_mode ? "WiFi" : "SIM",
-            wifi_mode  ? 0x000F : 0x6000, C_WHITE, 2);
-  tft_badge(PAD + 90,  y, conn ? "SERVER OK" : "NO SERVER",
-            conn       ? 0x0320 : 0x6000, C_WHITE, 2);
+  tft_badge(PAD, y, wifi_mode ? "WiFi" : "SIM", wifi_mode ? 0x000F : 0x6000, C_WHITE);
+  if (conn) ui_badge(PAD + 90, y, "SERVER OK", "サーバーOK", 0x0320, C_WHITE);
+  else      ui_badge(PAD + 90, y, "NO SERVER", "サーバー未接続", 0x6000, C_WHITE);
   y += 28;
 
   // ── Sensor controllers ──
-  tft_section(PAD, y, "CONTROLLERS");
+  tft_section(PAD, y, "CONTROLLERS", "コントローラー");
   y += 22;
 
   uint16_t peers = sys_state.peer_count;
@@ -460,17 +601,13 @@ static void _draw_gateway()
   tft.setTextColor(peers > 0 ? C_ACCENT : C_GRAY, C_BG);
   tft.setCursor(PAD, y);
   tft.print(pbuf);
-  tft.setTextSize(1);
-  tft.setTextColor(C_WHITE, C_BG);
-  tft.setCursor(PAD + (peers >= 10 ? 28 : 16), y + 5);
-  tft.print(peers == 1 ? "controller" : "controllers");
-  tft.print(" connected");
+  ui_print(PAD + (peers >= 10 ? 28 : 16), y + 5, "controllers connected", "台接続中", C_WHITE, C_BG);
   y += 22;
 
   // ── Data buffer ──
   // Ring buffer (128 slots) antrian sensor data antara ESP-NOW dan MQTT publish.
   // 0% = normal. >50% = jaringan lambat. >80% = data lama mulai tertimpa.
-  tft_section(PAD, y, "DATA BUFFER");
+  tft_section(PAD, y, "DATA BUFFER", "データバッファ");
   y += 22;
 
   float    buf_pct = rb_usage();
@@ -488,7 +625,7 @@ static void _draw_wifi()
 {
   int y = CONT_Y;
 
-  tft_section(PAD, y, "NETWORK");
+  tft_section(PAD, y, "NETWORK", "ネットワーク");
   y += 22;
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -517,7 +654,7 @@ static void _draw_wifi()
     y += 24;
 
     // RSSI + signal bars
-    tft_section(PAD, y, "SIGNAL");
+    tft_section(PAD, y, "SIGNAL", "信号");
     y += 22;
 
     int rssi = WiFi.RSSI();
@@ -545,16 +682,10 @@ static void _draw_wifi()
   } else {
     // Not connected
     tft_dot(PAD + 6, y + 10, C_RED);
-    tft.setTextSize(2);
-    tft.setTextColor(C_RED, C_BG);
-    tft.setCursor(PAD + 22, y);
-    tft.print("NOT CONNECTED   ");
+    ui_print(PAD + 22, y, "NOT CONNECTED", "未接続", C_RED, C_BG);
     y += 36;
 
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("See Settings page ");
+    ui_print(PAD, y, "See Settings page", "設定ページを確認", C_WHITE, C_BG);
   }
 }
 
@@ -563,34 +694,32 @@ static void _draw_sim()
 {
   int y = CONT_Y;
 
-  tft_section(PAD, y, "SIM MODULE");
+  tft_section(PAD, y, "SIM MODULE", "SIMモジュール");
   y += 22;
 
   if (!sys_state.sim_enabled) {
-    tft_badge(PAD, y, "DISABLED", C_DARKRED, C_WHITE, 2);
+    ui_badge(PAD, y, "DISABLED", "無効", C_DARKRED, C_WHITE);
     y += 36;
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Go to SIM Ctrl  ");
+    // SIM enable/disable now lives in the WiFi-setup web portal (Advanced
+    // section), not a physical page/hold-gesture — PAGE_SIM_CTRL was removed.
+    ui_print(PAD, y, "Enable via setup portal", "セットアップポータルで有効化", C_WHITE, C_BG);
     y += 24;
-    tft.setTextColor(C_YELLOW, C_BG);
-    tft.setCursor(PAD, y);
-    tft.print("Hold 5s =Enable  ");
+    ui_print(PAD, y, "Connect to 192.168.4.1", "192.168.4.1 に接続", C_YELLOW, C_BG);
     return;
   }
 
   // Modem status badge
-  tft_badge(PAD, y, sys_state.sim_modem_ok ? "MODEM OK" : "INIT...",
-            sys_state.sim_modem_ok ? 0x0320 : C_DGRAY, C_WHITE, 2);
+  ui_badge(PAD, y, sys_state.sim_modem_ok ? "MODEM OK" : "INIT...",
+           sys_state.sim_modem_ok ? "モデムOK" : "初期化中...",
+           sys_state.sim_modem_ok ? 0x0320 : C_DGRAY, C_WHITE);
   bool active = (strncmp(sys_state.conn_mode, "sim", 3) == 0);
   if (active)
-    tft_badge(PAD + 150, y, "ACTIVE", C_ACCENT, C_BG, 2);
+    ui_badge(PAD + 150, y, "ACTIVE", "有効", C_ACCENT, C_BG);
   y += 36;
 
   if (sys_state.sim_modem_ok) {
     // Operator
-    tft_section(PAD, y, "OPERATOR");
+    tft_section(PAD, y, "OPERATOR", "キャリア");
     y += 22;
     tft.setTextSize(2);
     tft.setTextColor(C_WHITE, C_BG);
@@ -601,7 +730,7 @@ static void _draw_sim()
     y += 24;
 
     // Signal
-    tft_section(PAD, y, "SIGNAL");
+    tft_section(PAD, y, "SIGNAL", "信号");
     y += 22;
     int sig = sys_state.sim_signal;
     // CSQ → dBm: rssi = -113 + csq*2  (valid range 0–31; 99 = unknown)
@@ -627,40 +756,30 @@ static void _draw_settings()
 {
   int y = CONT_Y;
 
-  tft_section(PAD, y, "WiFi SETTINGS");
+  tft_section(PAD, y, "CONNECTION SETTINGS", "接続設定");
   y += 22;
 
   if (portal_active) {
     // Portal is running — show connection instructions
-    tft_badge(PAD, y, "SETUP MODE", C_ACCENT, C_BG, 2);
+    ui_badge(PAD, y, "SETUP MODE", "設定モード", C_ACCENT, C_BG);
     y += 36;
 
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y); tft.print("Connect to WiFi:");
+    ui_print(PAD, y, "Connect to WiFi:", "WiFiに接続:", C_WHITE, C_BG);
     y += 22;
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(PAD, y);
     String ap = portal_ssid;
     if (ap.length() > 16) ap = ap.substring(0, 16);
-    tft.print(ap.c_str());
-    tft.setTextColor(C_BG, C_BG); tft.print("         ");
+    jp_print(PAD, y, ap.c_str(), C_ACCENT, C_BG);
     y += 22;
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y); tft.print("Pass: " PORTAL_PASS "  ");
+    { String s = String(sys_state.lang_ja ? "パスワード: " : "Password: ") + PORTAL_PASS;
+      jp_print(PAD, y, s.c_str(), C_WHITE, C_BG); }
     y += 22;
-    tft.setTextColor(C_ACCENT, C_BG);
-    tft.setCursor(PAD, y); tft.print("192.168.4.1     ");
+    jp_print(PAD, y, "192.168.4.1", C_ACCENT, C_BG);
 
   } else if (WiFi.status() == WL_CONNECTED) {
     tft_dot(PAD + 6, y + 10, C_GREEN);
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
     String ssid = WiFi.SSID();
     if (ssid.length() > 15) ssid = ssid.substring(0, 15);
-    tft.setCursor(PAD + 22, y);
-    tft.print(ssid.c_str());
-    tft.setTextColor(C_BG, C_BG); tft.print("     ");
+    jp_print(PAD + 22, y, ssid.c_str(), C_WHITE, C_BG);
     y += 28;
 
     tft.setTextSize(2);
@@ -671,61 +790,17 @@ static void _draw_settings()
     snprintf(ipbuf, sizeof(ipbuf), "%-13s", WiFi.localIP().toString().c_str());
     tft.print(ipbuf);
     y += 36;
-    tft.setTextColor(C_YELLOW, C_BG);
-    tft.setCursor(PAD, y); tft.print("Hold 5s = Reset   ");
+    ui_print(PAD, y, "Hold 5s = Reset", "5秒長押しでリセット", C_YELLOW, C_BG);
 
   } else {
     // Credentials saved but WiFi not connected (wrong password / network down)
     tft_dot(PAD + 6, y + 10, C_RED);
-    tft.setTextSize(2);
-    tft.setTextColor(C_RED, C_BG);
-    tft.setCursor(PAD + 22, y); tft.print("NOT CONNECTED   ");
+    ui_print(PAD + 22, y, "NOT CONNECTED", "未接続", C_RED, C_BG);
     y += 36;
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y); tft.print("Wrong password? ");
+    ui_print(PAD, y, "Wrong password?", "パスワードを確認", C_WHITE, C_BG);
     y += 24;
-    tft.setTextColor(C_YELLOW, C_BG);
-    tft.setCursor(PAD, y); tft.print("Hold 5s = Reset   ");
+    ui_print(PAD, y, "Hold 5s = Reset", "5秒長押しでリセット", C_YELLOW, C_BG);
   }
-}
-
-// ─── Page: SIM Control ───────────────────────────────────────────────────────
-static void _draw_sim_ctrl()
-{
-  int y = CONT_Y;
-
-  tft_section(PAD, y, "SIM CONTROL");
-  y += 22;
-
-  bool enabled = sys_state.sim_enabled;
-  tft_badge(PAD, y, enabled ? "ENABLED" : "DISABLED",
-            enabled ? 0x0320 : C_DARKRED, C_WHITE, 2);
-  y += 38;
-
-  if (enabled) {
-    tft.setTextSize(2);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y); tft.print("Modem:");
-    tft.setTextColor(sys_state.sim_modem_ok ? C_GREEN : C_YELLOW, C_BG);
-    tft.print(sys_state.sim_modem_ok ? "OK      " : "Init... ");
-    y += 22;
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y); tft.print("GPRS: ");
-    tft.setTextColor(sys_state.sim_gprs ? C_GREEN : C_RED, C_BG);
-    tft.print(sys_state.sim_gprs ? "OK      " : "OFFLINE ");
-    y += 22;
-    bool sim_active = (strncmp(sys_state.conn_mode, "sim", 3) == 0);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(PAD, y); tft.print("Mode: ");
-    tft.setTextColor(sim_active ? C_ACCENT : C_WHITE, C_BG);
-    tft.print(sim_active ? "SIM     " : "Standby ");
-    y += 28;
-  }
-
-  tft.setTextSize(2);
-  tft.setTextColor(C_YELLOW, C_BG);
-  tft.setCursor(PAD, y);
-  tft.print(enabled ? "Hold 5s = Disable " : "Hold 5s =Enable  ");
 }
 
 // ─── Hold-progress overlay ───────────────────────────────────────────────────
@@ -736,12 +811,10 @@ static void _draw_hold_overlay(uint32_t held_ms)
   // Fill content area with a semi-dark rect
   tft.fillRect(0, CONT_Y, TFT_WIDTH, FTR_Y - CONT_Y, C_BG);
   tft.drawRect(PAD, CONT_Y + 4, TFT_WIDTH - PAD * 2, FTR_Y - CONT_Y - 8, C_SEP);
+  ui_cache_clear();   // area just got wiped by the fillRect above — don't let jp_print/tft_badge think old text is still there
 
   int inner_y = CONT_Y + 24;
-  tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
-  tft.setCursor(PAD + 8, inner_y);
-  tft.print("Hold to confirm...");
+  ui_print(PAD + 8, inner_y, "Hold to confirm...", "長押しで確定...", C_GRAY, C_BG);
   inner_y += 18;
 
   // Progress bar
@@ -749,15 +822,7 @@ static void _draw_hold_overlay(uint32_t held_ms)
   inner_y += 28;
 
   // Action description
-  tft.setTextSize(1);
-  tft.setTextColor(C_ACCENT, C_BG);
-  tft.setCursor(PAD + 8, inner_y);
-  if (tft_page == PAGE_SIM_CTRL) {
-    tft.print(sys_state.sim_enabled ? "Release = Disable SIM Module    " :
-                                      "Release = Enable SIM Module     ");
-  } else {
-    tft.print("Release = Reset WiFi + Reboot   ");
-  }
+  ui_print(PAD + 8, inner_y, "Release = Reset WiFi + Reboot", "離す = WiFiリセット+再起動", C_ACCENT, C_BG);
   inner_y += 18;
 
   // Countdown
@@ -773,19 +838,16 @@ static void _draw_hold_overlay(uint32_t held_ms)
 static void portal_loading_anim()
 {
   tft.fillScreen(C_BG);
+  ui_cache_clear();
   tft_draw_header();
   tft_draw_footer();
 
-  auto frame = [](int pct, const char *msg) {
-    tft.setTextSize(1);
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.fillRect(PAD, 80, TFT_WIDTH - PAD * 2, 16, C_BG);
-    tft.setCursor(PAD, 80);
-    tft.print(msg);
+  auto frame = [](int pct, const char *en, const char *ja) {
+    ui_print(PAD, 80, en, ja, C_WHITE, C_BG);
     tft_hbar(PAD, 104, TFT_WIDTH - PAD * 2, 16, pct / 100.0f, C_ACCENT);
   };
-  for (int p = 0; p <= 40; p += 4)  { frame(p, "Preparing...         "); delay(40); }
-  for (int p = 40; p <= 75; p += 3) { frame(p, "Scanning WiFi...     "); delay(30); }
+  for (int p = 0; p <= 40; p += 4)  { frame(p, "Preparing...", "準備中..."); delay(40); }
+  for (int p = 40; p <= 75; p += 3) { frame(p, "Scanning WiFi...", "WiFiをスキャン中..."); delay(30); }
 }
 
 static void portal_ready_anim(const String &ap, const char* pass)
@@ -795,25 +857,14 @@ static void portal_ready_anim(const String &ap, const char* pass)
   };
   for (int p = 75; p <= 100; p += 5) { frame(p); delay(40); }
 
-  tft.fillRect(PAD, 80, TFT_WIDTH - PAD * 2, 16, C_BG);
-  tft.setTextSize(1);
-  tft.setTextColor(C_GREEN, C_BG);
-  tft.setCursor(PAD, 80);
-  tft.print("Portal Ready!          ");
+  ui_print(PAD, 80, "Portal Ready!", "ポータル準備完了！", C_GREEN, C_BG);
 
   tft.fillRect(PAD, 132, TFT_WIDTH - PAD * 2, 80, C_BG);
-  tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
-  tft.setCursor(PAD, 132);
-  tft.print("Connect phone to AP:");
-  tft.setTextSize(2);
-  tft.setTextColor(C_ACCENT, C_BG);
-  tft.setCursor(PAD, 148);
-  tft.print(ap.c_str());
-  tft.setTextSize(1);
-  tft.setTextColor(C_GRAY, C_BG);
-  tft.setCursor(PAD, 174);
-  tft.printf("Pass: %s  then 192.168.4.1", pass);
+  ui_print(PAD, 132, "Connect phone to AP:", "スマホをAPに接続:", C_GRAY, C_BG);
+  jp_print(PAD, 148, ap.c_str(), C_ACCENT, C_BG);
+  char passbuf[64];
+  snprintf(passbuf, sizeof(passbuf), sys_state.lang_ja ? "パスワード: %s → 192.168.4.1" : "Password: %s -> 192.168.4.1", pass);
+  jp_print(PAD, 174, passbuf, C_GRAY, C_BG);
   delay(800);
 }
 
@@ -829,6 +880,8 @@ static void portal_start(Preferences *prefs)
   _portal_sim_user  = prefs->getString("sim_user", "");
   _portal_sim_pass  = prefs->getString("sim_pass", "");
   _portal_device_id = String(sys_state.device_id);  // sudah di-set sebelum portal_start dipanggil
+  _portal_sim_enabled = prefs->getBool("sim_en", true);
+  _portal_lora_enabled = prefs->getBool("lora_en", true);
   prefs->end();
   portal_loading_anim();
 
@@ -865,6 +918,10 @@ static void portal_start(Preferences *prefs)
     String sim_user  = portal_server.arg("sim_user");
     String sim_pass  = portal_server.arg("sim_pass");
     String device_id = portal_server.arg("device_id");
+    // Checkbox: browsers only include it in the POST body when checked, so
+    // its presence (not its value) is what tells us the new state.
+    bool sim_enabled_new  = portal_server.hasArg("sim_enabled");
+    bool lora_enabled_new = portal_server.hasArg("lora_enabled");
     ssid.trim(); ssid_m.trim(); pass.trim(); mqtt_host.trim();
     sim_apn.trim(); sim_user.trim(); sim_pass.trim(); device_id.trim();
     if (ssid.length() == 0) ssid = ssid_m;
@@ -891,6 +948,14 @@ static void portal_start(Preferences *prefs)
       strncpy(sys_state.sim_apn,      sim_apn.c_str(),  sizeof(sys_state.sim_apn));
       strncpy(sys_state.sim_apn_user, sim_user.c_str(), sizeof(sys_state.sim_apn_user));
       strncpy(sys_state.sim_apn_pass, sim_pass.c_str(), sizeof(sys_state.sim_apn_pass));
+      // SIM enable/disable — moved here from the physical SIM CONTROL page
+      _prefs_ptr->putBool("sim_en", sim_enabled_new);
+      _portal_sim_enabled  = sim_enabled_new;
+      sys_state.sim_enabled = sim_enabled_new;
+      // LoRa enable/disable — takes effect after reboot, same as SIM above
+      _prefs_ptr->putBool("lora_en", lora_enabled_new);
+      _portal_lora_enabled  = lora_enabled_new;
+      sys_state.lora_enabled = lora_enabled_new;
       // Device ID — hanya update jika diisi, jika kosong pertahankan yang ada
       if (device_id.length() > 0) {
         _prefs_ptr->putString("device_id", device_id);
@@ -901,9 +966,26 @@ static void portal_start(Preferences *prefs)
       _prefs_ptr->end();
     }
     portal_server.send(200, "text/html",
-                       build_portal_page("Saved! Rebooting in 2s...", true));
+                       build_portal_page(sys_state.lang_ja ? "保存しました！2秒後に再起動します..."
+                                                            : "Saved! Rebooting in 2s...", true));
     reboot_pending = true;
     reboot_at_ms   = millis() + 2000;
+  });
+  portal_server.on("/lang", HTTP_GET, []() {
+    // Language switch — affects the portal (this page, re-rendered on
+    // redirect) and the physical OLED (same sys_state.lang_ja, redrawn on
+    // its next tick) — no reboot needed, just persisted + applied live.
+    String set = portal_server.arg("set");
+    bool want_ja = (set != "en");
+    sys_state.lang_ja = want_ja;
+    if (_prefs_ptr) {
+      _prefs_ptr->begin("ciren", false);
+      _prefs_ptr->putBool("lang_ja", want_ja);
+      _prefs_ptr->end();
+    }
+    page_dirty = true;   // force OLED to redraw in the new language
+    portal_server.sendHeader("Location", "/");
+    portal_server.send(302, "text/plain", "");
   });
   portal_server.onNotFound([]() {
     portal_server.sendHeader("Location", "/");
@@ -929,9 +1011,8 @@ static void tft_draw()
 {
   if (!tft_ready) return;
 
-  // Hold is always active when WiFi is configured (to reset from any page),
-  // or specifically on SIM_CTRL page.
-  bool on_action = (!portal_active || tft_page == PAGE_SIM_CTRL);
+  // Hold is active whenever WiFi is configured (to reset from any page).
+  bool on_action = !portal_active;
   uint32_t held  = btn_held_ms();
 
   // Hold progress overlay
@@ -952,6 +1033,7 @@ static void tft_draw()
   // Full page redraw on page change
   if (page_dirty) {
     tft.fillScreen(C_BG);
+    ui_cache_clear();
     tft_draw_header();
     tft_draw_footer();
     page_dirty = false;
@@ -973,7 +1055,6 @@ static void tft_draw()
     case PAGE_WIFI:     _draw_wifi();     break;
     case PAGE_SIM:      _draw_sim();      break;
     case PAGE_SETTINGS: _draw_settings(); break;
-    case PAGE_SIM_CTRL: _draw_sim_ctrl(); break;
   }
 }
 
@@ -1009,6 +1090,7 @@ void btn_oled_init()
   tft.begin(40000000UL);   // 40 MHz SPI
   tft.setRotation(TFT_ROTATION);
   tft.fillScreen(C_BG);
+  jp_font_init();
   tft_ready = true;
 
   // Logo — horizontally centred
@@ -1028,15 +1110,12 @@ void btn_oled_init()
   tft.drawFastHLine(PAD, 150, TFT_WIDTH - PAD * 2, C_SEP);
 
   // Device & firmware — centre-calculated
-  tft.setTextSize(1);
-  tft.setTextColor(C_ACCENT, C_BG);
-  tft.setCursor(88, 158);
-  tft.printf("Device: %s    v%s", sys_state.device_id, FW_VERSION);
+  { char dbuf[64]; snprintf(dbuf, sizeof(dbuf), sys_state.lang_ja ? "デバイス: %s    v%s" : "Device: %s    v%s",
+                            sys_state.device_id, FW_VERSION);
+    jp_print(88, 158, dbuf, C_ACCENT, C_BG); }
 
   // Booting indicator
-  tft.setTextColor(C_WHITE, C_BG);
-  tft.setCursor(130, 174);
-  tft.print("Booting...");
+  ui_print(130, 174, "Booting...", "起動中...", C_WHITE, C_BG);
 
   delay(2000);   // hold splash for 2 seconds
 
@@ -1054,8 +1133,9 @@ void task_oled(void *param)
   SPI.begin(PIN_TFT_SCK, PIN_TFT_MISO, PIN_TFT_MOSI, -1);
   tft.begin(40000000UL);
   tft.setRotation(TFT_ROTATION);
+  jp_font_init();
   tft_ready  = true;
-  page_dirty = true;   
+  page_dirty = true;
   Serial.println("[TFT] Task reinit OK (Core 0)");
 
   for (;;) {
@@ -1071,27 +1151,7 @@ void task_oled(void *param)
       Serial.printf("[BTN] Page -> %d\n", tft_page);
     }
     else if (act == BA_HOLD5) {
-      if (tft_page == PAGE_SIM_CTRL) {
-        bool new_val = !sys_state.sim_enabled;
-        if (prefs) {
-          prefs->begin("ciren", false);
-          prefs->putBool("sim_en", new_val);
-          prefs->end();
-        }
-        tft.fillScreen(C_BG);
-        tft_draw_header();
-        tft.setTextSize(2);
-        tft.setTextColor(new_val ? C_GREEN : C_RED, C_BG);
-        tft.setCursor(PAD, CONT_Y + 30);
-        tft.print(new_val ? "SIM ENABLED" : "SIM DISABLED");
-        tft.setTextSize(1);
-        tft.setTextColor(C_WHITE, C_BG);
-        tft.setCursor(PAD, CONT_Y + 58);
-        tft.print("Rebooting in 1.5 s...");
-        delay(1500);
-        esp_restart();
-      }
-      else if (!portal_active) {
+      if (!portal_active) {
         // WiFi is configured — hold from any page = wipe credentials + reboot to portal
         Serial.println("[BTN] Hold 5s — resetting WiFi credentials");
         if (prefs) {
@@ -1102,14 +1162,8 @@ void task_oled(void *param)
         }
         tft.fillScreen(C_BG);
         tft_draw_header();
-        tft.setTextSize(2);
-        tft.setTextColor(C_RED, C_BG);
-        tft.setCursor(PAD, CONT_Y + 30);
-        tft.print("WiFi Reset!");
-        tft.setTextSize(1);
-        tft.setTextColor(C_WHITE, C_BG);
-        tft.setCursor(PAD, CONT_Y + 58);
-        tft.print("Rebooting...");
+        ui_print(PAD, CONT_Y + 30, "WiFi Reset!", "WiFiをリセットしました！", C_RED, C_BG);
+        ui_print(PAD, CONT_Y + 58, "Rebooting...", "再起動中...", C_WHITE, C_BG);
         delay(1500);
         esp_restart();
       }

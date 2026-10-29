@@ -35,6 +35,8 @@ typedef struct
   uint16_t err_counter;
   uint32_t agg_window_ms;
   bool sim_enabled;
+  bool lora_enabled;
+  bool lang_ja;   // true = Japanese UI (portal + OLED), false = English
   bool sim_modem_ok;
   bool sim_gprs;
   uint8_t sim_pdp_method; // 0=none, 1=CGACT, 2=NETOPEN
@@ -77,6 +79,8 @@ void state_init()
   memset(&sys_state, 0, sizeof(sys_state));
   sys_state.agg_window_ms = AGG_WINDOW_MS; // use config define (10ms), not hardcoded
   sys_state.sim_enabled = true;
+  sys_state.lora_enabled = true;
+  sys_state.lang_ja = true;   // Japanese by default
   sys_state.batt_pct = 100; // mains-powered gateway — no battery ADC yet
   strncpy(sys_state.conn_mode, "wifi", sizeof(sys_state.conn_mode));
 }

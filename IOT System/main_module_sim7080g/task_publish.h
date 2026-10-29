@@ -5,6 +5,7 @@
 #include "ciren_config.h"
 #include "system_state.h"
 #include "task_logger.h"
+#include "task_flash_store.h"
 
 QueueHandle_t publish_queue = NULL;
 
@@ -14,7 +15,14 @@ typedef struct {
   char     topic[64];
   char     payload[PQ_MAX_PAYLOAD];
   uint16_t len;
-  uint8_t  qos;  
+  uint8_t  qos;
+  // Store-and-forward bookkeeping: set when this item was rendered from the
+  // flash backlog (task_aggregator.h's replay step) instead of a live
+  // reading. flash_count is how many buffered records this item carries —
+  // the caller must call fb_confirm(flash_count) only once the publish that
+  // carries this item actually succeeds (never just on enqueue/dequeue).
+  bool     from_flash;
+  uint8_t  flash_count;
 } PublishItem;
 
 static esp_mqtt_client_handle_t mqtt_client = NULL;
@@ -129,13 +137,15 @@ void mqtt_init(const char* broker_host) {
   LOG_INFO("MQTT", "Client initialized, host=%s port=%d", broker_host, MQTT_PORT);
 }
 
-void mqtt_publish_raw(const char* topic, const char* payload, int len, int qos = MQTT_QOS) {
-  if (!mqtt_client) return;
+bool mqtt_publish_raw(const char* topic, const char* payload, int len, int qos = MQTT_QOS) {
+  if (!mqtt_client) return false;
   int msg_id = esp_mqtt_client_publish(mqtt_client, topic, payload, len, qos, 0);
   if (msg_id < 0) {
     Serial.printf("[PUBLISH] publish failed topic=%s\n", topic);
     LOG_ERROR("MQTT", "Publish failed, msg_id=%d", msg_id);
+    return false;
   }
+  return true;
 }
 
 void task_publish(void* param) {
@@ -170,10 +180,18 @@ void task_publish(void* param) {
           // to prevent memory pressure and ensure fresh data gets through on reconnect.
           UBaseType_t queued = uxQueueMessagesWaiting(publish_queue);
           if (queued >= 48) {
-            // Queue is nearly full — flush all items (stale data)
+            // Queue is nearly full — flush all items (stale data). A
+            // replayed flash batch discarded here was never actually sent —
+            // release its in-flight mark (don't confirm) so it gets
+            // re-peeked and retried later instead of permanently blocking
+            // fb_peek_batch().
+            if (item.from_flash) fb_release_peek();
             PublishItem _flush;
             uint16_t flushed = 1;  // include the item we just dequeued
-            while (xQueueReceive(publish_queue, &_flush, 0) == pdTRUE) flushed++;
+            while (xQueueReceive(publish_queue, &_flush, 0) == pdTRUE) {
+              flushed++;
+              if (_flush.from_flash) fb_release_peek();
+            }
             Serial.printf("[MQTT] Flushed %u stale items (queue was %u/64)\n", flushed, queued + 1);
             LOG_WARN("MQTT", "Flushed %u stale items (queue was %u/64)", flushed, queued + 1);
           } else {
@@ -182,7 +200,13 @@ void task_publish(void* param) {
             vTaskDelay(pdMS_TO_TICKS(1000));
           }
         } else {
-          mqtt_publish_raw(item.topic, item.payload, item.len, item.qos);
+          bool ok = mqtt_publish_raw(item.topic, item.payload, item.len, item.qos);
+          // Only confirm (and let the flash slot be reclaimed) once the
+          // publish that carried a replayed batch actually succeeded — never
+          // just because it reached the front of the queue. A failure here
+          // leaves confirmed_idx untouched; fb_has_backlog() will offer the
+          // same records again next cycle.
+          if (ok && item.from_flash) fb_confirm(item.flash_count);
           xSemaphoreTake(state_mutex, portMAX_DELAY);
           sys_state.last_publish_ms = millis();
           xSemaphoreGive(state_mutex);
