@@ -130,10 +130,11 @@ static void _agg_render(PublishItem *item, const RenderItem *r, int count)
   item->len = pos;
 }
 
-// Top up publish_queue from the flash backlog — called once per aggregator
-// tick, AFTER live readings have already claimed whatever queue space they
-// needed. Strictly a filler: live data always gets first claim, backlog
-// only uses what's left over (see Diagram 3 / the replay flow discussion).
+// Pull one batch (up to AGG_PUB_BATCH records) from the flash ledger into
+// publish_queue. This is now the ONLY path that enqueues sensor data for
+// publish — every reading is written to flash first (see task_aggregator's
+// main loop), so "backlog" here includes readings from this very tick, not
+// just ones left over from a past outage.
 static void _agg_replay_from_flash()
 {
   if (!publish_queue || !fb_has_backlog()) return;
@@ -176,7 +177,7 @@ void task_aggregator(void *param)
 {
   esp_task_wdt_add(NULL); // subscribe to Task Watchdog
   SensorPacket batch[AGG_BATCH_MAX];
-  static uint16_t _agg_batch_count = 0;
+  static uint16_t _agg_write_count = 0;
   for (;;)
   {
     esp_task_wdt_reset(); // feed WD every loop iteration — before any delays
@@ -201,93 +202,54 @@ void task_aggregator(void *param)
       count = kept;
     }
 
-    for (int i = 0; i < count;)
+    // Write-ahead: every genuine reading goes to the flash ledger FIRST,
+    // before it has ever touched publish_queue — it is durable the instant
+    // fb_write() returns. Flash is the source of truth for sensor data, not
+    // an overflow bucket for when RAM is full (see task_flash_store.h).
+    // Non-reading frames that still reach here (e.g. a port-level HELLO)
+    // are not buffered — same as they were already dropped under the old
+    // overflow path.
+    uint8_t buffered = 0, dropped = 0;
+    for (uint8_t i = 0; i < count; i++)
     {
-      if (!publish_queue)
-        break;
-
-      int batch_len = (count - i < AGG_PUB_BATCH) ? (count - i) : AGG_PUB_BATCH;
-
-      if (batch_len == 1 && count > i + 1 &&
-          (batch[i].sensor_type == 0x01 || batch[i].sensor_type == 0x02))
+      if (batch[i].ftype == FTYPE_DATA || batch[i].ftype == FTYPE_DATA_TYPED)
       {
-        uint8_t companion = (batch[i].sensor_type == 0x01) ? 0x02 : 0x01;
-        for (int j = i + 1; j < count; j++)
-        {
-          if (batch[j].ctrl_id == batch[i].ctrl_id &&
-              batch[j].port_num == batch[i].port_num &&
-              batch[j].sensor_type == companion)
-          {
-            // Found — swap adjacent so both go in this batch
-            SensorPacket tmp = batch[i + 1];
-            batch[i + 1] = batch[j];
-            batch[j] = tmp;
-            batch_len = 2;
-            break;
-          }
-        }
-      }
-
-      RenderItem rbatch[AGG_PUB_BATCH];
-      for (int k = 0; k < batch_len; k++)
-      {
-        rbatch[k].ctrl_id     = batch[i + k].ctrl_id;
-        rbatch[k].port_num    = batch[i + k].port_num;
-        rbatch[k].sensor_type = batch[i + k].sensor_type;
-        rbatch[k].ftype       = batch[i + k].ftype;
-        rbatch[k].value       = batch[i + k].value;
-        rbatch[k].epoch_s     = state_epoch_s_at(batch[i + k].timestamp_ms);
-      }
-
-      PublishItem item;
-      item.qos = MQTT_QOS_DATA;
-      item.from_flash  = false;
-      item.flash_count = 0;
-      strncpy(item.topic, sys_state.topic_data, sizeof(item.topic));
-      _agg_render(&item, rbatch, batch_len);
-
-      if (xQueueSend(publish_queue, &item, pdMS_TO_TICKS(200)) != pdTRUE)
-      {
-        // RAM queue full — overflow only genuine measurements (DATA /
-        // DATA_TYPED) to the flash ring buffer instead of dropping them.
-        // Everything else (ERROR, or any ftype that isn't a real reading)
-        // is dropped exactly as before — see task_flash_store.h's scope note.
-        uint8_t buffered = 0, dropped = 0;
-        for (int k = 0; k < batch_len; k++)
-        {
-          uint8_t ft = batch[i + k].ftype;
-          if (ft == FTYPE_DATA || ft == FTYPE_DATA_TYPED)
-          {
-            if (fb_write(batch[i + k].ctrl_id, batch[i + k].port_num, batch[i + k].sensor_type,
-                         batch[i + k].value, ft, rbatch[k].epoch_s))
-              buffered++;
-            else
-              dropped++;
-          }
-          else
-          {
-            dropped++;
-          }
-        }
-        Serial.printf("[AGG] queue full — buffered %d to flash, dropped %d (ctrl=%d port=%d)\n",
-                      buffered, dropped, batch[i].ctrl_id, batch[i].port_num);
-        LOG_WARN("AGG", "Queue full — buffered %d to flash, dropped %d (ctrl=%d port=%d)",
-                 buffered, dropped, batch[i].ctrl_id, batch[i].port_num);
+        uint32_t epoch_s = state_epoch_s_at(batch[i].timestamp_ms);
+        if (fb_write(batch[i].ctrl_id, batch[i].port_num, batch[i].sensor_type,
+                     batch[i].value, batch[i].ftype, epoch_s))
+          buffered++;
+        else
+          dropped++;
       }
       else
       {
-        _agg_batch_count++;
-        if (_agg_batch_count % 10 == 0)
-        {
-          LOG_INFO("AGG", "Batch #%u: %d readings queued", _agg_batch_count, count);
-        }
+        dropped++;
       }
-      i += batch_len;
+    }
+    if (dropped > 0)
+    {
+      LOG_WARN("AGG", "%d non-data/unwritable frame(s) dropped this tick", dropped);
+    }
+    if (buffered > 0)
+    {
+      _agg_write_count += buffered;
+      if (_agg_write_count >= 50)
+      {
+        LOG_INFO("AGG", "%u reading(s) written to flash ledger", _agg_write_count);
+        _agg_write_count = 0;
+      }
     }
 
-    // Flash backlog only gets whatever queue room live data didn't need —
-    // see _agg_replay_from_flash()'s header comment.
-    _agg_replay_from_flash();
+    // Drain flash into publish_queue. Each call enqueues at most one
+    // AGG_PUB_BATCH-sized item — loop (bounded) so a burst bigger than
+    // AGG_PUB_BATCH still fully drains within this same tick instead of
+    // trickling out over the next few 10ms ticks.
+    for (uint8_t iter = 0; iter < (AGG_BATCH_MAX / AGG_PUB_BATCH) + 1; iter++)
+    {
+      if (!publish_queue || !fb_has_backlog() || uxQueueSpacesAvailable(publish_queue) == 0)
+        break;
+      _agg_replay_from_flash();
+    }
 
     esp_task_wdt_reset(); // feed watchdog — loop completes every ~10ms
   }
