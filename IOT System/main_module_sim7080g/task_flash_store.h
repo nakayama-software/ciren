@@ -1,12 +1,13 @@
 #pragma once
 // ─────────────────────────────────────────────────────────────────────────────
-// Store-and-forward flash buffer — overflow extension for publish_queue.
+// Store-and-forward flash buffer — write-ahead ledger for sensor readings.
 //
-// This is NOT an always-on write log. In normal operation (publish_queue has
-// room) this module is never touched — flash is only used when the RAM queue
-// is full, i.e. the device has been disconnected long enough that the live
-// path can't keep up. See the design discussion / published flow diagrams
-// for the full rationale.
+// This IS an always-on write log for sensor data: task_aggregator writes
+// every DATA / DATA_TYPED reading here the instant it's received, before it
+// ever touches publish_queue (RAM). A reading is durable as soon as
+// fb_write() returns, so a crash/reboot/power-loss at any point afterward
+// cannot lose it — publish_queue is just a transient work queue fed from
+// this ledger, not the primary home for data in flight.
 //
 // Scope: only FTYPE_DATA / FTYPE_DATA_TYPED (genuine sensor measurements) are
 // ever written here. HB_TYPED and ERROR frames are never buffered — callers

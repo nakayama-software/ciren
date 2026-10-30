@@ -29,7 +29,7 @@
 #define RB_SIZE            128
 #define AGG_WINDOW_MS      10
 
-// ── Store-and-forward flash buffer (overflow for publish_queue, DATA/DATA_TYPED only) ──
+// ── Store-and-forward flash buffer (write-ahead ledger for DATA/DATA_TYPED readings) ──
 #define FLASH_BUFFER_PATH      "/fb_ring.bin"
 #define FLASH_BUFFER_CAPACITY  2048        // records — ~7 days at today's 20-min interval, 4 series
 #define FB_MIN_VALID_EPOCH_S   1577836800  // 2020-01-01T00:00:00Z — same guard as the backend's eventMs

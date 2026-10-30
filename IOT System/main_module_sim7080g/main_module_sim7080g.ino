@@ -249,7 +249,7 @@ void setup()
 
   // Core 1: data processing
   xTaskCreatePinnedToCore(task_publish, "publish", STACK_PUBLISH, NULL, PRIO_PUBLISH, &h_publish, 1);
-  xTaskCreatePinnedToCore(task_aggregator, "aggregator", STACK_AGG, NULL, PRIO_AGG, &h_aggregator, 1);
+  xTaskCreatePinnedToCore(task_aggregator, "aggregator", STACK_AGG, NULL, PRIO_AGG, &h_aggregator, 0);
   xTaskCreatePinnedToCore(task_status, "status", STACK_STATUS, NULL, PRIO_STATUS, &h_status, 1);
   xTaskCreatePinnedToCore(mqtt_sim_task, "mqtt_sim", STACK_MQTT_SIM, NULL, PRIO_CONN, NULL, 1);
   xTaskCreatePinnedToCore(task_logger, "logger", STACK_LOGGER, NULL, PRIO_LOGGER, NULL, 1);
